@@ -11,124 +11,128 @@ import (
 )
 
 type fileData struct {
-	FilePath string
-	IsDir    bool
-	Size     uint
-	ModTime  time.Time
+	FilePath  string
+	IsDir     bool
+	Size      uint
+	ModTime   time.Time
+	FileCount uint
 }
+
+var parseInfo map[string][]fileData
 
 func main() {
 	// const parentDir = "C:\\Users\\jyoth\\technical\\"
 	const parentDir = "/Users/jyothri/test/"
 	const saveFile = "./FolderStats.gob"
-	var parseInfo map[string][]fileData
-	var err error
-	parseInfo, err = collectStats(parentDir)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
+	parseInfo = make(map[string][]fileData)
 
-	fmt.Println("Saving stats to file")
-	err = saveStatsToFile(parseInfo, saveFile)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
+	collectStats(parentDir)
 
-	fmt.Println("Loading stats from file")
-	parseInfo, err = loadStatsFromFile(saveFile)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-	fmt.Println("Printing stats from file")
-	printStats(parseInfo)
+	fmt.Printf("Saving stats to file %v \n", saveFile)
+	saveStatsToFile(saveFile)
+
+	fmt.Printf("Loading stats from file %v \n", saveFile)
+	parseInfo = make(map[string][]fileData)
+	loadStatsFromFile(saveFile)
+
+	fmt.Println("Printing stats")
+	printStats()
 }
 
-func collectStats(parentDir string) (map[string][]fileData, error) {
-	var parseInfo = make(map[string][]fileData)
-
-	err := filepath.WalkDir(parentDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+// Gathers the info for the directory.
+// Returns a tuple of (size of the directory, no. of files contained)
+func collectStats(parentDir string) (int64, int64) {
+	var directorySize int64
+	var fileCount int64 = 0
+	err := filepath.Walk(parentDir, func(path string, info fs.FileInfo, err error) error {
+		checkError(err)
+		// filepath.Walk also traverses the parent directory.
+		// As we call the same function recursively, we would
+		// end up invoking with the same arg again which results
+		// in an infinite loop. This check prevents traversing
+		// the same directory again.
+		if parentDir == path {
+			return nil
 		}
-		fi, err := d.Info()
-		if err != nil {
-			return err
+		fd := fileData{
+			FilePath:  path,
+			IsDir:     info.IsDir(),
+			ModTime:   info.ModTime(),
+			FileCount: 1,
 		}
-		var fd = fileData{
-			FilePath: path,
-			IsDir:    d.IsDir(),
-			Size:     uint(fi.Size()),
-			ModTime:  fi.ModTime(),
+		if info.IsDir() {
+			ds, fc := collectStats(path)
+			directorySize += ds
+			fileCount += fc
+			fd.Size = uint(ds)
+			fd.FileCount = uint(fc)
+		} else {
+			directorySize += info.Size()
+			fileCount++
+			fd.Size = uint(info.Size())
+			fd.FileCount = 1
 		}
-		parseInfo[fi.Name()] = append(parseInfo[fi.Name()], fd)
+		parseInfo[info.Name()] = append(parseInfo[info.Name()], fd)
+		// filepath.Walk works recursively. However our call to
+		// collectStats also performs the traversal recursively.
+		// Returns `filepath.SkipDir` limits to only the files and folders
+		// in current directory to prevent multiple traversals.
+		if info.IsDir() {
+			return filepath.SkipDir
+		}
 		return nil
 	})
-
-	return parseInfo, err
+	checkError(err)
+	return directorySize, fileCount
 }
 
-func printStats(parseInfo map[string][]fileData) {
-	for fileName, filesData := range parseInfo {
-		var filePaths = make([]string, 0)
-		for _, fileData := range filesData {
-			if fileData.IsDir {
-				continue
-			}
-			filePaths = append(filePaths, fileData.FilePath)
+func printStats() {
+	for _, filesData := range parseInfo {
+		for _, fd := range filesData {
+			// fmt.Printf("filename: %v Path: %v Size: %v ModifiedTime: %v Directory?: %v Contained files: %v \n ", fileName, fd.FilePath, fd.Size, fd.ModTime, fd.IsDir, fd.FileCount)
+			fmt.Printf("Size: %v Path: %v Contained files: %v \n ", fd.Size, fd.FilePath, fd.FileCount)
 		}
-		if len(filePaths) == 0 {
-			continue
-		}
-		fmt.Printf("filename: %v occurences: %v\n ", fileName, len(filePaths))
 	}
 }
 
-func saveStatsToFile(parseInfo map[string][]fileData, saveFile string) error {
+func saveStatsToFile(saveFile string) {
 	gobFile, err := os.Create(saveFile)
-	if err != nil {
-		return err
-	}
+	checkError(err)
 	defer gobFile.Close()
 
 	encoder := gob.NewEncoder(gobFile)
 
 	// Encoding the data
 	err = encoder.Encode(parseInfo)
-	if err != nil {
-		return err
-	}
-	gobFile.Close()
-	fmt.Printf("Data saved to file %v \n", saveFile)
-	return nil
+	checkError(err)
+	err = gobFile.Close()
+	checkError(err)
 }
 
-func loadStatsFromFile(saveFile string) (map[string][]fileData, error) {
+func loadStatsFromFile(saveFile string) {
 	_, err := os.Stat(saveFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Fatal("File does not exist.")
 		}
-		return nil, err
+		panic(err)
 	}
 
 	gobFile, err := os.Open(saveFile)
-	if err != nil {
-		return nil, err
-	}
+	checkError(err)
 	defer gobFile.Close()
 
 	decoder := gob.NewDecoder(gobFile)
 
-	var parseInfo map[string][]fileData
 	// Encoding the data
 	err = decoder.Decode(&parseInfo)
+	checkError(err)
+	err = gobFile.Close()
+	checkError(err)
+}
+
+func checkError(err error) {
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
-	gobFile.Close()
-	fmt.Printf("Data loaded from file %v \n", saveFile)
-	return parseInfo, nil
 }
