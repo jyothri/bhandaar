@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -22,7 +23,7 @@ var parseInfo map[string][]fileData
 
 func main() {
 	// const parentDir = "C:\\Users\\jyoth\\technical\\"
-	const parentDir = "/Users/jyothri/test/"
+	const parentDir = "/Users/jyothri/test"
 	const saveFile = "./FolderStats.gob"
 	parseInfo = make(map[string][]fileData)
 
@@ -54,6 +55,13 @@ func collectStats(parentDir string) (int64, int64) {
 		if parentDir == path {
 			return nil
 		}
+
+		// Skip hidden files and directories
+		if runtime.GOOS != "windows" && info.Name()[0:1] == "." {
+			// unix/linux file or directory that starts with . is hidden
+			return nil
+		}
+
 		fd := fileData{
 			FilePath:  path,
 			IsDir:     info.IsDir(),
@@ -124,7 +132,7 @@ func loadStatsFromFile(saveFile string) {
 
 	decoder := gob.NewDecoder(gobFile)
 
-	// Encoding the data
+	// Decoding the data
 	err = decoder.Decode(&parseInfo)
 	checkError(err)
 	err = gobFile.Close()
