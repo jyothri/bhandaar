@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 
 // List of fields to be retreived on file resource from the drive API.
 var fields []string = []string{"size", "id", "name", "mimeType", "parents", "modifiedTime"}
+var paginationFields []string = []string{"nextPageToken", "incompleteSearch"}
 
 // Filter files list by this criteria.
 const queryString = "name contains 'tesla'"
@@ -43,10 +45,24 @@ func init() {
 }
 
 func cloudDrive() {
-	fileList, err := driveService.Files.List().PageSize(10).Q(queryString).Fields(googleapi.Field(strings.Join(addPrefix(fields, "files/"), ","))).Do()
-	checkError(err)
-
 	parseInfo = make(map[string][]fileData)
+	filesListCall := driveService.Files.List().PageSize(5).Q(queryString).Fields(googleapi.Field(strings.Join(append(addPrefix(fields, "files/"), paginationFields...), ",")))
+	hasNextPage := true
+	for hasNextPage {
+		fileList, err := filesListCall.Do()
+		checkError(err)
+		if fileList.IncompleteSearch {
+			checkError(errors.New("incomplete search from drive API"))
+		}
+		parseFileList(fileList)
+		if fileList.NextPageToken == "" {
+			hasNextPage = false
+		}
+		filesListCall = filesListCall.PageToken(fileList.NextPageToken)
+	}
+}
+
+func parseFileList(fileList *drive.FileList) {
 	for _, file := range fileList.Files {
 		fd := fileData{
 			FilePath:  file.Id,
