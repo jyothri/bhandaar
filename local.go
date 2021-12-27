@@ -1,32 +1,14 @@
 package main
 
 import (
-	"encoding/gob"
-	"fmt"
 	"io/fs"
-	"log"
-	"os"
 	"path/filepath"
 	"runtime"
 )
 
-func localDrive() {
-	// const parentDir = "C:\\Users\\jyoth\\technical\\"
-	const parentDir = "/Users/jyothri/test"
-	const saveFile = "./FolderStats.gob"
+func localDrive(parentDir string) {
 	parseInfo = make(map[string][]fileData)
-
 	collectStats(parentDir)
-
-	fmt.Printf("Saving stats to file %v \n", saveFile)
-	saveStatsToFile(saveFile)
-
-	fmt.Printf("Loading stats from file %v \n", saveFile)
-	parseInfo = make(map[string][]fileData)
-	loadStatsFromFile(saveFile)
-
-	fmt.Println("Printing stats")
-	printStats()
 }
 
 // Gathers the info for the directory.
@@ -81,40 +63,4 @@ func collectStats(parentDir string) (int64, int64) {
 	})
 	checkError(err)
 	return directorySize, fileCount
-}
-
-func saveStatsToFile(saveFile string) {
-	gobFile, err := os.Create(saveFile)
-	checkError(err)
-	defer gobFile.Close()
-
-	encoder := gob.NewEncoder(gobFile)
-
-	// Encoding the data
-	err = encoder.Encode(parseInfo)
-	checkError(err)
-	err = gobFile.Close()
-	checkError(err)
-}
-
-func loadStatsFromFile(saveFile string) {
-	_, err := os.Stat(saveFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			log.Fatal("File does not exist.")
-		}
-		panic(err)
-	}
-
-	gobFile, err := os.Open(saveFile)
-	checkError(err)
-	defer gobFile.Close()
-
-	decoder := gob.NewDecoder(gobFile)
-
-	// Decoding the data
-	err = decoder.Decode(&parseInfo)
-	checkError(err)
-	err = gobFile.Close()
-	checkError(err)
 }

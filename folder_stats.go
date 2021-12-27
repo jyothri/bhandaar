@@ -16,15 +16,26 @@ type fileData struct {
 var parseInfo map[string][]fileData
 
 func main() {
+	// const parentDir = "C:\\Users\\jyoth\\technical\\"
+	const parentDir = "/Users/jyothri/test"
+	const saveFile = "./FolderStats.gob"
 	cloudDrive()
 	printStats()
-	localDrive()
+	localDrive(parentDir)
+	printStats()
+
+	fmt.Printf("Saving stats to file %v \n", saveFile)
+	saveStatsToFile(saveFile)
+
+	fmt.Printf("Loading stats from file %v \n", saveFile)
+	loadStatsFromFile(saveFile)
 }
 
 func printStats() {
+	fmt.Println("#################   STATS   #################")
 	for fileName, filesData := range parseInfo {
 		for _, fd := range filesData {
-			fmt.Printf("fileName: %30.30v Path: %v Size: %v ModifiedTime: %v Directory?: %v Contained files: %v \n ", fileName, fd.FilePath, fd.Size, fd.ModTime, fd.IsDir, fd.FileCount)
+			fmt.Printf("fileName: %30.30v Path: %-45.45v Size: %10v ModifiedTime: %30.30v Directory?: %6v Contained files: %v \n", fileName, fd.FilePath, fd.Size, fd.ModTime, fd.IsDir, fd.FileCount)
 		}
 	}
 }
