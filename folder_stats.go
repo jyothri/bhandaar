@@ -19,7 +19,11 @@ func main() {
 	// const parentDir = "C:\\Users\\jyoth\\technical\\"
 	const parentDir = "/Users/jyothri/test"
 	const saveFile = "./FolderStats.gob"
-	cloudDrive()
+	worker := make(chan string, 2)
+	go cloudDrive(worker)
+	for elem := range worker {
+		fmt.Println(elem)
+	}
 	printStats()
 	localDrive(parentDir)
 	printStats()

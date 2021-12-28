@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"strings"
 	"time"
 
@@ -44,7 +45,8 @@ func init() {
 	checkError(err)
 }
 
-func cloudDrive() {
+func cloudDrive(parent chan<- string) {
+	defer close(parent)
 	parseInfo = make(map[string][]fileData)
 	filesListCall := driveService.Files.List().PageSize(5).Q(queryString).Fields(googleapi.Field(strings.Join(append(addPrefix(fields, "files/"), paginationFields...), ",")))
 	hasNextPage := true
@@ -58,6 +60,7 @@ func cloudDrive() {
 		if fileList.NextPageToken == "" {
 			hasNextPage = false
 		}
+		parent <- fmt.Sprintf("Data collected so far: %d", len(parseInfo))
 		filesListCall = filesListCall.PageToken(fileList.NextPageToken)
 	}
 }
