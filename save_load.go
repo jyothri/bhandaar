@@ -9,14 +9,12 @@ import (
 func saveStatsToFile(saveFile string) {
 	gobFile, err := os.Create(saveFile)
 	checkError(err)
-	defer gobFile.Close()
+	defer closeFile(gobFile)
 
 	encoder := gob.NewEncoder(gobFile)
 
 	// Encoding the data
 	err = encoder.Encode(parseInfo)
-	checkError(err)
-	err = gobFile.Close()
 	checkError(err)
 }
 
@@ -32,13 +30,16 @@ func loadStatsFromFile(saveFile string) {
 
 	gobFile, err := os.Open(saveFile)
 	checkError(err)
-	defer gobFile.Close()
+	defer closeFile(gobFile)
 
 	decoder := gob.NewDecoder(gobFile)
 
 	// Decoding the data
 	err = decoder.Decode(&parseInfo)
 	checkError(err)
-	err = gobFile.Close()
+}
+
+func closeFile(fileToClose *os.File) {
+	err := fileToClose.Close()
 	checkError(err)
 }
