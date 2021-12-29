@@ -4,9 +4,12 @@ import (
 	"io/fs"
 	"path/filepath"
 	"runtime"
+	"sync"
 )
 
-func localDrive(parentDir string) {
+func localDrive(parentDir string, lock *sync.RWMutex) {
+	lock.Lock()
+	defer lock.Unlock()
 	parseInfo = make(map[string][]fileData)
 	collectStats(parentDir)
 }

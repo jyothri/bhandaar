@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -45,8 +45,9 @@ func init() {
 	checkError(err)
 }
 
-func cloudDrive(parent chan<- string) {
-	defer close(parent)
+func cloudDrive(lock *sync.RWMutex) {
+	lock.Lock()
+	defer lock.Unlock()
 	parseInfo = make(map[string][]fileData)
 	filesListCall := driveService.Files.List().PageSize(5).Q(queryString).Fields(googleapi.Field(strings.Join(append(addPrefix(fields, "files/"), paginationFields...), ",")))
 	hasNextPage := true
@@ -60,7 +61,6 @@ func cloudDrive(parent chan<- string) {
 		if fileList.NextPageToken == "" {
 			hasNextPage = false
 		}
-		parent <- fmt.Sprintf("Data collected so far: %d", len(parseInfo))
 		filesListCall = filesListCall.PageToken(fileList.NextPageToken)
 	}
 }
