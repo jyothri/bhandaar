@@ -88,13 +88,15 @@ func printOptions() {
 
 func printStats() {
 	fmt.Println("#################   STATS   #################")
+	count := 1
 	for fileName, filesData := range parseInfo {
-		for idx, fd := range filesData {
+		for _, fd := range filesData {
 			fmt.Printf("fileName: %30.30v Path: %-45.45v Size: %10v ModifiedTime: %30.30v Directory?: %6v Contained files: %v \n", fileName, fd.FilePath, fd.Size, fd.ModTime, fd.IsDir, fd.FileCount)
-			if idx > 15 {
-				break
-			}
 		}
+		if count > 5 {
+			break
+		}
+		count++
 	}
 	fmt.Printf("Collection size:%d\n", len(parseInfo))
 }
