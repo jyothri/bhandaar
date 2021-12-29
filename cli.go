@@ -28,12 +28,14 @@ func main() {
 		case 2:
 			go cloudDrive(&lock)
 		case 3:
-			optionSaveStats(&lock)
+			go cloudStorage(&lock)
 		case 4:
-			optionLoadStats(&lock)
+			optionSaveStats(&lock)
 		case 5:
-			printStats()
+			optionLoadStats(&lock)
 		case 6:
+			printStats()
+		case 7:
 			fmt.Printf("Provide saveFile to use. <enter> to use default %v \n", saveFile)
 			var newFile string
 			fmt.Scan(newFile)
@@ -79,10 +81,11 @@ func printOptions() {
 	fmt.Println("0 Exit")
 	fmt.Println("1 Scan Local Drive")
 	fmt.Println("2 Scan Google Drive")
-	fmt.Println("3 Save stats to file")
-	fmt.Println("4 Load stats from file")
-	fmt.Println("5 Print sample of in-memory stats")
-	fmt.Println("6 Change saveFile")
+	fmt.Println("3 Scan Cloud Storage")
+	fmt.Println("4 Save stats to file")
+	fmt.Println("5 Load stats from file")
+	fmt.Println("6 Print sample of in-memory stats")
+	fmt.Println("7 Change saveFile")
 	fmt.Print(" > ")
 }
 
