@@ -42,6 +42,8 @@ func main() {
 			if newFile != "" {
 				saveFile = newFile
 			}
+		case 8:
+			go StartWebServer()
 		default:
 			fmt.Println("Invalid selection")
 		}
@@ -86,6 +88,7 @@ func printOptions() {
 	fmt.Println("5 Load stats from file")
 	fmt.Println("6 Print sample of in-memory stats")
 	fmt.Println("7 Change saveFile")
+	fmt.Println("8 Start web server")
 	fmt.Print(" > ")
 }
 
