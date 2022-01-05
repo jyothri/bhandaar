@@ -26,7 +26,7 @@ func loadStatsFromFile(saveFile string) {
 		}
 		panic(err)
 	}
-	parseInfo = make(map[string][]fileData)
+	parseInfo = make([]fileData, 0)
 
 	gobFile, err := os.Open(saveFile)
 	checkError(err)

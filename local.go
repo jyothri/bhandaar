@@ -14,7 +14,7 @@ import (
 func localDrive(parentDir string, lock *sync.RWMutex) {
 	lock.Lock()
 	defer lock.Unlock()
-	parseInfo = make(map[string][]fileData)
+	parseInfo = make([]fileData, 0)
 	scanId := logStartScan("local")
 	collectStats(parentDir)
 	logCompleteScan(scanId)
@@ -43,6 +43,7 @@ func collectStats(parentDir string) (int64, int64) {
 		}
 
 		fd := fileData{
+			FileName:  info.Name(),
 			FilePath:  path,
 			IsDir:     info.IsDir(),
 			ModTime:   info.ModTime(),
@@ -61,7 +62,7 @@ func collectStats(parentDir string) (int64, int64) {
 			fd.FileCount = 1
 			fd.Md5Hash = getMd5ForFile(path)
 		}
-		parseInfo[info.Name()] = append(parseInfo[info.Name()], fd)
+		parseInfo = append(parseInfo, fd)
 		// filepath.Walk works recursively. However our call to
 		// collectStats also performs the traversal recursively.
 		// Returns `filepath.SkipDir` limits to only the files and folders

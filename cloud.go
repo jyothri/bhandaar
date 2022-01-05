@@ -48,7 +48,7 @@ func init() {
 func cloudDrive(lock *sync.RWMutex) {
 	lock.Lock()
 	defer lock.Unlock()
-	parseInfo = make(map[string][]fileData)
+	parseInfo = make([]fileData, 0)
 	scanId := logStartScan("google_drive")
 	filesListCall := driveService.Files.List().PageSize(5).Q(queryString).Fields(googleapi.Field(strings.Join(append(addPrefix(fields, "files/"), paginationFields...), ",")))
 	hasNextPage := true
@@ -70,6 +70,7 @@ func cloudDrive(lock *sync.RWMutex) {
 func parseFileList(fileList *drive.FileList) {
 	for _, file := range fileList.Files {
 		fd := fileData{
+			FileName:  file.Name,
 			FilePath:  file.Id,
 			IsDir:     file.MimeType == "application/vnd.google-apps.folder",
 			ModTime:   parseTime(file.ModifiedTime),
@@ -79,40 +80,9 @@ func parseFileList(fileList *drive.FileList) {
 			fd.Size = uint(file.Size)
 			fd.FileCount = 1
 			fd.Md5Hash = file.Md5Checksum
-			for _, parent := range file.Parents {
-				parentFile := getFileInfo(parent)
-				_, present := parseInfo[parentFile.Name]
-				if !present {
-					parseInfo[parentFile.Name] = append(make([]fileData, 0), fileData{FilePath: parent, IsDir: true, ModTime: parseTime(parentFile.ModifiedTime), FileCount: 0})
-				}
-				prevValues := parseInfo[parentFile.Name]
-				updatedValues := make([]fileData, 0)
-				for _, fd2 := range prevValues {
-					if fd2.FilePath != parent {
-						continue
-					}
-					fd2.FileCount += 1
-					fd2.Size += fd.Size
-					updatedValues = append(updatedValues, fd2)
-				}
-				parseInfo[parentFile.Name] = updatedValues
-			}
-			parseInfo[file.Name] = append(parseInfo[file.Name], fd)
-		} else {
-			// It is possible that directory is already captured as part of the file traversal.
-			// Insert only if the directory info is not already saved.
-			if !existsKeyAndId(parseInfo, file.Name, file.Id) {
-				parseInfo[file.Name] = append(parseInfo[file.Name], fd)
-			}
+			parseInfo = append(parseInfo, fd)
 		}
-
 	}
-}
-
-func getFileInfo(fileId string) *drive.File {
-	file, err := driveService.Files.Get(fileId).Fields(googleapi.Field(strings.Join(fields, ","))).Do()
-	checkError(err)
-	return file
 }
 
 func addPrefix(in []string, prefix string) []string {
@@ -121,23 +91,6 @@ func addPrefix(in []string, prefix string) []string {
 		out[idx] = prefix + str
 	}
 	return out
-}
-
-func existsKeyAndId(theMap map[string][]fileData, mapKey string, id string) bool {
-	values, present := theMap[mapKey]
-	if !present {
-		return false
-	} else {
-		for _, fd2 := range values {
-			if !fd2.IsDir {
-				continue
-			}
-			if fd2.FilePath == id {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func parseTime(inputTime string) time.Time {

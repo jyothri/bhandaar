@@ -13,7 +13,7 @@ import (
 func cloudStorage(lock *sync.RWMutex) {
 	lock.Lock()
 	defer lock.Unlock()
-	parseInfo = make(map[string][]fileData)
+	parseInfo = make([]fileData, 0)
 	ctx := context.Background()
 
 	// Create a client.
@@ -43,14 +43,8 @@ func cloudStorage(lock *sync.RWMutex) {
 			Md5Hash:   fmt.Sprintf("%x", attrs.MD5),
 		}
 		fileName := getFileName(attrs.Name)
-		parseInfo[fileName] = append(parseInfo[fileName], fd)
-
-		parentDir := getParentDirectory(attrs.Name)
-		_, present := parseInfo[parentDir]
-		if !present {
-			parseInfo[parentDir] = append(make([]fileData, 0), fileData{FilePath: parentDir, IsDir: true, ModTime: attrs.Updated, FileCount: 0})
-		}
-		parseInfo[parentDir][0].Size = parseInfo[parentDir][0].Size + fd.Size
+		fd.FileName = fileName
+		parseInfo = append(parseInfo, fd)
 	}
 	logCompleteScan(scanId)
 }
@@ -61,12 +55,4 @@ func getFileName(objectPath string) string {
 		panic("Does not have a valid filename. ObjectPath:" + objectPath)
 	}
 	return fileParts[len(fileParts)-1]
-}
-
-func getParentDirectory(objectPath string) string {
-	fileParts := strings.Split(objectPath, "/")
-	if len(fileParts) < 2 {
-		panic("Does not have a parent directory. ObjectPath:" + objectPath)
-	}
-	return fileParts[len(fileParts)-2]
 }

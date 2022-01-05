@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-var parseInfo map[string][]fileData
+var parseInfo []fileData
 var parentDir string
 var saveFile string
 
@@ -95,10 +95,8 @@ func printOptions() {
 func printStats() {
 	fmt.Println("#################   STATS   #################")
 	count := 1
-	for fileName, filesData := range parseInfo {
-		for _, fd := range filesData {
-			fmt.Printf("fileName: %30.30v Path: %-45.45v Size: %10v ModifiedTime: %30.30v Directory?: %6v Contained files: %v \n", fileName, fd.FilePath, fd.Size, fd.ModTime, fd.IsDir, fd.FileCount)
-		}
+	for _, fd := range parseInfo {
+		fmt.Printf("fileName: %30.30v Path: %-45.45v Size: %10v ModifiedTime: %30.30v Directory?: %6v Contained files: %v \n", fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.IsDir, fd.FileCount)
 		if count > 5 {
 			break
 		}
