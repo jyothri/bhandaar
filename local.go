@@ -17,6 +17,7 @@ func localDrive(parentDir string, lock *sync.RWMutex) {
 	parseInfo = make([]fileData, 0)
 	scanId := logStartScan("local")
 	collectStats(parentDir)
+	saveStatsToDb(scanId, &parseInfo)
 	logCompleteScan(scanId)
 }
 

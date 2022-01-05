@@ -49,16 +49,18 @@
     scan_end_time TIMESTAMP
   );
 
-
   CREATE TABLE IF NOT EXISTS ScanData (
-    id serial PRIMARY KEY,
-    path VARCHAR(2000),
-    size INT,
-    file_mod_time TIMESTAMP,
-    md5hash VARCHAR(60),
-    scan_id INT NOT NULL,
-    FOREIGN KEY (scan_id)
-        REFERENCES Scans (id)
+   id serial PRIMARY KEY,
+   name VARCHAR(200),
+   path VARCHAR(2000),
+   size BIGINT,
+   file_mod_time TIMESTAMP,
+   md5hash VARCHAR(60),
+   is_dir boolean,
+   file_count INT,
+   scan_id INT NOT NULL,
+   FOREIGN KEY (scan_id)
+      REFERENCES Scans (id)
   );
   ```
 

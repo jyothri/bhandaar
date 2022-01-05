@@ -64,6 +64,7 @@ func cloudDrive(lock *sync.RWMutex) {
 		}
 		filesListCall = filesListCall.PageToken(fileList.NextPageToken)
 	}
+	saveStatsToDb(scanId, &parseInfo)
 	logCompleteScan(scanId)
 }
 

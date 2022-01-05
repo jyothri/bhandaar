@@ -46,6 +46,7 @@ func cloudStorage(lock *sync.RWMutex) {
 		fd.FileName = fileName
 		parseInfo = append(parseInfo, fd)
 	}
+	saveStatsToDb(scanId, &parseInfo)
 	logCompleteScan(scanId)
 }
 

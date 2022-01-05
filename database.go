@@ -50,6 +50,25 @@ func logStartScan(scanType string) int {
 	return lastInsertId
 }
 
+func saveStatsToDb(scanId int, info *[]fileData) {
+	if !initialized {
+		return
+	}
+	insert_row := `insert into ScanData 
+                           (name, path, size, file_mod_time, md5hash, scan_id, is_dir, file_count) 
+                        values 
+                           ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
+	for _, fd := range *info {
+		var err error
+		if fd.IsDir {
+			_, err = db.Exec(insert_row, fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.Md5Hash, scanId, fd.IsDir, fd.FileCount)
+		} else {
+			_, err = db.Exec(insert_row, fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.Md5Hash, scanId, fd.IsDir, nil)
+		}
+		checkError(err)
+	}
+}
+
 func logCompleteScan(scanId int) {
 	if !initialized {
 		return
