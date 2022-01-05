@@ -10,4 +10,5 @@ type fileData struct {
 	Size      uint
 	ModTime   time.Time
 	FileCount uint
+	Md5Hash   string
 }

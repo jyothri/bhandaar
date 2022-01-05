@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -38,6 +39,7 @@ func cloudStorage(lock *sync.RWMutex) {
 			ModTime:   attrs.Updated,
 			FileCount: 1,
 			Size:      uint(attrs.Size),
+			Md5Hash:   fmt.Sprintf("%x", attrs.MD5),
 		}
 		fileName := getFileName(attrs.Name)
 		parseInfo[fileName] = append(parseInfo[fileName], fd)

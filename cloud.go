@@ -16,7 +16,7 @@ import (
 )
 
 // List of fields to be retreived on file resource from the drive API.
-var fields []string = []string{"size", "id", "name", "mimeType", "parents", "modifiedTime"}
+var fields []string = []string{"size", "id", "name", "mimeType", "parents", "modifiedTime", "md5Checksum"}
 var paginationFields []string = []string{"nextPageToken", "incompleteSearch"}
 
 // Filter files list by this criteria.
@@ -76,6 +76,7 @@ func parseFileList(fileList *drive.FileList) {
 		if !fd.IsDir {
 			fd.Size = uint(file.Size)
 			fd.FileCount = 1
+			fd.Md5Hash = file.Md5Checksum
 			for _, parent := range file.Parents {
 				parentFile := getFileInfo(parent)
 				_, present := parseInfo[parentFile.Name]

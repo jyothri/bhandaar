@@ -1,7 +1,11 @@
 package main
 
 import (
+	"crypto/md5"
+	"fmt"
+	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -53,6 +57,7 @@ func collectStats(parentDir string) (int64, int64) {
 			fileCount++
 			fd.Size = uint(info.Size())
 			fd.FileCount = 1
+			fd.Md5Hash = getMd5ForFile(path)
 		}
 		parseInfo[info.Name()] = append(parseInfo[info.Name()], fd)
 		// filepath.Walk works recursively. However our call to
@@ -66,4 +71,14 @@ func collectStats(parentDir string) (int64, int64) {
 	})
 	checkError(err)
 	return directorySize, fileCount
+}
+
+func getMd5ForFile(filePath string) string {
+	file, err := os.Open(filePath)
+	checkError(err)
+	defer file.Close()
+	hash := md5.New()
+	_, err = io.Copy(hash, file)
+	checkError(err)
+	return fmt.Sprintf("%x", hash.Sum(nil))
 }
