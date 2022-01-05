@@ -21,6 +21,7 @@ func cloudStorage(lock *sync.RWMutex) {
 	checkError(err)
 	defer client.Close()
 
+	scanId := logStartScan("google_storage")
 	// Create a Bucket instance.
 	bucket := client.Bucket("jyo-pics")
 
@@ -51,6 +52,7 @@ func cloudStorage(lock *sync.RWMutex) {
 		}
 		parseInfo[parentDir][0].Size = parseInfo[parentDir][0].Size + fd.Size
 	}
+	logCompleteScan(scanId)
 }
 
 func getFileName(objectPath string) string {

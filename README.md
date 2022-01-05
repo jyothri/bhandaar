@@ -31,6 +31,37 @@
   ```
 - To be able to query cloud stroage, credentials may to be provided as a key file. The environment variable `GOOGLE_APPLICATION_CREDENTIALS` points to this file. For instructions on setting this up, refer to [link](https://cloud.google.com/storage/docs/reference/libraries#setting_up_authentication)
 
+## Database
+- docker pull postgres
+- Run the container
+  - First time `docker run --name postgres -e POSTGRES_PASSWORD=postgres -d -p 5432:5432 postgres`. Subsequent runs `docker start postgres`
+- Schema setup
+  - `docker exec -it postgres /bin/bash`
+  - `psql --u postgres`
+  - `\c postgres`
+  - Create tables
+  ```
+    CREATE TABLE IF NOT EXISTS Scans (
+    id serial PRIMARY KEY,
+    scan_type VARCHAR (50) NOT NULL,
+    created_on TIMESTAMP NOT NULL,
+    scan_start_time TIMESTAMP NOT NULL,
+    scan_end_time TIMESTAMP
+  );
+
+
+  CREATE TABLE IF NOT EXISTS ScanData (
+    id serial PRIMARY KEY,
+    path VARCHAR(2000),
+    size INT,
+    file_mod_time TIMESTAMP,
+    md5hash VARCHAR(60),
+    scan_id INT NOT NULL,
+    FOREIGN KEY (scan_id)
+        REFERENCES Scans (id)
+  );
+  ```
+
 ## Kinks
 - Directory storage size is inconsistent. Consider a sample directory tree
 ```
