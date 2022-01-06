@@ -5,6 +5,7 @@ go 1.17
 require (
 	cloud.google.com/go/storage v1.18.2
 	github.com/gorilla/mux v1.8.0
+	github.com/jmoiron/sqlx v1.3.4
 	github.com/lib/pq v1.10.4
 	golang.org/x/oauth2 v0.0.0-20211104180415-d3ed0bb246c8
 	google.golang.org/api v0.63.0
