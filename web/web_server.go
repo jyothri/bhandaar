@@ -45,7 +45,7 @@ func StartWebServer() {
 	api.HandleFunc("/scans", ListScansHandler).Methods("GET")
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET")
-	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./web/static/"))).Methods("GET")
+	r.PathPrefix("/").Handler(http.FileServer(http.Dir("web/svelte/public"))).Methods("GET")
 	http.ListenAndServe(":8090", r)
 }
 
@@ -73,6 +73,10 @@ func setJsonHeader(w http.ResponseWriter) {
 	w.Header().Set(
 		"Content-Type",
 		"application/json",
+	)
+	w.Header().Set(
+		"Access-Control-Allow-Origin",
+		"http://localhost:8080",
 	)
 }
 
