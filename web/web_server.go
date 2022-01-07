@@ -1,4 +1,4 @@
-package main
+package web
 
 import (
 	"encoding/json"
@@ -6,11 +6,12 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/jyothri/hdd/db"
 )
 
 func ListScansHandler(w http.ResponseWriter, r *http.Request) {
 	pageNo := getPageNumber(mux.Vars(r))
-	scans, totResults := getScansFromDb(pageNo)
+	scans, totResults := db.GetScansFromDb(pageNo)
 	pageInfo := PaginationInfo{Page: pageNo, Size: totResults}
 	body := ScansResponse{
 		PageInfo: pageInfo,
@@ -25,7 +26,7 @@ func ListScanDataHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	pageNo := getPageNumber(mux.Vars(r))
 	scanId, _ := getIntFromMap(vars, "scan_id")
-	scanData, totResults := getScanDataFromDb(scanId, pageNo)
+	scanData, totResults := db.GetScanDataFromDb(scanId, pageNo)
 	pageInfo := PaginationInfo{Page: pageNo, Size: totResults}
 	body := ScanDataResponse{
 		PageInfo: pageInfo,
@@ -44,7 +45,7 @@ func StartWebServer() {
 	api.HandleFunc("/scans", ListScansHandler).Methods("GET")
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET")
-	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./static/"))).Methods("GET")
+	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./web/static/"))).Methods("GET")
 	http.ListenAndServe(":8090", r)
 }
 
@@ -82,10 +83,10 @@ type PaginationInfo struct {
 
 type ScansResponse struct {
 	PageInfo PaginationInfo `json:"pagination_info"`
-	Scans    []Scan         `json:"scans"`
+	Scans    []db.Scan      `json:"scans"`
 }
 
 type ScanDataResponse struct {
 	PageInfo PaginationInfo `json:"pagination_info"`
-	ScanData []ScanData     `json:"scan_data"`
+	ScanData []db.ScanData  `json:"scan_data"`
 }

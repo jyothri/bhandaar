@@ -1,10 +1,10 @@
-package main
+package db
 
 import (
 	"time"
 )
 
-type fileData struct {
+type FileData struct {
 	FilePath  string
 	FileName  string
 	IsDir     bool

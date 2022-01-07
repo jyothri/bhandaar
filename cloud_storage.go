@@ -7,13 +7,14 @@ import (
 	"sync"
 
 	"cloud.google.com/go/storage"
+	"github.com/jyothri/hdd/db"
 	"google.golang.org/api/iterator"
 )
 
 func cloudStorage(lock *sync.RWMutex) {
 	lock.Lock()
 	defer lock.Unlock()
-	parseInfo = make([]fileData, 0)
+	parseInfo = make([]db.FileData, 0)
 	ctx := context.Background()
 
 	// Create a client.
@@ -21,7 +22,7 @@ func cloudStorage(lock *sync.RWMutex) {
 	checkError(err)
 	defer client.Close()
 
-	scanId := logStartScan("google_storage")
+	scanId := db.LogStartScan("google_storage")
 	// Create a Bucket instance.
 	bucket := client.Bucket("jyo-pics")
 
@@ -34,7 +35,7 @@ func cloudStorage(lock *sync.RWMutex) {
 			break
 		}
 		checkError(err)
-		fd := fileData{
+		fd := db.FileData{
 			FilePath:  attrs.MediaLink,
 			IsDir:     false,
 			ModTime:   attrs.Updated,
@@ -46,8 +47,8 @@ func cloudStorage(lock *sync.RWMutex) {
 		fd.FileName = fileName
 		parseInfo = append(parseInfo, fd)
 	}
-	saveStatsToDb(scanId, &parseInfo)
-	logCompleteScan(scanId)
+	db.SaveStatsToDb(scanId, &parseInfo)
+	db.LogCompleteScan(scanId)
 }
 
 func getFileName(objectPath string) string {

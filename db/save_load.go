@@ -1,4 +1,4 @@
-package main
+package db
 
 import (
 	"encoding/gob"
@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-func saveStatsToFile(saveFile string) {
+func saveStatsToFile(saveFile string, info *[]FileData) {
 	gobFile, err := os.Create(saveFile)
 	checkError(err)
 	defer closeFile(gobFile)
@@ -14,11 +14,11 @@ func saveStatsToFile(saveFile string) {
 	encoder := gob.NewEncoder(gobFile)
 
 	// Encoding the data
-	err = encoder.Encode(parseInfo)
+	err = encoder.Encode(*info)
 	checkError(err)
 }
 
-func loadStatsFromFile(saveFile string) {
+func loadStatsFromFile(saveFile string) *[]FileData {
 	_, err := os.Stat(saveFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -26,7 +26,7 @@ func loadStatsFromFile(saveFile string) {
 		}
 		panic(err)
 	}
-	parseInfo = make([]fileData, 0)
+	info := make([]FileData, 0)
 
 	gobFile, err := os.Open(saveFile)
 	checkError(err)
@@ -35,8 +35,9 @@ func loadStatsFromFile(saveFile string) {
 	decoder := gob.NewDecoder(gobFile)
 
 	// Decoding the data
-	err = decoder.Decode(&parseInfo)
+	err = decoder.Decode(&info)
 	checkError(err)
+	return &info
 }
 
 func closeFile(fileToClose *os.File) {

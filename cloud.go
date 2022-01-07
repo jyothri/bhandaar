@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jyothri/hdd/db"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/drive/v3"
@@ -48,8 +49,8 @@ func init() {
 func cloudDrive(lock *sync.RWMutex) {
 	lock.Lock()
 	defer lock.Unlock()
-	parseInfo = make([]fileData, 0)
-	scanId := logStartScan("google_drive")
+	parseInfo = make([]db.FileData, 0)
+	scanId := db.LogStartScan("google_drive")
 	filesListCall := driveService.Files.List().PageSize(5).Q(queryString).Fields(googleapi.Field(strings.Join(append(addPrefix(fields, "files/"), paginationFields...), ",")))
 	hasNextPage := true
 	for hasNextPage {
@@ -64,13 +65,13 @@ func cloudDrive(lock *sync.RWMutex) {
 		}
 		filesListCall = filesListCall.PageToken(fileList.NextPageToken)
 	}
-	saveStatsToDb(scanId, &parseInfo)
-	logCompleteScan(scanId)
+	db.SaveStatsToDb(scanId, &parseInfo)
+	db.LogCompleteScan(scanId)
 }
 
 func parseFileList(fileList *drive.FileList) {
 	for _, file := range fileList.Files {
-		fd := fileData{
+		fd := db.FileData{
 			FileName:  file.Name,
 			FilePath:  file.Id,
 			IsDir:     file.MimeType == "application/vnd.google-apps.folder",

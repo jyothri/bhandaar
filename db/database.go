@@ -1,4 +1,4 @@
-package main
+package db
 
 import (
 	"database/sql"
@@ -38,7 +38,7 @@ func init() {
 	initialized = true
 }
 
-func logStartScan(scanType string) int {
+func LogStartScan(scanType string) int {
 	if !initialized {
 		return -1
 	}
@@ -52,8 +52,9 @@ func logStartScan(scanType string) int {
 	return lastInsertId
 }
 
-func saveStatsToDb(scanId int, info *[]fileData) {
+func SaveStatsToDb(scanId int, info *[]FileData) {
 	if !initialized {
+		saveStatsToFile(fmt.Sprintf("SaveFile_%v.gob", time.Now().Format("2022-01-02T15:04:05.000000Z")), info)
 		return
 	}
 	insert_row := `insert into ScanData 
@@ -71,7 +72,7 @@ func saveStatsToDb(scanId int, info *[]fileData) {
 	}
 }
 
-func getScansFromDb(pageNo int) ([]Scan, int) {
+func GetScansFromDb(pageNo int) ([]Scan, int) {
 	if !initialized {
 		return make([]Scan, 0), 0
 	}
@@ -88,7 +89,7 @@ func getScansFromDb(pageNo int) ([]Scan, int) {
 	return scans, count
 }
 
-func getScanDataFromDb(scanId int, pageNo int) ([]ScanData, int) {
+func GetScanDataFromDb(scanId int, pageNo int) ([]ScanData, int) {
 	if !initialized {
 		return make([]ScanData, 0), 0
 	}
@@ -105,7 +106,7 @@ func getScanDataFromDb(scanId int, pageNo int) ([]ScanData, int) {
 	return scandata, count
 }
 
-func logCompleteScan(scanId int) {
+func LogCompleteScan(scanId int) {
 	if !initialized {
 		return
 	}
@@ -119,6 +120,10 @@ func logCompleteScan(scanId int) {
 	if count != 1 {
 		fmt.Printf("Could not perform update. query=%s, expected:%d actual: %d", update_row, 1, count)
 	}
+}
+
+func LoadStatsFromFile(saveFile string) *[]FileData {
+	return loadStatsFromFile(saveFile)
 }
 
 type Scan struct {
@@ -139,4 +144,10 @@ type ScanData struct {
 	IsDir        sql.NullBool   `db:"is_dir"`
 	FileCount    sql.NullInt32  `db:"file_count"`
 	ScanId       int            `db:"scan_id"`
+}
+
+func checkError(err error) {
+	if err != nil {
+		panic(err)
+	}
 }

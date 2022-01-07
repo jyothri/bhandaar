@@ -9,16 +9,18 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+
+	"github.com/jyothri/hdd/db"
 )
 
 func localDrive(parentDir string, lock *sync.RWMutex) {
 	lock.Lock()
 	defer lock.Unlock()
-	parseInfo = make([]fileData, 0)
-	scanId := logStartScan("local")
+	parseInfo = make([]db.FileData, 0)
+	scanId := db.LogStartScan("local")
 	collectStats(parentDir)
-	saveStatsToDb(scanId, &parseInfo)
-	logCompleteScan(scanId)
+	db.SaveStatsToDb(scanId, &parseInfo)
+	db.LogCompleteScan(scanId)
 }
 
 // Gathers the info for the directory.
@@ -43,7 +45,7 @@ func collectStats(parentDir string) (int64, int64) {
 			return nil
 		}
 
-		fd := fileData{
+		fd := db.FileData{
 			FileName:  info.Name(),
 			FilePath:  path,
 			IsDir:     info.IsDir(),
