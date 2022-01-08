@@ -4,10 +4,15 @@
     SubComponent = null;
     SubComponent = (await import("./ListScans.svelte")).default;
   };
+
+  let loadStartScan = async () => {
+    SubComponent = null;
+    SubComponent = (await import("./InitiateScans.svelte")).default;
+  };
 </script>
 
 <button on:click={loadListScans}> Scan Info </button>
-<button> Start a scan </button>
+<button on:click={loadStartScan}> Start a scan </button>
 <hr />
 <svelte:component this={SubComponent} />
 
