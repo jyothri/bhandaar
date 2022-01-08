@@ -1,6 +1,7 @@
 <script lang="ts">
   let SubComponent: any;
   let loadListScans = async () => {
+    SubComponent = null;
     SubComponent = (await import("./ListScans.svelte")).default;
   };
 </script>

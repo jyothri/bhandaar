@@ -99,9 +99,9 @@ func GetScanDataFromDb(scanId int, pageNo int) ([]ScanData, int) {
 	read_row := `select * from scandata where scan_id = $1 order by id limit $2 offset $3`
 	scandata := []ScanData{}
 	var count int
-	err := db.Select(&scandata, read_row, scanId, limit, offset)
+	err := db.Get(&count, count_rows, scanId)
 	checkError(err)
-	err = db.Get(&count, count_rows, scanId)
+	err = db.Select(&scandata, read_row, scanId, limit, offset)
 	checkError(err)
 	return scandata, count
 }
