@@ -22,6 +22,7 @@ var paginationFields []string = []string{"nextPageToken", "incompleteSearch"}
 
 // Filter files list by this criteria.
 const queryString = "name contains 'tesla'"
+const pageSize = 1000
 
 var driveService *drive.Service
 
@@ -51,7 +52,7 @@ func cloudDrive(lock *sync.RWMutex) {
 	defer lock.Unlock()
 	parseInfo = make([]db.FileData, 0)
 	scanId := db.LogStartScan("google_drive")
-	filesListCall := driveService.Files.List().PageSize(5).Q(queryString).Fields(googleapi.Field(strings.Join(append(addPrefix(fields, "files/"), paginationFields...), ",")))
+	filesListCall := driveService.Files.List().PageSize(pageSize).Q(queryString).Fields(googleapi.Field(strings.Join(append(addPrefix(fields, "files/"), paginationFields...), ",")))
 	hasNextPage := true
 	for hasNextPage {
 		fileList, err := filesListCall.Do()
