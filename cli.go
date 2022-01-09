@@ -5,11 +5,11 @@ import (
 	"os"
 	"sync"
 
+	"github.com/jyothri/hdd/collect"
 	"github.com/jyothri/hdd/db"
 	"github.com/jyothri/hdd/web"
 )
 
-var parseInfo []db.FileData
 var parentDir string
 
 func main() {
@@ -27,9 +27,9 @@ func main() {
 		case 1:
 			optionLocalDrive(&lock)
 		case 2:
-			go cloudDrive(&lock)
+			go collect.CloudDrive(&lock)
 		case 3:
-			go cloudStorage(&lock)
+			go collect.CloudStorage(&lock)
 		case 4:
 			printStats()
 		case 5:
@@ -38,7 +38,7 @@ func main() {
 			fmt.Println("Provide saveFile to use?")
 			var saveFile string
 			fmt.Scan(&saveFile)
-			parseInfo = *db.LoadStatsFromFile(saveFile)
+			collect.ParseInfo = *db.LoadStatsFromFile(saveFile)
 		case 6:
 			go web.StartWebServer()
 		default:
@@ -57,7 +57,7 @@ func optionLocalDrive(lock *sync.RWMutex) {
 		fmt.Scan(&newParentDir)
 		parentDir = newParentDir
 	}
-	go localDrive(parentDir, lock)
+	go collect.LocalDrive(parentDir, lock)
 }
 
 func printOptions() {
@@ -76,18 +76,12 @@ func printOptions() {
 func printStats() {
 	fmt.Println("#################   STATS   #################")
 	count := 1
-	for _, fd := range parseInfo {
+	for _, fd := range collect.ParseInfo {
 		fmt.Printf("fileName: %30.30v Path: %-45.45v Size: %10v ModifiedTime: %30.30v Directory?: %6v Contained files: %v \n", fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.IsDir, fd.FileCount)
 		if count > 5 {
 			break
 		}
 		count++
 	}
-	fmt.Printf("Collection size:%d\n", len(parseInfo))
-}
-
-func checkError(err error) {
-	if err != nil {
-		panic(err)
-	}
+	fmt.Printf("Collection size:%d\n", len(collect.ParseInfo))
 }

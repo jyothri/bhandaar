@@ -1,4 +1,4 @@
-package main
+package collect
 
 import (
 	"crypto/md5"
@@ -13,13 +13,15 @@ import (
 	"github.com/jyothri/hdd/db"
 )
 
-func localDrive(parentDir string, lock *sync.RWMutex) {
+var ParseInfo []db.FileData
+
+func LocalDrive(parentDir string, lock *sync.RWMutex) {
 	lock.Lock()
 	defer lock.Unlock()
-	parseInfo = make([]db.FileData, 0)
+	ParseInfo = make([]db.FileData, 0)
 	scanId := db.LogStartScan("local")
 	collectStats(parentDir)
-	db.SaveStatsToDb(scanId, &parseInfo)
+	db.SaveStatsToDb(scanId, &ParseInfo)
 	db.LogCompleteScan(scanId)
 }
 
@@ -65,7 +67,7 @@ func collectStats(parentDir string) (int64, int64) {
 			fd.FileCount = 1
 			fd.Md5Hash = getMd5ForFile(path)
 		}
-		parseInfo = append(parseInfo, fd)
+		ParseInfo = append(ParseInfo, fd)
 		// filepath.Walk works recursively. However our call to
 		// collectStats also performs the traversal recursively.
 		// Returns `filepath.SkipDir` limits to only the files and folders
@@ -87,4 +89,10 @@ func getMd5ForFile(filePath string) string {
 	_, err = io.Copy(hash, file)
 	checkError(err)
 	return fmt.Sprintf("%x", hash.Sum(nil))
+}
+
+func checkError(err error) {
+	if err != nil {
+		panic(err)
+	}
 }

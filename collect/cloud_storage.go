@@ -1,4 +1,4 @@
-package main
+package collect
 
 import (
 	"context"
@@ -11,10 +11,10 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-func cloudStorage(lock *sync.RWMutex) {
+func CloudStorage(lock *sync.RWMutex) {
 	lock.Lock()
 	defer lock.Unlock()
-	parseInfo = make([]db.FileData, 0)
+	ParseInfo = make([]db.FileData, 0)
 	ctx := context.Background()
 
 	// Create a client.
@@ -45,9 +45,9 @@ func cloudStorage(lock *sync.RWMutex) {
 		}
 		fileName := getFileName(attrs.Name)
 		fd.FileName = fileName
-		parseInfo = append(parseInfo, fd)
+		ParseInfo = append(ParseInfo, fd)
 	}
-	db.SaveStatsToDb(scanId, &parseInfo)
+	db.SaveStatsToDb(scanId, &ParseInfo)
 	db.LogCompleteScan(scanId)
 }
 

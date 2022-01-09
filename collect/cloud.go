@@ -1,4 +1,4 @@
-package main
+package collect
 
 import (
 	"context"
@@ -47,10 +47,10 @@ func init() {
 	checkError(err)
 }
 
-func cloudDrive(lock *sync.RWMutex) {
+func CloudDrive(lock *sync.RWMutex) {
 	lock.Lock()
 	defer lock.Unlock()
-	parseInfo = make([]db.FileData, 0)
+	ParseInfo = make([]db.FileData, 0)
 	scanId := db.LogStartScan("google_drive")
 	filesListCall := driveService.Files.List().PageSize(pageSize).Q(queryString).Fields(googleapi.Field(strings.Join(append(addPrefix(fields, "files/"), paginationFields...), ",")))
 	hasNextPage := true
@@ -66,7 +66,7 @@ func cloudDrive(lock *sync.RWMutex) {
 		}
 		filesListCall = filesListCall.PageToken(fileList.NextPageToken)
 	}
-	db.SaveStatsToDb(scanId, &parseInfo)
+	db.SaveStatsToDb(scanId, &ParseInfo)
 	db.LogCompleteScan(scanId)
 }
 
@@ -83,7 +83,7 @@ func parseFileList(fileList *drive.FileList) {
 			fd.Size = uint(file.Size)
 			fd.FileCount = 1
 			fd.Md5Hash = file.Md5Checksum
-			parseInfo = append(parseInfo, fd)
+			ParseInfo = append(ParseInfo, fd)
 		}
 	}
 }
