@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jyothri/hdd/db"
@@ -20,8 +19,6 @@ import (
 var fields []string = []string{"size", "id", "name", "mimeType", "parents", "modifiedTime", "md5Checksum"}
 var paginationFields []string = []string{"nextPageToken", "incompleteSearch"}
 
-// Filter files list by this criteria.
-const queryString = "name contains 'tesla'"
 const pageSize = 1000
 
 var driveService *drive.Service
@@ -47,11 +44,16 @@ func init() {
 	checkError(err)
 }
 
-func CloudDrive(lock *sync.RWMutex) {
+func CloudDrive(queryString string) int {
+	scanId := db.LogStartScan("google_drive")
+	go startCloudDrive(scanId, queryString)
+	return scanId
+}
+
+func startCloudDrive(scanId int, queryString string) {
 	lock.Lock()
 	defer lock.Unlock()
 	ParseInfo = make([]db.FileData, 0)
-	scanId := db.LogStartScan("google_drive")
 	filesListCall := driveService.Files.List().PageSize(pageSize).Q(queryString).Fields(googleapi.Field(strings.Join(append(addPrefix(fields, "files/"), paginationFields...), ",")))
 	hasNextPage := true
 	for hasNextPage {

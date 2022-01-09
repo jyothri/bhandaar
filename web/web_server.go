@@ -2,12 +2,46 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/jyothri/hdd/collect"
 	"github.com/jyothri/hdd/db"
 )
+
+func DoScansHandler(w http.ResponseWriter, r *http.Request) {
+	decoder := json.NewDecoder(r.Body)
+	var doScanRequest DoScanRequest
+	err := decoder.Decode(&doScanRequest)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Received request: %v\n", doScanRequest)
+	var body DoScanResponse
+	switch doScanRequest.ScanType {
+	case "Local":
+		body = DoScanResponse{
+			ScanId: collect.LocalDrive(doScanRequest.LocalPath),
+		}
+	case "Google Drive":
+		body = DoScanResponse{
+			ScanId: collect.CloudDrive(doScanRequest.Filter),
+		}
+	case "Google Storage":
+		body = DoScanResponse{
+			ScanId: collect.CloudStorage(doScanRequest.Bucket),
+		}
+	default:
+		body = DoScanResponse{
+			ScanId: -1,
+		}
+	}
+	serializedBody, _ := json.Marshal(body)
+	setJsonHeader(w)
+	_, _ = w.Write(serializedBody)
+}
 
 func ListScansHandler(w http.ResponseWriter, r *http.Request) {
 	pageNo := getPageNumber(mux.Vars(r))
@@ -41,6 +75,7 @@ func StartWebServer() {
 	r := mux.NewRouter()
 	// Handle API routes
 	api := r.PathPrefix("/api/").Subrouter()
+	api.HandleFunc("/scans", DoScansHandler).Methods("POST")
 	api.HandleFunc("/scans", ListScansHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/scans", ListScansHandler).Methods("GET")
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET").Queries("page", "{page}")
@@ -93,4 +128,15 @@ type ScansResponse struct {
 type ScanDataResponse struct {
 	PageInfo PaginationInfo `json:"pagination_info"`
 	ScanData []db.ScanData  `json:"scan_data"`
+}
+
+type DoScanRequest struct {
+	ScanType  string `json:"scan_type"`
+	LocalPath string `json:"localPath"`
+	Filter    string `json:"filter"`
+	Bucket    string `json:"gs_bucket"`
+}
+
+type DoScanResponse struct {
+	ScanId int `json:"scan_id"`
 }

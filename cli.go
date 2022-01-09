@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"sync"
 
 	"github.com/jyothri/hdd/collect"
 	"github.com/jyothri/hdd/db"
@@ -16,7 +15,6 @@ func main() {
 	parentDir = "/Users/jyothri/test"
 	// parentDir = "C:\\Users\\jyoth\\technical\\"
 	var choice int
-	var lock sync.RWMutex
 	for {
 		printOptions()
 		fmt.Scan(&choice)
@@ -25,16 +23,14 @@ func main() {
 		case 0:
 			os.Exit(0)
 		case 1:
-			optionLocalDrive(&lock)
+			optionLocalDrive()
 		case 2:
-			go collect.CloudDrive(&lock)
+			go collect.CloudDrive("name contains 'tesla'")
 		case 3:
-			go collect.CloudStorage(&lock)
+			go collect.CloudStorage("jyo-pics")
 		case 4:
 			printStats()
 		case 5:
-			lock.Lock()
-			lock.Unlock()
 			fmt.Println("Provide saveFile to use?")
 			var saveFile string
 			fmt.Scan(&saveFile)
@@ -47,7 +43,7 @@ func main() {
 	}
 }
 
-func optionLocalDrive(lock *sync.RWMutex) {
+func optionLocalDrive() {
 	fmt.Printf("Current dir: %v Change directory to scan (y/n)? \n", parentDir)
 	var newParentDir string
 	var changeDir string
@@ -57,7 +53,7 @@ func optionLocalDrive(lock *sync.RWMutex) {
 		fmt.Scan(&newParentDir)
 		parentDir = newParentDir
 	}
-	go collect.LocalDrive(parentDir, lock)
+	go collect.LocalDrive(parentDir)
 }
 
 func printOptions() {

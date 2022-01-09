@@ -8,18 +8,20 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 
 	"github.com/jyothri/hdd/db"
 )
 
-var ParseInfo []db.FileData
-
-func LocalDrive(parentDir string, lock *sync.RWMutex) {
-	lock.Lock()
-	defer lock.Unlock()
+func LocalDrive(parentDir string) int {
 	ParseInfo = make([]db.FileData, 0)
 	scanId := db.LogStartScan("local")
+	go startCollectStats(scanId, parentDir)
+	return scanId
+}
+
+func startCollectStats(scanId int, parentDir string) {
+	lock.Lock()
+	defer lock.Unlock()
 	collectStats(parentDir)
 	db.SaveStatsToDb(scanId, &ParseInfo)
 	db.LogCompleteScan(scanId)
@@ -89,10 +91,4 @@ func getMd5ForFile(filePath string) string {
 	_, err = io.Copy(hash, file)
 	checkError(err)
 	return fmt.Sprintf("%x", hash.Sum(nil))
-}
-
-func checkError(err error) {
-	if err != nil {
-		panic(err)
-	}
 }
