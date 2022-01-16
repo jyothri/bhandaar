@@ -1,18 +1,12 @@
-FROM node:16
+FROM node:16 as build
 
-# Create app directory
 WORKDIR /usr/src/app
-
-# Install app dependencies
-# A wildcard is used to ensure both package.json AND package-lock.json are copied
-# where available (npm@5+)
 COPY ./web/svelte/ ./
-# COPY package*.json ./
-
 RUN npm install
-# If you are building your code for production
-# RUN npm ci --only=production
-
 RUN npm run build
 
-CMD [ "npm", "start" ]
+FROM node:16-alpine
+
+COPY --from=build /usr/src/app /
+EXPOSE 8080
+CMD ["npm", "start"]
