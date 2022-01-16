@@ -3,11 +3,11 @@
 ## Docker build
 - To build the image execute the following commands. (Execute at the *base* and not inside the build directory)
   ```
-  docker build . -f .\build\Dockerfile -t jyothri/hdd-build
+  docker build . -f .\build\Dockerfile -t jyothri/hdd
   ```
 - To run the built image
   ```
-  docker run -it --rm --name hdd-svelte -p 8080:8080 jyothri/hdd-build
+  docker run -it --rm --name jyothri-hdd -p 8090:8090 jyothri/hdd
   ```
 
 ## Parsing setup
