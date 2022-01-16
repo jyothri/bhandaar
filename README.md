@@ -1,6 +1,16 @@
 # hdd
 
-## Setup
+## Docker build
+- To build the image execute the following commands. (Execute at the *base* and not inside the build directory)
+  ```
+  docker build . -f .\build\Dockerfile -t jyothri/hdd-build
+  ```
+- To run the built image
+  ```
+  docker run -it --rm --name hdd-svelte -p 8080:8080 jyothri/hdd-build
+  ```
+
+## Parsing setup
 - To be able to query Google drive, credentials are provided in the form of OAuth2 token. see [this](https://stackoverflow.com/a/35611334/6487201) answer for instructions. The steps include
   - Setup an oauth client & configure OAuth consent screen. May need to add specific gmail accounts for testing.
   - Obtain authorization code. E.g. https://accounts.google.com/o/oauth2/v2/auth?response_type=code&scope=https://www.googleapis.com/auth/drive.readonly&client_id=CLIENT_ID&state=YOUR_CUSTOM_STATE&redirect_uri=https://local.jkurapati.com&access_type=offline&prompt=consent
