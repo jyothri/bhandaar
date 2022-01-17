@@ -3,10 +3,10 @@ package collect
 import (
 	"context"
 	"errors"
-	"flag"
 	"strings"
 	"time"
 
+	"github.com/jyothri/hdd/constants"
 	"github.com/jyothri/hdd/db"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -24,19 +24,14 @@ const pageSize = 1000
 var driveService *drive.Service
 
 func init() {
-	oauth_client_id := flag.String("oauth_client_id", "dummy", "oauth client id")
-	oauth_client_secret := flag.String("oauth_client_secret", "dummy", "oauth client secret")
-	refresh_token := flag.String("refresh_token", "dummy", "refresh token for the user")
-	flag.Parse()
-
 	config := &oauth2.Config{
-		ClientID:     *oauth_client_id,
-		ClientSecret: *oauth_client_secret,
+		ClientID:     constants.OauthClientId,
+		ClientSecret: constants.OauthClientSecret,
 		Endpoint:     google.Endpoint,
 		Scopes:       []string{drive.DriveReadonlyScope},
 	}
 	tokenSrc := oauth2.Token{
-		RefreshToken: *refresh_token,
+		RefreshToken: constants.RefreshToken,
 	}
 	ctx := context.Background()
 	var err error

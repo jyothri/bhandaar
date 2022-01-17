@@ -1,17 +1,32 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
 	"github.com/jyothri/hdd/collect"
+	"github.com/jyothri/hdd/constants"
 	"github.com/jyothri/hdd/db"
 	"github.com/jyothri/hdd/web"
 )
 
 var parentDir string
 
+func init() {
+	flag.StringVar(&constants.OauthClientId, "oauth_client_id", "dummy", "oauth client id")
+	flag.StringVar(&constants.OauthClientSecret, "oauth_client_secret", "dummy", "oauth client secret")
+	flag.StringVar(&constants.RefreshToken, "refresh_token", "dummy", "refresh token for the user")
+	flag.BoolVar(&constants.StartWebServer, "start_web_server", false, "Set to true to start a web server.")
+	flag.Parse()
+}
+
 func main() {
+	if constants.StartWebServer {
+		fmt.Println("Starting web server on startup.")
+		go web.StartWebServer()
+	}
+
 	parentDir = "/Users/jyothri/test"
 	// parentDir = "C:\\Users\\jyoth\\technical\\"
 	var choice int

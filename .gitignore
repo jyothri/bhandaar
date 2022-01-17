@@ -16,3 +16,6 @@
 
 # Intermediate files
 *.gob
+
+# postgres data folder
+build/data
