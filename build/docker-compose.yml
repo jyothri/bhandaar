@@ -1,5 +1,4 @@
 version: "3.9"
-   
 services:
   postgres:
     image: postgres
@@ -13,9 +12,15 @@ services:
     image: jyothri/hdd-go-build
     restart: always
     tty: true
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/keys/gae_creds.json
+      - OAUTH_CLIENT_ID=dummy-client-id
+      - OAUTH_CLIENT_SECRET=dummy-client-secret
+      - REFRESH_TOKEN=dummy-refresh-token
     volumes:
       - /Users/jyothri/test:/scan
       # - C:/Users/jyoth/technical:/scan
+      - ~/keys/gae_creds.json:/keys/gae_creds.json:ro
     ports:
       - "8090:8090"
     depends_on:

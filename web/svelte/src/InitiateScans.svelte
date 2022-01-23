@@ -1,7 +1,7 @@
 <script lang="ts">
   let selected: any;
   let readyToSubmit = false;
-  let localPath = "/Users/jyothri/test";
+  let localPath = "/scan";
   let filter = "name contains 'tesla'";
   let bucket = "jyo-pics";
   let submittedScans: number[] = [];
