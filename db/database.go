@@ -18,30 +18,21 @@ const (
 )
 
 var db *sqlx.DB
-var initialized bool
 
 func init() {
-	initialized = false
 	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
 		"password=%s dbname=%s sslmode=disable",
 		host, port, user, password, dbname)
 	var err error
 	db, err = sqlx.Open("postgres", psqlInfo)
-	if err != nil {
-		return
-	}
+	checkError(err)
 	err = db.Ping()
-	if err != nil {
-		return
-	}
+	checkError(err)
 	fmt.Println("Successfully connected to DB!")
-	initialized = true
+	migrateDB()
 }
 
 func LogStartScan(scanType string) int {
-	if !initialized {
-		return -1
-	}
 	insert_row := `insert into scans 
 									(scan_type, created_on, scan_start_time) 
 								values 
@@ -53,11 +44,7 @@ func LogStartScan(scanType string) int {
 }
 
 func SaveStatsToDb(scanId int, info *[]FileData) {
-	if !initialized {
-		saveStatsToFile(fmt.Sprintf("SaveFile_%v.gob", time.Now().Format("2022-01-02T15:04:05.000000Z")), info)
-		return
-	}
-	insert_row := `insert into ScanData 
+	insert_row := `insert into scandata 
                            (name, path, size, file_mod_time, md5hash, scan_id, is_dir, file_count) 
                         values 
                            ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
@@ -73,9 +60,6 @@ func SaveStatsToDb(scanId int, info *[]FileData) {
 }
 
 func GetScansFromDb(pageNo int) ([]Scan, int) {
-	if !initialized {
-		return make([]Scan, 0), 0
-	}
 	limit := 10
 	offset := limit * (pageNo - 1)
 	count_rows := `select count(*) from scans`
@@ -90,9 +74,6 @@ func GetScansFromDb(pageNo int) ([]Scan, int) {
 }
 
 func GetScanDataFromDb(scanId int, pageNo int) ([]ScanData, int) {
-	if !initialized {
-		return make([]ScanData, 0), 0
-	}
 	limit := 10
 	offset := limit * (pageNo - 1)
 	count_rows := `select count(*) from scandata where scan_id = $1`
@@ -107,9 +88,6 @@ func GetScanDataFromDb(scanId int, pageNo int) ([]ScanData, int) {
 }
 
 func LogCompleteScan(scanId int) {
-	if !initialized {
-		return
-	}
 	update_row := `update scans 
 								 set scan_end_time = current_timestamp 
 								 where id = $1`
@@ -124,6 +102,48 @@ func LogCompleteScan(scanId int) {
 
 func LoadStatsFromFile(saveFile string) *[]FileData {
 	return loadStatsFromFile(saveFile)
+}
+
+func migrateDB() {
+	table_row_count := `select count(*) 
+											from information_schema.tables 
+											where table_name = $1`
+	row_count := 0
+	err := db.QueryRow(table_row_count, "scans").Scan(&row_count)
+	checkError(err)
+
+	if row_count == 0 {
+		fmt.Println("Creating scans table")
+		create_scans_table := `CREATE TABLE scans (
+														id serial PRIMARY KEY,
+														scan_type VARCHAR (50) NOT NULL,
+														created_on TIMESTAMP NOT NULL,
+														scan_start_time TIMESTAMP NOT NULL,
+														scan_end_time TIMESTAMP
+													)`
+		db.MustExec(create_scans_table)
+	}
+
+	err = db.QueryRow(table_row_count, "scandata").Scan(&row_count)
+	checkError(err)
+
+	if row_count == 0 {
+		fmt.Println("Creating scandata table")
+		create_scandata_table := `CREATE TABLE IF NOT EXISTS scandata (
+			id serial PRIMARY KEY,
+			name VARCHAR(200),
+			path VARCHAR(2000),
+			size BIGINT,
+			file_mod_time TIMESTAMP,
+			md5hash VARCHAR(60),
+			is_dir boolean,
+			file_count INT,
+			scan_id INT NOT NULL,
+			FOREIGN KEY (scan_id)
+				 REFERENCES Scans (id)
+		 )`
+		db.MustExec(create_scandata_table)
+	}
 }
 
 type Scan struct {
