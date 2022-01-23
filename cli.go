@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 
@@ -12,14 +11,6 @@ import (
 )
 
 var parentDir string
-
-func init() {
-	flag.StringVar(&constants.OauthClientId, "oauth_client_id", "dummy", "oauth client id")
-	flag.StringVar(&constants.OauthClientSecret, "oauth_client_secret", "dummy", "oauth client secret")
-	flag.StringVar(&constants.RefreshToken, "refresh_token", "dummy", "refresh token for the user")
-	flag.BoolVar(&constants.StartWebServer, "start_web_server", false, "Set to true to start a web server.")
-	flag.Parse()
-}
 
 func main() {
 	if constants.StartWebServer {
