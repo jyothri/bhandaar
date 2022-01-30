@@ -34,6 +34,28 @@
     status = "";
   };
 
+  let deleteScan = async (scanId: number) => {
+    try {
+      await fetch(`${apiEndpoint}/api/scans/${scanId}`, {
+        method: "DELETE",
+      });
+      status = "Deleted scan " + scanId;
+      const index = scans.findIndex((x) => x.scan_id == scanId);
+      if (index > -1) {
+        scans.splice(index, 1);
+      }
+      scans = scans;
+      if (scans.length == 0) {
+        if (page > 1) {
+          page--;
+        }
+        fetchListScans();
+      }
+    } catch (err) {
+      status = "error deleting scan " + scanId;
+    }
+  };
+
   let fetchListScans = async () => {
     try {
       const res = await fetch(`${apiEndpoint}/api/scans?page=${page}`);
@@ -48,6 +70,7 @@
       if (totalScans % pageSize == 0) {
         maxPages--;
       }
+      status = "";
     } catch (err) {
       status = "error getting results";
     }
@@ -81,15 +104,22 @@
   <table>
     <tr>
       <th>id</th>
+      <th>Details</th>
       <th>Scan type</th>
       <th>Created On</th>
       <th>Start Time</th>
       <th>End Time</th>
       <th>Metadata</th>
+      <th>Actions</th>
     </tr>
     {#each scans as scan}
-      <tr on:click={() => loadScanData(scan.scan_id)}>
+      <tr>
         <td>{scan.scan_id}</td>
+        <td>
+          <i class="material-icons" on:click={() => loadScanData(scan.scan_id)}>
+            forward
+          </i>
+        </td>
         <td>{scan.ScanType}</td>
         <td>{scan.CreatedOn}</td>
         <td>{scan.ScanStartTime}</td>
@@ -99,13 +129,17 @@
           <td> - </td>
         {/if}
         <td>{scan.Metadata}</td>
+        <td>
+          <i class="material-icons" on:click={() => deleteScan(scan.scan_id)}>
+            delete
+          </i>
+        </td>
       </tr>
     {/each}
   </table>
-{:else}
-  <!-- this block renders when there are no scans -->
-  <p>{status}</p>
 {/if}
+
+<p>{status}</p>
 
 <style>
   table {

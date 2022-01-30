@@ -56,6 +56,13 @@ func ListScansHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(serializedBody)
 }
 
+func DeleteScanHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	scanId, _ := getIntFromMap(vars, "scan_id")
+	db.DeleteScan(scanId)
+	w.WriteHeader(http.StatusOK)
+}
+
 func ListScanDataHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	pageNo := getPageNumber(mux.Vars(r))
@@ -76,6 +83,7 @@ func StartWebServer() {
 	// Handle API routes
 	api := r.PathPrefix("/api/").Subrouter()
 	api.HandleFunc("/scans", DoScansHandler).Methods("POST")
+	api.HandleFunc("/scans/{scan_id}", DeleteScanHandler).Methods("DELETE")
 	api.HandleFunc("/scans", ListScansHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/scans", ListScansHandler).Methods("GET")
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET").Queries("page", "{page}")

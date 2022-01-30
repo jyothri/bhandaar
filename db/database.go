@@ -108,6 +108,23 @@ func GetScanDataFromDb(scanId int, pageNo int) ([]ScanData, int) {
 	return scandata, count
 }
 
+func DeleteScan(scanId int) {
+	delete_scandata := `delete from scandata
+	where scan_id = $1`
+	_, err := db.Exec(delete_scandata, scanId)
+	checkError(err)
+
+	delete_scanmetadata := `delete from scanmetadata
+	where scan_id = $1`
+	_, err = db.Exec(delete_scanmetadata, scanId)
+	checkError(err)
+
+	delete_scans := `delete from scans
+	where id = $1`
+	_, err = db.Exec(delete_scans, scanId)
+	checkError(err)
+}
+
 func logCompleteScan(scanId int) {
 	update_row := `update scans 
 								 set scan_end_time = current_timestamp 
