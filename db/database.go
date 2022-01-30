@@ -79,8 +79,11 @@ func GetScansFromDb(pageNo int) ([]Scan, int) {
 	offset := limit * (pageNo - 1)
 	count_rows := `select count(*) from scans`
 	read_row :=
-		`select S.id, scan_type, created_on, scan_start_time, 
-		 scan_end_time, CONCAT(search_path, search_filter) as metadata
+		`select S.id, scan_type, 
+		 created_on AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles' as created_on, 
+		 scan_start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles' as scan_start_time, 
+		 scan_end_time, CONCAT(search_path, search_filter) as metadata,
+		 date_trunc('millisecond', COALESCE(scan_end_time,current_timestamp)-scan_start_time) as duration
 	   from scans S LEFT JOIN scanmetadata SM
 		 ON S.id = SM.scan_id
 		 order by id limit $1 OFFSET $2
@@ -217,6 +220,7 @@ type Scan struct {
 	ScanStartTime time.Time    `db:"scan_start_time"`
 	ScanEndTime   sql.NullTime `db:"scan_end_time"`
 	Metadata      string       `db:"metadata"`
+	Duration      string       `db:"duration"`
 }
 
 type ScanData struct {

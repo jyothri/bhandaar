@@ -90,6 +90,24 @@
     await fetchListScanData();
   };
 
+  let getSize = (bytes: number) => {
+    if (bytes < 1024) {
+      return Math.round(bytes) + "  B";
+    }
+    bytes = bytes / 1024;
+    if (bytes < 1024) {
+      return Math.round(bytes) + " KB";
+    }
+    bytes = bytes / 1024;
+    if (bytes < 1024) {
+      return Math.round(bytes) + " MB";
+    }
+    bytes = bytes / 1024;
+    if (bytes < 1024) {
+      return Math.round(bytes) + " GB";
+    }
+  };
+
   afterUpdate(() => {
     if (scanId > 0) {
       fetchListScanData();
@@ -109,7 +127,7 @@
       <th>id</th>
       <th>Name</th>
       <th>Path</th>
-      <th>Size (in bytes)</th>
+      <th>Size</th>
       <th>Modified time</th>
       <th>Md5 Hash</th>
     </tr>
@@ -118,7 +136,7 @@
         <td>{scandatum.scan_data_id}</td>
         <td>{scandatum.Name.String}</td>
         <td>{scandatum.Path.String}</td>
-        <td>{scandatum.Size.Int64}</td>
+        <td>{@html getSize(scandatum.Size.Int64)}</td>
         <td>{scandatum.ModifiedTime.Time}</td>
         <td>{scandatum.Md5Hash.String}</td>
       </tr>

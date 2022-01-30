@@ -15,6 +15,7 @@
     ScanStartTime: string;
     ScanEndTime: OptionalTime;
     Metadata: string;
+    Duration: string;
   }
 
   const pageSize = 10;
@@ -106,9 +107,8 @@
       <th>id</th>
       <th>Details</th>
       <th>Scan type</th>
-      <th>Created On</th>
       <th>Start Time</th>
-      <th>End Time</th>
+      <th>Duration</th>
       <th>Metadata</th>
       <th>Actions</th>
     </tr>
@@ -121,12 +121,11 @@
           </i>
         </td>
         <td>{scan.ScanType}</td>
-        <td>{scan.CreatedOn}</td>
         <td>{scan.ScanStartTime}</td>
         {#if scan.ScanEndTime.Valid}
-          <td>{scan.ScanEndTime.Time}</td>
+          <td>{scan.Duration}</td>
         {:else}
-          <td> - </td>
+          <td class="ongoing">{scan.Duration}</td>
         {/if}
         <td>{scan.Metadata}</td>
         <td>
@@ -145,6 +144,10 @@
   table {
     width: 100%;
     border: 1px solid black;
+  }
+
+  td.ongoing {
+    background-color: rgb(193, 166, 150);
   }
 
   th,
