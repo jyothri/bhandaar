@@ -13,6 +13,7 @@ import (
 func CloudStorage(bucketName string) int {
 	scanData := make(chan db.FileData, 10)
 	scanId := db.LogStartScan("google_storage")
+	go db.SaveScanMetadata("bucket="+bucketName, "", scanId)
 	go startCloudStorage(scanId, bucketName, scanData)
 	go db.SaveStatToDb(scanId, scanData)
 	return scanId

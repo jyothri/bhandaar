@@ -43,6 +43,16 @@ func LogStartScan(scanType string) int {
 	return lastInsertId
 }
 
+func SaveScanMetadata(searchPath string, searchFilter string, scanId int) {
+	insert_row := `insert into scanmetadata 
+			(name, search_path, search_filter, scan_id) 
+		values 
+			($1, $2, $3, $4) RETURNING id`
+	var err error
+	_, err = db.Exec(insert_row, nil, searchPath, searchFilter, scanId)
+	checkError(err)
+}
+
 func SaveStatToDb(scanId int, scanData <-chan FileData) {
 	for {
 		fd, more := <-scanData
@@ -68,7 +78,13 @@ func GetScansFromDb(pageNo int) ([]Scan, int) {
 	limit := 10
 	offset := limit * (pageNo - 1)
 	count_rows := `select count(*) from scans`
-	read_row := `select * from scans order by id limit $1 OFFSET $2`
+	read_row :=
+		`select S.id, scan_type, created_on, scan_start_time, 
+		 scan_end_time, CONCAT(search_path, search_filter) as metadata
+	   from scans S LEFT JOIN scanmetadata SM
+		 ON S.id = SM.scan_id
+		 order by id limit $1 OFFSET $2
+		`
 	scans := []Scan{}
 	var count int
 	err := db.Select(&scans, read_row, limit, offset)
@@ -124,6 +140,10 @@ func migrateDB() {
 	select_version_table := `select COALESCE(MAX(id),0) from version`
 	err = db.Get(&version, select_version_table)
 	checkError(err)
+
+	if version < 2 {
+		migrateDBv1To2()
+	}
 }
 
 func migrateDBv0() {
@@ -152,12 +172,30 @@ func migrateDBv0() {
 		)`
 
 	insert_version_table := `delete from version; 
-		INSERT INTO version (id) VALUES (1)`
+		INSERT INTO version (id) VALUES (2)`
 	db.MustExec(create_scans_table)
 	db.MustExec(create_scandata_table)
+	db.MustExec(create_scanmetadata_table)
 	db.MustExec(create_version_table)
 	db.MustExec(insert_version_table)
 }
+
+func migrateDBv1To2() {
+	insert_version_table := `delete from version; 
+		INSERT INTO version (id) VALUES (2)`
+	db.MustExec(create_scanmetadata_table)
+	db.MustExec(insert_version_table)
+}
+
+const create_scanmetadata_table string = `CREATE TABLE IF NOT EXISTS scanmetadata (
+	id serial PRIMARY KEY,
+	name VARCHAR(200),
+	search_path VARCHAR(2000),
+	search_filter VARCHAR(2000),
+	scan_id INT NOT NULL,
+	FOREIGN KEY (scan_id)
+		REFERENCES Scans (id)
+)`
 
 type Scan struct {
 	Id            int          `db:"id" json:"scan_id"`
@@ -165,6 +203,7 @@ type Scan struct {
 	CreatedOn     time.Time    `db:"created_on"`
 	ScanStartTime time.Time    `db:"scan_start_time"`
 	ScanEndTime   sql.NullTime `db:"scan_end_time"`
+	Metadata      string       `db:"metadata"`
 }
 
 type ScanData struct {

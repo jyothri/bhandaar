@@ -15,6 +15,7 @@ import (
 func LocalDrive(parentDir string) int {
 	scanData := make(chan db.FileData, 10)
 	scanId := db.LogStartScan("local")
+	go db.SaveScanMetadata("dir="+parentDir, "", scanId)
 	go startCollectStats(scanId, parentDir, scanData)
 	go db.SaveStatToDb(scanId, scanData)
 	return scanId

@@ -14,6 +14,7 @@
     CreatedOn: string;
     ScanStartTime: string;
     ScanEndTime: OptionalTime;
+    Metadata: string;
   }
 
   const pageSize = 10;
@@ -84,6 +85,7 @@
       <th>Created On</th>
       <th>Start Time</th>
       <th>End Time</th>
+      <th>Metadata</th>
     </tr>
     {#each scans as scan}
       <tr on:click={() => loadScanData(scan.scan_id)}>
@@ -96,6 +98,7 @@
         {:else}
           <td> - </td>
         {/if}
+        <td>{scan.Metadata}</td>
       </tr>
     {/each}
   </table>

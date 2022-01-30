@@ -42,6 +42,7 @@ func init() {
 func CloudDrive(queryString string) int {
 	scanData := make(chan db.FileData, 10)
 	scanId := db.LogStartScan("google_drive")
+	go db.SaveScanMetadata("", queryString, scanId)
 	go startCloudDrive(scanId, queryString, scanData)
 	go db.SaveStatToDb(scanId, scanData)
 	return scanId
