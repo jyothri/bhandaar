@@ -43,12 +43,17 @@ func LogStartScan(scanType string) int {
 	return lastInsertId
 }
 
-func SaveStatsToDb(scanId int, info *[]FileData) {
-	insert_row := `insert into scandata 
-                           (name, path, size, file_mod_time, md5hash, scan_id, is_dir, file_count) 
-                        values 
-                           ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
-	for _, fd := range *info {
+func SaveStatToDb(scanId int, scanData <-chan FileData) {
+	for {
+		fd, more := <-scanData
+		if !more {
+			logCompleteScan(scanId)
+			break
+		}
+		insert_row := `insert into scandata 
+			(name, path, size, file_mod_time, md5hash, scan_id, is_dir, file_count) 
+		values 
+			($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
 		var err error
 		if fd.IsDir {
 			_, err = db.Exec(insert_row, fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.Md5Hash, scanId, fd.IsDir, fd.FileCount)
@@ -87,7 +92,7 @@ func GetScanDataFromDb(scanId int, pageNo int) ([]ScanData, int) {
 	return scandata, count
 }
 
-func LogCompleteScan(scanId int) {
+func logCompleteScan(scanId int) {
 	update_row := `update scans 
 								 set scan_end_time = current_timestamp 
 								 where id = $1`

@@ -13,23 +13,23 @@ import (
 )
 
 func LocalDrive(parentDir string) int {
-	ParseInfo = make([]db.FileData, 0)
+	scanData := make(chan db.FileData, 10)
 	scanId := db.LogStartScan("local")
-	go startCollectStats(scanId, parentDir)
+	go startCollectStats(scanId, parentDir, scanData)
+	go db.SaveStatToDb(scanId, scanData)
 	return scanId
 }
 
-func startCollectStats(scanId int, parentDir string) {
+func startCollectStats(scanId int, parentDir string, scanData chan<- db.FileData) {
 	lock.Lock()
 	defer lock.Unlock()
-	collectStats(parentDir)
-	db.SaveStatsToDb(scanId, &ParseInfo)
-	db.LogCompleteScan(scanId)
+	collectStats(parentDir, scanData)
+	close(scanData)
 }
 
 // Gathers the info for the directory.
 // Returns a tuple of (size of the directory, no. of files contained)
-func collectStats(parentDir string) (int64, int64) {
+func collectStats(parentDir string, scanData chan<- db.FileData) (int64, int64) {
 	var directorySize int64
 	var fileCount int64 = 0
 	err := filepath.Walk(parentDir, func(path string, info fs.FileInfo, err error) error {
@@ -57,7 +57,7 @@ func collectStats(parentDir string) (int64, int64) {
 			FileCount: 1,
 		}
 		if info.IsDir() {
-			ds, fc := collectStats(path)
+			ds, fc := collectStats(path, scanData)
 			directorySize += ds
 			fileCount += fc
 			fd.Size = uint(ds)
@@ -69,7 +69,7 @@ func collectStats(parentDir string) (int64, int64) {
 			fd.FileCount = 1
 			fd.Md5Hash = getMd5ForFile(path)
 		}
-		ParseInfo = append(ParseInfo, fd)
+		scanData <- fd
 		// filepath.Walk works recursively. However our call to
 		// collectStats also performs the traversal recursively.
 		// Returns `filepath.SkipDir` limits to only the files and folders

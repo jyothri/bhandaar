@@ -6,7 +6,6 @@ import (
 
 	"github.com/jyothri/hdd/collect"
 	"github.com/jyothri/hdd/constants"
-	"github.com/jyothri/hdd/db"
 	"github.com/jyothri/hdd/web"
 )
 
@@ -35,13 +34,6 @@ func main() {
 		case 3:
 			go collect.CloudStorage("jyo-pics")
 		case 4:
-			printStats()
-		case 5:
-			fmt.Println("Provide saveFile to use?")
-			var saveFile string
-			fmt.Scan(&saveFile)
-			collect.ParseInfo = *db.LoadStatsFromFile(saveFile)
-		case 6:
 			go web.StartWebServer()
 		default:
 			fmt.Println("Invalid selection")
@@ -69,21 +61,6 @@ func printOptions() {
 	fmt.Println("1 Scan Local Drive")
 	fmt.Println("2 Scan Google Drive")
 	fmt.Println("3 Scan Cloud Storage")
-	fmt.Println("4 Print sample of stats")
-	fmt.Println("5 Load saveFile")
-	fmt.Println("6 Start web server")
+	fmt.Println("4 Start web server")
 	fmt.Print(" > ")
-}
-
-func printStats() {
-	fmt.Println("#################   STATS   #################")
-	count := 1
-	for _, fd := range collect.ParseInfo {
-		fmt.Printf("fileName: %30.30v Path: %-45.45v Size: %10v ModifiedTime: %30.30v Directory?: %6v Contained files: %v \n", fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.IsDir, fd.FileCount)
-		if count > 5 {
-			break
-		}
-		count++
-	}
-	fmt.Printf("Collection size:%d\n", len(collect.ParseInfo))
 }

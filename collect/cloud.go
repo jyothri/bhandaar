@@ -40,15 +40,16 @@ func init() {
 }
 
 func CloudDrive(queryString string) int {
+	scanData := make(chan db.FileData, 10)
 	scanId := db.LogStartScan("google_drive")
-	go startCloudDrive(scanId, queryString)
+	go startCloudDrive(scanId, queryString, scanData)
+	go db.SaveStatToDb(scanId, scanData)
 	return scanId
 }
 
-func startCloudDrive(scanId int, queryString string) {
+func startCloudDrive(scanId int, queryString string, scanData chan<- db.FileData) {
 	lock.Lock()
 	defer lock.Unlock()
-	ParseInfo = make([]db.FileData, 0)
 	filesListCall := driveService.Files.List().PageSize(pageSize).Q(queryString).Fields(googleapi.Field(strings.Join(append(addPrefix(fields, "files/"), paginationFields...), ",")))
 	hasNextPage := true
 	for hasNextPage {
@@ -57,17 +58,16 @@ func startCloudDrive(scanId int, queryString string) {
 		if fileList.IncompleteSearch {
 			checkError(errors.New("incomplete search from drive API"))
 		}
-		parseFileList(fileList)
+		parseFileList(fileList, scanData)
 		if fileList.NextPageToken == "" {
 			hasNextPage = false
 		}
 		filesListCall = filesListCall.PageToken(fileList.NextPageToken)
 	}
-	db.SaveStatsToDb(scanId, &ParseInfo)
-	db.LogCompleteScan(scanId)
+	close(scanData)
 }
 
-func parseFileList(fileList *drive.FileList) {
+func parseFileList(fileList *drive.FileList, scanData chan<- db.FileData) {
 	for _, file := range fileList.Files {
 		fd := db.FileData{
 			FileName:  file.Name,
@@ -80,7 +80,7 @@ func parseFileList(fileList *drive.FileList) {
 			fd.Size = uint(file.Size)
 			fd.FileCount = 1
 			fd.Md5Hash = file.Md5Checksum
-			ParseInfo = append(ParseInfo, fd)
+			scanData <- fd
 		}
 	}
 }

@@ -11,15 +11,16 @@ import (
 )
 
 func CloudStorage(bucketName string) int {
+	scanData := make(chan db.FileData, 10)
 	scanId := db.LogStartScan("google_storage")
-	go startCloudStorage(scanId, bucketName)
+	go startCloudStorage(scanId, bucketName, scanData)
+	go db.SaveStatToDb(scanId, scanData)
 	return scanId
 }
 
-func startCloudStorage(scanId int, bucketName string) {
+func startCloudStorage(scanId int, bucketName string, scanData chan<- db.FileData) {
 	lock.Lock()
 	defer lock.Unlock()
-	ParseInfo = make([]db.FileData, 0)
 	ctx := context.Background()
 
 	// Create a client.
@@ -49,10 +50,9 @@ func startCloudStorage(scanId int, bucketName string) {
 		}
 		fileName := getFileName(attrs.Name)
 		fd.FileName = fileName
-		ParseInfo = append(ParseInfo, fd)
+		scanData <- fd
 	}
-	db.SaveStatsToDb(scanId, &ParseInfo)
-	db.LogCompleteScan(scanId)
+	close(scanData)
 }
 
 func getFileName(objectPath string) string {
