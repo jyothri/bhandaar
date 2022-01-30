@@ -138,10 +138,6 @@ func logCompleteScan(scanId int) {
 	}
 }
 
-func LoadStatsFromFile(saveFile string) *[]FileData {
-	return loadStatsFromFile(saveFile)
-}
-
 func migrateDB() {
 	var count int
 	var version int
