@@ -105,45 +105,53 @@ func LoadStatsFromFile(saveFile string) *[]FileData {
 }
 
 func migrateDB() {
-	table_row_count := `select count(*) 
-											from information_schema.tables 
-											where table_name = $1`
-	row_count := 0
-	err := db.QueryRow(table_row_count, "scans").Scan(&row_count)
+	var count int
+	var version int
+	has_table_query := `select count(*) 
+		from information_schema.tables 
+		where table_name = $1`
+	err := db.Get(&count, has_table_query, "version")
 	checkError(err)
-
-	if row_count == 0 {
-		fmt.Println("Creating scans table")
-		create_scans_table := `CREATE TABLE scans (
-														id serial PRIMARY KEY,
-														scan_type VARCHAR (50) NOT NULL,
-														created_on TIMESTAMP NOT NULL,
-														scan_start_time TIMESTAMP NOT NULL,
-														scan_end_time TIMESTAMP
-													)`
-		db.MustExec(create_scans_table)
+	if count == 0 {
+		migrateDBv0()
+		return
 	}
-
-	err = db.QueryRow(table_row_count, "scandata").Scan(&row_count)
+	select_version_table := `select COALESCE(MAX(id),0) from version`
+	err = db.Get(&version, select_version_table)
 	checkError(err)
+}
 
-	if row_count == 0 {
-		fmt.Println("Creating scandata table")
-		create_scandata_table := `CREATE TABLE IF NOT EXISTS scandata (
-			id serial PRIMARY KEY,
-			name VARCHAR(200),
-			path VARCHAR(2000),
-			size BIGINT,
-			file_mod_time TIMESTAMP,
-			md5hash VARCHAR(60),
-			is_dir boolean,
-			file_count INT,
-			scan_id INT NOT NULL,
-			FOREIGN KEY (scan_id)
-				 REFERENCES Scans (id)
-		 )`
-		db.MustExec(create_scandata_table)
-	}
+func migrateDBv0() {
+	create_scans_table := `CREATE TABLE scans (
+		  id serial PRIMARY KEY,
+		  scan_type VARCHAR (50) NOT NULL,
+		  created_on TIMESTAMP NOT NULL,
+		  scan_start_time TIMESTAMP NOT NULL,
+		  scan_end_time TIMESTAMP
+		)`
+	create_scandata_table := `CREATE TABLE IF NOT EXISTS scandata (
+		  id serial PRIMARY KEY,
+		  name VARCHAR(200),
+		  path VARCHAR(2000),
+		  size BIGINT,
+		  file_mod_time TIMESTAMP,
+		  md5hash VARCHAR(60),
+		  is_dir boolean,
+		  file_count INT,
+		  scan_id INT NOT NULL,
+		  FOREIGN KEY (scan_id)
+			  REFERENCES Scans (id)
+		)`
+	create_version_table := `CREATE TABLE IF NOT EXISTS version (
+		  id INT PRIMARY KEY
+		)`
+
+	insert_version_table := `delete from version; 
+		INSERT INTO version (id) VALUES (1)`
+	db.MustExec(create_scans_table)
+	db.MustExec(create_scandata_table)
+	db.MustExec(create_version_table)
+	db.MustExec(insert_version_table)
 }
 
 type Scan struct {
