@@ -13,3 +13,14 @@ type FileData struct {
 	FileCount uint
 	Md5Hash   string
 }
+
+type MessageMetadata struct {
+	MessageId    string
+	ThreadId     string
+	LabelIds     []string
+	From         string
+	To           string
+	Subject      string
+	Date         string
+	SizeEstimate int64
+}

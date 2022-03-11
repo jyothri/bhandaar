@@ -34,6 +34,8 @@ func main() {
 		case 3:
 			go collect.CloudStorage("jyo-pics")
 		case 4:
+			go collect.Gmail()
+		case 5:
 			go web.StartWebServer()
 		default:
 			fmt.Println("Invalid selection")
@@ -61,6 +63,7 @@ func printOptions() {
 	fmt.Println("1 Scan Local Drive")
 	fmt.Println("2 Scan Google Drive")
 	fmt.Println("3 Scan Cloud Storage")
-	fmt.Println("4 Start web server")
+	fmt.Println("4 Scan GMail")
+	fmt.Println("5 Start web server")
 	fmt.Print(" > ")
 }

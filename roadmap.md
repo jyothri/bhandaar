@@ -11,3 +11,7 @@
 
 - Sync folder with Cloud (Google Drive)
   - Identify files backed up in cloud
+
+- Gmail
+  - Identify emails which take up most space
+  - Show results on UI

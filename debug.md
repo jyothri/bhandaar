@@ -55,7 +55,7 @@
 ## <a name="creds"></a>Credentials setup for parsing
 - To be able to query Google drive, credentials are provided in the form of OAuth2 token. see [this](https://stackoverflow.com/a/35611334/6487201) answer for instructions. The steps include
   - Setup an oauth client & configure OAuth consent screen. May need to add specific gmail accounts for testing.
-  - Obtain authorization code. E.g. https://accounts.google.com/o/oauth2/v2/auth?response_type=code&scope=https://www.googleapis.com/auth/drive.readonly&client_id=CLIENT_ID&state=YOUR_CUSTOM_STATE&redirect_uri=https://local.jkurapati.com&access_type=offline&prompt=consent
+  - Obtain authorization code. E.g. https://accounts.google.com/o/oauth2/v2/auth?response_type=code&scope=SCOPE&client_id=CLIENT_ID&state=YOUR_CUSTOM_STATE&redirect_uri=https://local.jkurapati.com&access_type=offline&prompt=consent (e.g SCOPE=https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/gmail.readonly)
   - Exchange AuthZ code for Access & Refresh token. The refresh token can be used by the code.
   ```
   curl --location --request POST 'https://oauth2.googleapis.com/token' \
@@ -115,4 +115,31 @@
    FOREIGN KEY (scan_id)
       REFERENCES Scans (id)
   );
+
+  CREATE TABLE IF NOT EXISTS messagemetadata (
+	id serial PRIMARY KEY,
+	message_id VARCHAR(200),
+	thread_id VARCHAR(200),
+	date VARCHAR(200),
+	mail_from VARCHAR(500),
+	mail_to VARCHAR(500),
+	subject VARCHAR(2000),
+	size_estimate BIGINT,
+	labels VARCHAR(500),
+	scan_id INT NOT NULL,
+	FOREIGN KEY (scan_id)
+		REFERENCES Scans (id)
+  );
   ```  
+
+  ## Query
+  - Query to see top usages
+  ```
+  select substring(mail_from from '<(.*)>') as m_from, sum(size_estimate), count(*) as count, 
+  count(distinct thread_id) as thread_count, count(distinct message_id) as message_count 
+  from messagemetadata 
+  where scan_id = 62 
+  group by substring(mail_from from '<(.*)>') 
+  order by 3 desc 
+  limit 5;
+  ```

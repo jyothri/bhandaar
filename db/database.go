@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -51,6 +52,25 @@ func SaveScanMetadata(searchPath string, searchFilter string, scanId int) {
 	var err error
 	_, err = db.Exec(insert_row, nil, searchPath, searchFilter, scanId)
 	checkError(err)
+}
+
+func SaveMessageMetadataToDb(scanId int, messageMetaData <-chan MessageMetadata) {
+	for {
+		mmd, more := <-messageMetaData
+		if !more {
+			logCompleteScan(scanId)
+			break
+		}
+		insert_row := `insert into messagemetadata 
+			(message_id, thread_id, date, mail_from, mail_to, subject, size_estimate, labels, scan_id) 
+		values 
+			($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`
+		var err error
+		_, err = db.Exec(insert_row, mmd.MessageId, mmd.ThreadId, mmd.Date, substr(mmd.From, 500),
+			substr(mmd.To, 500), substr(mmd.Subject, 2000), mmd.SizeEstimate,
+			substr(strings.Join(mmd.LabelIds, ","), 500), scanId)
+		checkError(err, fmt.Sprintf("While inserting to messagemetadata messageId:%v", mmd.MessageId))
+	}
 }
 
 func SaveStatToDb(scanId int, scanData <-chan FileData) {
@@ -160,6 +180,9 @@ func migrateDB() {
 	if version < 2 {
 		migrateDBv1To2()
 	}
+	if version < 3 {
+		migrateDBv2To3()
+	}
 }
 
 func migrateDBv0() {
@@ -203,11 +226,33 @@ func migrateDBv1To2() {
 	db.MustExec(insert_version_table)
 }
 
+func migrateDBv2To3() {
+	insert_version_table := `delete from version; 
+		INSERT INTO version (id) VALUES (3)`
+	db.MustExec(create_messagemetadata_table)
+	db.MustExec(insert_version_table)
+}
+
 const create_scanmetadata_table string = `CREATE TABLE IF NOT EXISTS scanmetadata (
 	id serial PRIMARY KEY,
 	name VARCHAR(200),
 	search_path VARCHAR(2000),
 	search_filter VARCHAR(2000),
+	scan_id INT NOT NULL,
+	FOREIGN KEY (scan_id)
+		REFERENCES Scans (id)
+)`
+
+const create_messagemetadata_table string = `CREATE TABLE IF NOT EXISTS messagemetadata (
+	id serial PRIMARY KEY,
+	message_id VARCHAR(200),
+	thread_id VARCHAR(200),
+	date VARCHAR(200),
+	mail_from VARCHAR(500),
+	mail_to VARCHAR(500),
+	subject VARCHAR(2000),
+	size_estimate BIGINT,
+	labels VARCHAR(500),
 	scan_id INT NOT NULL,
 	FOREIGN KEY (scan_id)
 		REFERENCES Scans (id)
@@ -235,8 +280,23 @@ type ScanData struct {
 	ScanId       int            `db:"scan_id"`
 }
 
-func checkError(err error) {
+func substr(s string, end int) string {
+	if len(s) < end {
+		return s
+	}
+	counter := 0
+	for i := range s {
+		if counter == end {
+			return s[0:i]
+		}
+		counter++
+	}
+	return s
+}
+
+func checkError(err error, msg ...string) {
 	if err != nil {
+		fmt.Println(msg)
 		panic(err)
 	}
 }
