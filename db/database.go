@@ -117,6 +117,23 @@ func GetScansFromDb(pageNo int) ([]Scan, int) {
 	return scans, count
 }
 
+func GetMessageMetadataFromDb(scanId int, pageNo int) ([]MessageMetadataRead, int) {
+	limit := 10
+	offset := limit * (pageNo - 1)
+	count_rows := `select count(*) from messagemetadata where scan_id = $1`
+	read_row := `select id, message_id, thread_id, date, mail_from, mail_to,
+							 subject, size_estimate, labels, scan_id
+	             from messagemetadata 
+							 where scan_id = $1 order by id limit $2 offset $3`
+	messageMetadata := []MessageMetadataRead{}
+	var count int
+	err := db.Get(&count, count_rows, scanId)
+	checkError(err)
+	err = db.Select(&messageMetadata, read_row, scanId, limit, offset)
+	checkError(err)
+	return messageMetadata, count
+}
+
 func GetScanDataFromDb(scanId int, pageNo int) ([]ScanData, int) {
 	limit := 10
 	offset := limit * (pageNo - 1)
@@ -135,6 +152,11 @@ func DeleteScan(scanId int) {
 	delete_scandata := `delete from scandata
 	where scan_id = $1`
 	_, err := db.Exec(delete_scandata, scanId)
+	checkError(err)
+
+	delete_messagemetadata := `delete from messagemetadata
+	where scan_id = $1`
+	_, err = db.Exec(delete_messagemetadata, scanId)
 	checkError(err)
 
 	delete_scanmetadata := `delete from scanmetadata
@@ -278,6 +300,19 @@ type ScanData struct {
 	IsDir        sql.NullBool   `db:"is_dir"`
 	FileCount    sql.NullInt32  `db:"file_count"`
 	ScanId       int            `db:"scan_id"`
+}
+
+type MessageMetadataRead struct {
+	Id           int            `db:"id" json:"message_metadata_id"`
+	ScanId       int            `db:"scan_id"`
+	MessageId    sql.NullString `db:"message_id"`
+	ThreadId     sql.NullString `db:"thread_id"`
+	LabelIds     sql.NullString `db:"labels"`
+	From         sql.NullString `db:"mail_from"`
+	To           sql.NullString `db:"mail_to"`
+	Subject      sql.NullString
+	Date         sql.NullString
+	SizeEstimate sql.NullInt64 `db:"size_estimate"`
 }
 
 func substr(s string, end int) string {

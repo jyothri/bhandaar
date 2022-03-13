@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import ListScanData from "./ListScanData.svelte";
+  import MessageMetaData from "./MessageMetaData.svelte";
   import Pagination from "./Pagination.svelte";
 
   interface OptionalTime {
@@ -27,10 +28,12 @@
   let status = "loading...";
   let heading = "Scans";
   let maxPages = 0;
+  let scanType = "";
 
-  let loadScanData = async (scan_row: number) => {
+  let loadScanData = async (scan_row: number, scan_type: string) => {
     heading = `Scan Data for ${scan_row}`;
     scanId = scan_row;
+    scanType = scan_type;
     scans = [];
     status = "";
   };
@@ -93,7 +96,8 @@
 </script>
 
 <h1>{heading}</h1>
-<ListScanData bind:scanId />
+<ListScanData bind:scanId bind:scanType />
+<MessageMetaData bind:scanId bind:scanType />
 
 {#if scans.length > 0}
   <Pagination
@@ -116,7 +120,10 @@
       <tr>
         <td>{scan.scan_id}</td>
         <td>
-          <i class="material-icons" on:click={() => loadScanData(scan.scan_id)}>
+          <i
+            class="material-icons"
+            on:click={() => loadScanData(scan.scan_id, scan.ScanType)}
+          >
             forward
           </i>
         </td>

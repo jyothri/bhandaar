@@ -1,8 +1,11 @@
 <script lang="ts">
   import { afterUpdate } from "svelte";
+  import Utilities from "./Utilities.svelte";
   import Pagination from "./Pagination.svelte";
 
   export let scanId: number;
+  export let scanType: string;
+  let utilities;
 
   interface OptionalTime {
     Time: string;
@@ -53,6 +56,9 @@
 
   let fetchListScanData = async () => {
     if (scanId == prevScanId && prevPage == page) {
+      return;
+    }
+    if (scanType == "gmail") {
       return;
     }
     prevScanId = scanId;
@@ -115,6 +121,8 @@
   });
 </script>
 
+<Utilities bind:this={utilities} />
+
 {#if scandata.length > 0}
   <Pagination
     {page}
@@ -136,7 +144,7 @@
         <td>{scandatum.scan_data_id}</td>
         <td>{scandatum.Name.String}</td>
         <td>{scandatum.Path.String}</td>
-        <td>{@html getSize(scandatum.Size.Int64)}</td>
+        <td>{@html utilities.getSize(scandatum.Size.Int64)}</td>
         <td>{scandatum.ModifiedTime.Time}</td>
         <td>{scandatum.Md5Hash.String}</td>
       </tr>

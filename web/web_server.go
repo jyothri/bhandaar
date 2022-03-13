@@ -33,6 +33,10 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 		body = DoScanResponse{
 			ScanId: collect.CloudStorage(doScanRequest.Bucket),
 		}
+	case "Google Mail":
+		body = DoScanResponse{
+			ScanId: collect.Gmail(doScanRequest.Filter),
+		}
 	default:
 		body = DoScanResponse{
 			ScanId: -1,
@@ -63,6 +67,21 @@ func DeleteScanHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func ListMessageMetaDataHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	pageNo := getPageNumber(mux.Vars(r))
+	scanId, _ := getIntFromMap(vars, "scan_id")
+	messageMetadata, totResults := db.GetMessageMetadataFromDb(scanId, pageNo)
+	pageInfo := PaginationInfo{Page: pageNo, Size: totResults}
+	body := MessageMetadataResponse{
+		PageInfo:        pageInfo,
+		MessageMetadata: messageMetadata,
+	}
+	serializedBody, _ := json.Marshal(body)
+	setJsonHeader(w)
+	_, _ = w.Write(serializedBody)
+}
+
 func ListScanDataHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	pageNo := getPageNumber(mux.Vars(r))
@@ -88,6 +107,8 @@ func StartWebServer() {
 	api.HandleFunc("/scans", ListScansHandler).Methods("GET")
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET")
+	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET").Queries("page", "{page}")
+	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET")
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir("web/svelte/public"))).Methods("GET")
 	http.ListenAndServe(":8090", r)
 }
@@ -147,4 +168,9 @@ type DoScanRequest struct {
 
 type DoScanResponse struct {
 	ScanId int `json:"scan_id"`
+}
+
+type MessageMetadataResponse struct {
+	PageInfo        PaginationInfo           `json:"pagination_info"`
+	MessageMetadata []db.MessageMetadataRead `json:"message_metadata"`
 }

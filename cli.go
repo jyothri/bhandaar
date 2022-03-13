@@ -34,7 +34,7 @@ func main() {
 		case 3:
 			go collect.CloudStorage("jyo-pics")
 		case 4:
-			go collect.Gmail()
+			go collect.Gmail("label:inbox label:unread from:project baseline")
 		case 5:
 			go web.StartWebServer()
 		default:

@@ -10,6 +10,7 @@
     { id: 1, text: `Local` },
     { id: 2, text: `Google Drive` },
     { id: 3, text: `Google Storage` },
+    { id: 4, text: `Google Mail` },
   ];
   selected = options[0];
   const apiEndpoint = "http://localhost:8090";
@@ -44,6 +45,7 @@
         return;
       case 2:
       case 3:
+      case 4:
         readyToSubmit = true;
         return;
     }
@@ -94,6 +96,16 @@
         </div>
         <div class="column">
           <input id="filter" type="text" bind:value={bucket} />
+        </div>
+      </div>
+    {/if}
+    {#if selected.id == 4}
+      <div class="row">
+        <div class="column">
+          <label for="scanType">Query filter</label>
+        </div>
+        <div class="column">
+          <input id="filter" type="text" bind:value={filter} />
         </div>
       </div>
     {/if}

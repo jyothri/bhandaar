@@ -35,16 +35,16 @@ func init() {
 	checkError(err)
 }
 
-func Gmail() int {
+func Gmail(queryString string) int {
 	messageMetaData := make(chan db.MessageMetadata, 10)
 	scanId := db.LogStartScan("gmail")
-	go db.SaveScanMetadata("", "", scanId)
-	go startGmailScan(scanId, messageMetaData)
+	go db.SaveScanMetadata("", queryString, scanId)
+	go startGmailScan(scanId, queryString, messageMetaData)
 	go db.SaveMessageMetadataToDb(scanId, messageMetaData)
 	return scanId
 }
 
-func startGmailScan(scanId int, messageMetaData chan<- db.MessageMetadata) {
+func startGmailScan(scanId int, queryString string, messageMetaData chan<- db.MessageMetadata) {
 	lock.Lock()
 	defer lock.Unlock()
 	var wg sync.WaitGroup
@@ -53,7 +53,7 @@ func startGmailScan(scanId int, messageMetaData chan<- db.MessageMetadata) {
 	go logProgressToConsole(done, ticker)
 	throttler := rate.NewLimiter(50, 5)
 
-	messageListCall := gmailService.Users.Messages.List("me")
+	messageListCall := gmailService.Users.Messages.List("me").Q(queryString)
 	hasNextPage := true
 	for hasNextPage {
 		messageList, err := messageListCall.Do()
