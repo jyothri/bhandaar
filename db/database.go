@@ -73,6 +73,48 @@ func SaveMessageMetadataToDb(scanId int, messageMetaData <-chan MessageMetadata)
 	}
 }
 
+func SavePhotosMediaItemToDb(scanId int, photosMediaItem <-chan PhotosMediaItem) {
+	for {
+		pmi, more := <-photosMediaItem
+		if !more {
+			logCompleteScan(scanId)
+			break
+		}
+		insert_row := `insert into photosmediaitem 
+			(media_item_id, product_url, mime_type, filename, size, scan_id, file_mod_time, 
+				contributor_display_name) 
+		values 
+			($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
+		var err error
+		lastInsertId := 0
+		err = db.QueryRow(insert_row, pmi.MediaItemId, pmi.ProductUrl, pmi.MimeType, pmi.Filename,
+			pmi.Size, scanId, pmi.FileModTime, pmi.ContributorDisplayName).Scan(&lastInsertId)
+		checkError(err, fmt.Sprintf("While inserting to photosmediaitem mediaItemId:%v", pmi.MediaItemId))
+
+		switch pmi.MimeType[:5] {
+		case "image":
+			//e.g. image/jpeg image/png image/gif
+			insert_photo_row := `insert into photometadata 
+			(photos_media_item_id, camera_make, camera_model, focal_length, f_number, iso, exposure_time) 
+		values 
+			($1, $2, $3, $4, $5, $6, $7) RETURNING id`
+			_, err = db.Exec(insert_photo_row, lastInsertId, pmi.CameraMake, pmi.CameraModel, pmi.FocalLength,
+				pmi.FNumber, pmi.Iso, pmi.ExposureTime)
+			checkError(err, fmt.Sprintf("While inserting to photometadata mediaItemId:%v", pmi.MediaItemId))
+		case "video":
+			//e.g. video/mp4
+			insert_video_row := `insert into videometadata 
+			(photos_media_item_id, camera_make, camera_model, fps) 
+		values 
+			($1, $2, $3, $4) RETURNING id`
+			_, err = db.Exec(insert_video_row, lastInsertId, pmi.CameraMake, pmi.CameraModel, pmi.Fps)
+			checkError(err, fmt.Sprintf("While inserting to videometadata mediaItemId:%v", pmi.MediaItemId))
+		default:
+			fmt.Println("Unsupported mime type.")
+		}
+	}
+}
+
 func SaveStatToDb(scanId int, scanData <-chan FileData) {
 	for {
 		fd, more := <-scanData
@@ -164,6 +206,23 @@ func DeleteScan(scanId int) {
 	_, err = db.Exec(delete_scanmetadata, scanId)
 	checkError(err)
 
+	delete_photometadata := `delete from photometadata
+	where photos_media_item_id IN (select id from 
+		photosmediaitem where scan_id = $1)`
+	_, err = db.Exec(delete_photometadata, scanId)
+	checkError(err)
+
+	delete_videometadata := `delete from videometadata
+	where photos_media_item_id IN (select id from 
+		photosmediaitem where scan_id = $1)`
+	_, err = db.Exec(delete_videometadata, scanId)
+	checkError(err)
+
+	delete_photosmediaitem := `delete from photosmediaitem
+	where scan_id = $1`
+	_, err = db.Exec(delete_photosmediaitem, scanId)
+	checkError(err)
+
 	delete_scans := `delete from scans
 	where id = $1`
 	_, err = db.Exec(delete_scans, scanId)
@@ -204,6 +263,9 @@ func migrateDB() {
 	}
 	if version < 3 {
 		migrateDBv2To3()
+	}
+	if version < 4 {
+		migrateDBv3To4()
 	}
 }
 
@@ -255,6 +317,15 @@ func migrateDBv2To3() {
 	db.MustExec(insert_version_table)
 }
 
+func migrateDBv3To4() {
+	insert_version_table := `delete from version; 
+		INSERT INTO version (id) VALUES (4)`
+	db.MustExec(create_photosmediaitem_table)
+	db.MustExec(create_photometadata_table)
+	db.MustExec(create_videometadata_table)
+	db.MustExec(insert_version_table)
+}
+
 const create_scanmetadata_table string = `CREATE TABLE IF NOT EXISTS scanmetadata (
 	id serial PRIMARY KEY,
 	name VARCHAR(200),
@@ -278,6 +349,44 @@ const create_messagemetadata_table string = `CREATE TABLE IF NOT EXISTS messagem
 	scan_id INT NOT NULL,
 	FOREIGN KEY (scan_id)
 		REFERENCES Scans (id)
+)`
+
+const create_photosmediaitem_table string = `CREATE TABLE IF NOT EXISTS photosmediaitem (
+	id serial PRIMARY KEY NOT NULL,
+	media_item_id TEXT NOT NULL,
+	product_url  TEXT NOT NULL,
+	mime_type  TEXT,
+	filename TEXT NOT NULL,
+	size BIGINT,
+	file_mod_time TIMESTAMP,
+	md5hash TEXT,
+	scan_id INT NOT NULL,
+	contributor_display_name TEXT,
+	FOREIGN KEY (scan_id)
+		REFERENCES Scans (id)
+)`
+
+const create_photometadata_table string = `CREATE TABLE IF NOT EXISTS photometadata (
+	id serial PRIMARY KEY NOT NULL,
+	photos_media_item_id INT NOT NULL,
+	camera_make VARCHAR(500),
+	camera_model VARCHAR(500),
+  focal_length numeric,
+  f_number numeric,
+  iso INT,
+  exposure_time VARCHAR(500),
+	FOREIGN KEY (photos_media_item_id)
+		REFERENCES photosmediaitem (id)
+)`
+
+const create_videometadata_table string = `CREATE TABLE IF NOT EXISTS videometadata (
+	id serial PRIMARY KEY NOT NULL,
+	photos_media_item_id INT NOT NULL,
+	camera_make VARCHAR(500),
+	camera_model VARCHAR(500),
+  fps numeric,
+	FOREIGN KEY (photos_media_item_id)
+		REFERENCES photosmediaitem (id)
 )`
 
 type Scan struct {

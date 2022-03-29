@@ -36,6 +36,8 @@ func main() {
 		case 4:
 			go collect.Gmail("label:inbox label:unread from:project baseline")
 		case 5:
+			go collect.Photos("")
+		case 6:
 			go web.StartWebServer()
 		default:
 			fmt.Println("Invalid selection")
@@ -64,6 +66,7 @@ func printOptions() {
 	fmt.Println("2 Scan Google Drive")
 	fmt.Println("3 Scan Cloud Storage")
 	fmt.Println("4 Scan GMail")
-	fmt.Println("5 Start web server")
+	fmt.Println("5 Scan Google Photos")
+	fmt.Println("6 Start web server")
 	fmt.Print(" > ")
 }
