@@ -176,6 +176,23 @@ func GetMessageMetadataFromDb(scanId int, pageNo int) ([]MessageMetadataRead, in
 	return messageMetadata, count
 }
 
+func GetPhotosMediaItemFromDb(scanId int, pageNo int) ([]PhotosMediaItemRead, int) {
+	limit := 10
+	offset := limit * (pageNo - 1)
+	count_rows := `select count(*) from photosmediaitem where scan_id = $1`
+	read_row := `select id, media_item_id, product_url, mime_type, filename,
+								size, file_mod_time, md5hash, scan_id, contributor_display_name 
+								from photosmediaitem 
+							 where scan_id = $1 order by id limit $2 offset $3`
+	photosMediaItemRead := []PhotosMediaItemRead{}
+	var count int
+	err := db.Get(&count, count_rows, scanId)
+	checkError(err)
+	err = db.Select(&photosMediaItemRead, read_row, scanId, limit, offset)
+	checkError(err)
+	return photosMediaItemRead, count
+}
+
 func GetScanDataFromDb(scanId int, pageNo int) ([]ScanData, int) {
 	limit := 10
 	offset := limit * (pageNo - 1)
@@ -422,6 +439,19 @@ type MessageMetadataRead struct {
 	Subject      sql.NullString
 	Date         sql.NullString
 	SizeEstimate sql.NullInt64 `db:"size_estimate"`
+}
+
+type PhotosMediaItemRead struct {
+	Id                     int            `db:"id" json:"photos_media_item_id"`
+	ScanId                 int            `db:"scan_id"`
+	MediaItemId            string         `db:"media_item_id" json:"media_item_id"`
+	ProductUrl             string         `db:"product_url"`
+	MimeType               sql.NullString `db:"mime_type"`
+	Filename               string
+	Size                   sql.NullInt64
+	ModifiedTime           sql.NullTime `db:"file_mod_time"`
+	Md5hash                sql.NullString
+	ContributorDisplayName sql.NullString `db:"contributor_display_name"`
 }
 
 func substr(s string, end int) string {

@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import ListScanData from "./ListScanData.svelte";
   import MessageMetaData from "./MessageMetaData.svelte";
+  import Photos from "./Photos.svelte";
   import Pagination from "./Pagination.svelte";
 
   interface OptionalTime {
@@ -98,6 +99,7 @@
 <h1>{heading}</h1>
 <ListScanData bind:scanId bind:scanType />
 <MessageMetaData bind:scanId bind:scanType />
+<Photos bind:scanId bind:scanType />
 
 {#if scans.length > 0}
   <Pagination

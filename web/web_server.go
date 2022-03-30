@@ -82,6 +82,21 @@ func ListMessageMetaDataHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(serializedBody)
 }
 
+func ListPhotosHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	pageNo := getPageNumber(mux.Vars(r))
+	scanId, _ := getIntFromMap(vars, "scan_id")
+	photosMediaItem, totResults := db.GetPhotosMediaItemFromDb(scanId, pageNo)
+	pageInfo := PaginationInfo{Page: pageNo, Size: totResults}
+	body := PhotosMediaItemResponse{
+		PageInfo:        pageInfo,
+		PhotosMediaItem: photosMediaItem,
+	}
+	serializedBody, _ := json.Marshal(body)
+	setJsonHeader(w)
+	_, _ = w.Write(serializedBody)
+}
+
 func ListScanDataHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	pageNo := getPageNumber(mux.Vars(r))
@@ -109,6 +124,8 @@ func StartWebServer() {
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET")
 	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET")
+	api.HandleFunc("/photos/{scan_id}", ListPhotosHandler).Methods("GET").Queries("page", "{page}")
+	api.HandleFunc("/photos/{scan_id}", ListPhotosHandler).Methods("GET")
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir("web/svelte/public"))).Methods("GET")
 	http.ListenAndServe(":8090", r)
 }
@@ -173,4 +190,9 @@ type DoScanResponse struct {
 type MessageMetadataResponse struct {
 	PageInfo        PaginationInfo           `json:"pagination_info"`
 	MessageMetadata []db.MessageMetadataRead `json:"message_metadata"`
+}
+
+type PhotosMediaItemResponse struct {
+	PageInfo        PaginationInfo           `json:"pagination_info"`
+	PhotosMediaItem []db.PhotosMediaItemRead `json:"photos_media_item"`
 }
