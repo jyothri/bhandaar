@@ -39,11 +39,11 @@ func init() {
 	checkError(err)
 }
 
-func CloudDrive(queryString string) int {
+func CloudDrive(driveScan GDriveScan) int {
 	scanData := make(chan db.FileData, 10)
 	scanId := db.LogStartScan("google_drive")
-	go db.SaveScanMetadata("", queryString, scanId)
-	go startCloudDrive(scanId, queryString, scanData)
+	go db.SaveScanMetadata("", driveScan.QueryString, scanId)
+	go startCloudDrive(scanId, driveScan.QueryString, scanData)
 	go db.SaveStatToDb(scanId, scanData)
 	return scanId
 }
@@ -98,4 +98,8 @@ func parseTime(inputTime string) time.Time {
 	parsedTime, err := time.Parse(time.RFC3339, inputTime)
 	checkError(err)
 	return parsedTime
+}
+
+type GDriveScan struct {
+	QueryString string
 }

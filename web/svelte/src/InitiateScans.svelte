@@ -1,29 +1,57 @@
 <script lang="ts">
-  let selected: any;
+  let selected: string;
   let readyToSubmit = false;
-  let localPath = "/scan";
-  let filter = "name contains 'tesla'";
-  let bucket = "jyo-pics";
   let submittedScans: number[] = [];
-  let options = [
-    { id: 0, text: `Select One` },
-    { id: 1, text: `Local` },
-    { id: 2, text: `Google Drive` },
-    { id: 3, text: `Google Storage` },
-    { id: 4, text: `Google Mail` },
-  ];
-  selected = options[0];
+  selected = "None";
   const apiEndpoint = "http://localhost:8090";
+
+  interface LocalScan {
+    Path: string;
+  }
+
+  interface GDriveScan {
+    QueryString: string;
+  }
+
+  interface GStorageScan {
+    Bucket: string;
+  }
+
+  interface GMailScan {
+    Filter: string;
+  }
+
+  interface GPhotosScan {}
+
+  enum ScanType {
+    Local = "Local",
+    GDrive = "GDrive",
+    GStorage = "GStorage",
+    GMail = "GMail",
+    GPhotos = "GPhotos",
+  }
+
+  interface ScanMetadata {
+    ScanType?: ScanType;
+    LocalScan: LocalScan;
+    GDriveScan: GDriveScan;
+    GStorageScan: GStorageScan;
+    GMailScan: GMailScan;
+    GPhotosScan: GPhotosScan;
+  }
+
+  let scanMetadata: ScanMetadata = {
+    LocalScan: { Path: "" },
+    GDriveScan: { QueryString: "" },
+    GStorageScan: { Bucket: "" },
+    GMailScan: { Filter: "" },
+    GPhotosScan: {},
+  };
 
   async function submit() {
     const res = await fetch(`${apiEndpoint}/api/scans`, {
       method: "POST",
-      body: JSON.stringify({
-        scan_type: selected.text,
-        localPath,
-        filter,
-        gs_bucket: bucket,
-      }),
+      body: JSON.stringify(scanMetadata),
     });
     const json = await res.json();
     submittedScans.push(json.scan_id);
@@ -31,21 +59,29 @@
   }
 
   function validate() {
-    switch (selected.id) {
-      case 0:
+    switch (selected) {
+      case "None":
       default:
         readyToSubmit = false;
         return;
-      case 1:
-        if (localPath == "") {
+      case "Local":
+        scanMetadata.ScanType = ScanType.Local;
+        if (scanMetadata.LocalScan.Path == "") {
           readyToSubmit = false;
           return;
         }
         readyToSubmit = true;
         return;
-      case 2:
-      case 3:
-      case 4:
+      case "GDrive":
+        scanMetadata.ScanType = ScanType.GDrive;
+        readyToSubmit = true;
+        return;
+      case "GStorage":
+        scanMetadata.ScanType = ScanType.GStorage;
+        readyToSubmit = true;
+        return;
+      case "GMail":
+        scanMetadata.ScanType = ScanType.GMail;
         readyToSubmit = true;
         return;
     }
@@ -60,52 +96,74 @@
       </div>
       <div class="column">
         <select id="scanType" bind:value={selected} on:change={validate}>
-          {#each options as option}
-            <option value={option}>
-              {option.text}
+          <option value="None"> Select One </option>
+          {#each Object.keys(ScanType) as scanType}
+            <option value={scanType}>
+              {scanType}
             </option>
           {/each}
         </select>
       </div>
     </div>
-    {#if selected.id == 1}
+
+    {#if selected == "Local"}
       <div class="row">
         <div class="column">
           <label for="scanType">Local Path</label>
         </div>
         <div class="column">
-          <input id="path" type="text" bind:value={localPath} />
+          <input
+            id="path"
+            type="text"
+            on:change={validate}
+            bind:value={scanMetadata.LocalScan.Path}
+          />
         </div>
       </div>
     {/if}
-
-    {#if selected.id == 2}
+    {#if selected == "GDrive"}
       <div class="row">
         <div class="column">
           <label for="scanType">File filter</label>
         </div>
         <div class="column">
-          <input id="filter" type="text" bind:value={filter} />
+          <input
+            id="filter"
+            type="text"
+            on:change={validate}
+            bind:value={scanMetadata.GDriveScan.QueryString}
+          />
         </div>
       </div>
     {/if}
-    {#if selected.id == 3}
+    {#if selected == "GStorage"}
       <div class="row">
         <div class="column">
           <label for="scanType">Google Storage Bucket</label>
         </div>
         <div class="column">
-          <input id="filter" type="text" bind:value={bucket} />
+          <input
+            id="filter"
+            type="text"
+            on:change={validate}
+            bind:value={scanMetadata.GStorageScan.Bucket}
+          />
         </div>
       </div>
     {/if}
-    {#if selected.id == 4}
+
+    {#if selected == "GMail"}
       <div class="row">
         <div class="column">
           <label for="scanType">Query filter</label>
         </div>
         <div class="column">
-          <input id="filter" type="text" bind:value={filter} />
+          <input
+            id="filter"
+            type="text"
+            on:change={validate}
+            bind:value={scanMetadata.GMailScan.Filter}
+          />
         </div>
       </div>
     {/if}

@@ -12,11 +12,12 @@ import (
 	"github.com/jyothri/hdd/db"
 )
 
-func LocalDrive(parentDir string) int {
+func LocalDrive(localScan LocalScan) int {
 	scanData := make(chan db.FileData, 10)
 	scanId := db.LogStartScan("local")
-	go db.SaveScanMetadata("dir="+parentDir, "", scanId)
-	go startCollectStats(scanId, parentDir, scanData)
+	path := localScan.Path
+	go db.SaveScanMetadata("dir="+path, "", scanId)
+	go startCollectStats(scanId, path, scanData)
 	go db.SaveStatToDb(scanId, scanData)
 	return scanId
 }
@@ -92,4 +93,8 @@ func getMd5ForFile(filePath string) string {
 	_, err = io.Copy(hash, file)
 	checkError(err)
 	return fmt.Sprintf("%x", hash.Sum(nil))
+}
+
+type LocalScan struct {
+	Path string
 }

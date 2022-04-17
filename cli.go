@@ -30,11 +30,20 @@ func main() {
 		case 1:
 			optionLocalDrive()
 		case 2:
-			go collect.CloudDrive("name contains 'tesla'")
+			driveScan := collect.GDriveScan{
+				QueryString: "name contains 'tesla'",
+			}
+			go collect.CloudDrive(driveScan)
 		case 3:
-			go collect.CloudStorage("jyo-pics")
+			storageScan := collect.GStorageScan{
+				Bucket: "jyo-pics",
+			}
+			go collect.CloudStorage(storageScan)
 		case 4:
-			go collect.Gmail("label:inbox label:unread from:project baseline")
+			gmailScan := collect.GMailScan{
+				Filter: "label:inbox label:unread from:project baseline",
+			}
+			go collect.Gmail(gmailScan)
 		case 5:
 			go collect.Photos("")
 		case 6:
@@ -55,7 +64,10 @@ func optionLocalDrive() {
 		fmt.Scan(&newParentDir)
 		parentDir = newParentDir
 	}
-	go collect.LocalDrive(parentDir)
+	localScan := collect.LocalScan{
+		Path: parentDir,
+	}
+	go collect.LocalDrive(localScan)
 }
 
 func printOptions() {

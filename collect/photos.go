@@ -344,3 +344,5 @@ type SearchMediaItemRequest struct {
 	PageToken string `json:"pageToken"`
 	OrderBy   string `json:"orderBy"`
 }
+
+type GPhotosScan struct{}

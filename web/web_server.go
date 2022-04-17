@@ -23,19 +23,19 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 	switch doScanRequest.ScanType {
 	case "Local":
 		body = DoScanResponse{
-			ScanId: collect.LocalDrive(doScanRequest.LocalPath),
+			ScanId: collect.LocalDrive(doScanRequest.LocalScan),
 		}
-	case "Google Drive":
+	case "GDrive":
 		body = DoScanResponse{
-			ScanId: collect.CloudDrive(doScanRequest.Filter),
+			ScanId: collect.CloudDrive(doScanRequest.GDriveScan),
 		}
-	case "Google Storage":
+	case "GStorage":
 		body = DoScanResponse{
-			ScanId: collect.CloudStorage(doScanRequest.Bucket),
+			ScanId: collect.CloudStorage(doScanRequest.GStorageScan),
 		}
-	case "Google Mail":
+	case "GMail":
 		body = DoScanResponse{
-			ScanId: collect.Gmail(doScanRequest.Filter),
+			ScanId: collect.Gmail(doScanRequest.GMailScan),
 		}
 	default:
 		body = DoScanResponse{
@@ -177,10 +177,12 @@ type ScanDataResponse struct {
 }
 
 type DoScanRequest struct {
-	ScanType  string `json:"scan_type"`
-	LocalPath string `json:"localPath"`
-	Filter    string `json:"filter"`
-	Bucket    string `json:"gs_bucket"`
+	ScanType     string `json:"scanType"`
+	LocalScan    collect.LocalScan
+	GDriveScan   collect.GDriveScan
+	GStorageScan collect.GStorageScan
+	GMailScan    collect.GMailScan
+	GPhotosScan  collect.GPhotosScan
 }
 
 type DoScanResponse struct {

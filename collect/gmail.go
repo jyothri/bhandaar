@@ -35,11 +35,11 @@ func init() {
 	checkError(err)
 }
 
-func Gmail(queryString string) int {
+func Gmail(gMailScan GMailScan) int {
 	messageMetaData := make(chan db.MessageMetadata, 10)
 	scanId := db.LogStartScan("gmail")
-	go db.SaveScanMetadata("", queryString, scanId)
-	go startGmailScan(scanId, queryString, messageMetaData)
+	go db.SaveScanMetadata("", gMailScan.Filter, scanId)
+	go startGmailScan(scanId, gMailScan.Filter, messageMetaData)
 	go db.SaveMessageMetadataToDb(scanId, messageMetaData)
 	return scanId
 }
@@ -127,4 +127,8 @@ func logProgressToConsole(done <-chan bool, ticker *time.Ticker) {
 			fmt.Printf("At: %v. Processed= %v, in-progress= %v\n", t, counter_processed, counter_pending)
 		}
 	}
+}
+
+type GMailScan struct {
+	Filter string
 }

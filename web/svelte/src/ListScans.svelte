@@ -20,13 +20,11 @@
 
   const pageSize = 10;
   const apiEndpoint = "http://localhost:8090";
-  let scanId = 0;
   let scans: Scans[] = [];
   let totalScans = 0;
   let page = 1;
   let status = "loading...";
   let maxPages = 0;
-  let scanType = "";
 
   let deleteScan = async (scanId: number) => {
     try {

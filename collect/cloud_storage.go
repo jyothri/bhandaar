@@ -10,11 +10,11 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-func CloudStorage(bucketName string) int {
+func CloudStorage(gStorageScan GStorageScan) int {
 	scanData := make(chan db.FileData, 10)
 	scanId := db.LogStartScan("google_storage")
-	go db.SaveScanMetadata("bucket="+bucketName, "", scanId)
-	go startCloudStorage(scanId, bucketName, scanData)
+	go db.SaveScanMetadata("bucket="+gStorageScan.Bucket, "", scanId)
+	go startCloudStorage(scanId, gStorageScan.Bucket, scanData)
 	go db.SaveStatToDb(scanId, scanData)
 	return scanId
 }
@@ -62,4 +62,8 @@ func getFileName(objectPath string) string {
 		panic("Does not have a valid filename. ObjectPath:" + objectPath)
 	}
 	return fileParts[len(fileParts)-1]
+}
+
+type GStorageScan struct {
+	Bucket string
 }
