@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { afterUpdate } from "svelte";
+  import { onMount } from "svelte";
   import Pagination from "./Pagination.svelte";
   import Utilities from "./Utilities.svelte";
 
   export let scanId: number;
-  export let scanType: string;
+  export let params: { [key: string]: string } = {};
   let utilities: any;
 
   class OptionalString {
@@ -49,9 +49,6 @@
     if (scanId == prevScanId && prevPage == page) {
       return;
     }
-    if (scanType != "photos") {
-      return;
-    }
     prevScanId = scanId;
     prevPage = page;
     status = "loading...";
@@ -87,14 +84,17 @@
     await fetchListPhotosData();
   };
 
-  afterUpdate(() => {
+  onMount(async () => {
+    scanId = parseInt(params.scanId);
     if (scanId > 0) {
-      fetchListPhotosData();
+      await fetchListPhotosData();
     }
   });
 </script>
 
 <Utilities bind:this={utilities} />
+
+<h1>Photos data for scan: {scanId}</h1>
 
 {#if photosMediaItems.length > 0}
   <Pagination

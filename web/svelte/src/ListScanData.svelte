@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { afterUpdate } from "svelte";
+  import { onMount } from "svelte";
   import Utilities from "./Utilities.svelte";
   import Pagination from "./Pagination.svelte";
 
   export let scanId: number;
   export let scanType: string;
+  export let params: { [key: string]: string } = {};
   let utilities;
 
   interface OptionalTime {
@@ -58,9 +59,6 @@
     if (scanId == prevScanId && prevPage == page) {
       return;
     }
-    if (scanType == "gmail" || scanType == "photos") {
-      return;
-    }
     prevScanId = scanId;
     prevPage = page;
     status = "loading...";
@@ -96,15 +94,17 @@
     await fetchListScanData();
   };
 
-  afterUpdate(() => {
+  onMount(async () => {
+    scanId = parseInt(params.scanId);
+    scanType = params.scanType;
     if (scanId > 0) {
-      fetchListScanData();
+      await fetchListScanData();
     }
   });
 </script>
 
 <Utilities bind:this={utilities} />
-
+<h1>Scan data for {scanId}</h1>
 {#if scandata.length > 0}
   <Pagination
     {page}
@@ -133,7 +133,7 @@
     {/each}
   </table>
 {:else}
-  <!-- this block renders when there are no scans -->
+  <!-- this block renders when there is no data -->
   <p>{status}</p>
 {/if}
 

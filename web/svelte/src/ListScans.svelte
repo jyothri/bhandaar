@@ -1,9 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import ListScanData from "./ListScanData.svelte";
-  import MessageMetaData from "./MessageMetaData.svelte";
-  import Photos from "./Photos.svelte";
   import Pagination from "./Pagination.svelte";
+  import { link } from "svelte-spa-router";
 
   interface OptionalTime {
     Time: string;
@@ -27,17 +25,8 @@
   let totalScans = 0;
   let page = 1;
   let status = "loading...";
-  let heading = "Scans";
   let maxPages = 0;
   let scanType = "";
-
-  let loadScanData = async (scan_row: number, scan_type: string) => {
-    heading = `Scan Data for ${scan_row}`;
-    scanId = scan_row;
-    scanType = scan_type;
-    scans = [];
-    status = "";
-  };
 
   let deleteScan = async (scanId: number) => {
     try {
@@ -96,10 +85,7 @@
   });
 </script>
 
-<h1>{heading}</h1>
-<ListScanData bind:scanId bind:scanType />
-<MessageMetaData bind:scanId bind:scanType />
-<Photos bind:scanId bind:scanType />
+<h1>Scans</h1>
 
 {#if scans.length > 0}
   <Pagination
@@ -122,12 +108,9 @@
       <tr>
         <td>{scan.scan_id}</td>
         <td>
-          <i
-            class="material-icons"
-            on:click={() => loadScanData(scan.scan_id, scan.ScanType)}
-          >
-            forward
-          </i>
+          <a href="/scan/{scan.ScanType}/{scan.scan_id}" use:link>
+            <i class="material-icons">forward</i>
+          </a>
         </td>
         <td>{scan.ScanType}</td>
         <td>{scan.ScanStartTime}</td>

@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { afterUpdate } from "svelte";
+  import { onMount } from "svelte";
   import Pagination from "./Pagination.svelte";
   import Utilities from "./Utilities.svelte";
 
   export let scanId: number;
-  export let scanType: string;
+  export let params: { [key: string]: string } = {};
   let utilities: any;
 
   class OptionalString {
@@ -44,9 +44,6 @@
     if (scanId == prevScanId && prevPage == page) {
       return;
     }
-    if (scanType != "gmail") {
-      return;
-    }
     prevScanId = scanId;
     prevPage = page;
     status = "loading...";
@@ -82,15 +79,17 @@
     await fetchListMessageMetaData();
   };
 
-  afterUpdate(() => {
+  onMount(async () => {
+    scanId = parseInt(params.scanId);
     if (scanId > 0) {
-      fetchListMessageMetaData();
+      await fetchListMessageMetaData();
     }
   });
 </script>
 
 <Utilities bind:this={utilities} />
 
+<h1>GMail data for scan: {scanId}</h1>
 {#if messageMetadata.length > 0}
   <Pagination
     {page}

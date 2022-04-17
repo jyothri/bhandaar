@@ -1,14 +1,10 @@
-<script lang="ts">
-  export let heading: string;
-</script>
-
-<h1>{heading}</h1>
+<h1>Page Not Found</h1>
 
 <style>
   h1 {
-    color: #0015ff;
+    color: #ff3e00;
     text-transform: uppercase;
-    font-size: 4em;
+    font-size: 3em;
     font-weight: 100;
   }
 
