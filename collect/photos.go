@@ -39,26 +39,26 @@ func init() {
 	client.Timeout = 10 * time.Second
 }
 
-func Photos(queryString string) int {
+func Photos(photosScan GPhotosScan) int {
 	photosMediaItem := make(chan db.PhotosMediaItem, 10)
 	scanId := db.LogStartScan("photos")
-	go db.SaveScanMetadata("", queryString, scanId)
-	go startPhotosScan(scanId, queryString, photosMediaItem)
+	go db.SaveScanMetadata("", "", scanId)
+	go startPhotosScan(scanId, photosScan, photosMediaItem)
 	go db.SavePhotosMediaItemToDb(scanId, photosMediaItem)
 	return scanId
 }
 
-func startPhotosScan(scanId int, queryString string, photosMediaItem chan<- db.PhotosMediaItem) {
+func startPhotosScan(scanId int, photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMediaItem) {
 	lock.Lock()
 	defer lock.Unlock()
 	ticker := time.NewTicker(5 * time.Second)
 	done := make(chan bool)
 	go logProgressToConsole(done, ticker)
 	var wg sync.WaitGroup
-	if queryString != "" {
-		listMediaItemsForAlbum(queryString, photosMediaItem, &wg)
+	if photosScan.AlbumId != "" {
+		listMediaItemsForAlbum(photosScan, photosMediaItem, &wg)
 	} else {
-		listMediaItems(photosMediaItem, &wg)
+		listMediaItems(photosScan, photosMediaItem, &wg)
 	}
 	wg.Wait()
 	done <- true
@@ -66,9 +66,12 @@ func startPhotosScan(scanId int, queryString string, photosMediaItem chan<- db.P
 	close(photosMediaItem)
 }
 
-func processMediaItem(mediaItem MediaItem, photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGroup) {
+func processMediaItem(photosScan GPhotosScan, mediaItem MediaItem, photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGroup) {
 	defer wg.Done()
-	size := getContentSize(mediaItem.BaseUrl, mediaItem.MimeType)
+	var size int64 = -1
+	if photosScan.FetchSize {
+		size = getContentSize(mediaItem.BaseUrl, mediaItem.MimeType)
+	}
 	var cameraMake string
 	var cameraModel string
 	var fNumber float32
@@ -149,7 +152,7 @@ func ListAlbums() []Album {
 	return albums
 }
 
-func listMediaItemsForAlbum(albumId string, photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGroup) {
+func listMediaItemsForAlbum(photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGroup) {
 	var retries int = 25
 	url := photosApiBaseUrl + "v1/mediaItems:search"
 	nextPageToken := ""
@@ -158,7 +161,7 @@ func listMediaItemsForAlbum(albumId string, photosMediaItem chan<- db.PhotosMedi
 		err := throttler.Wait(context.Background())
 		checkError(err, fmt.Sprintf("Error with limiter: %s", err))
 		nextPageUrl := url + "?pageToken=" + nextPageToken
-		request := &SearchMediaItemRequest{AlbumId: albumId}
+		request := &SearchMediaItemRequest{AlbumId: photosScan.AlbumId}
 		reqJson, err := json.Marshal(request)
 		checkError(err)
 		reqBody := strings.NewReader(string(reqJson))
@@ -167,7 +170,7 @@ func listMediaItemsForAlbum(albumId string, photosMediaItem chan<- db.PhotosMedi
 		resp, err := client.Do(req)
 		checkError(err)
 		if resp.StatusCode != 200 {
-			fmt.Printf("Unexepcted response status code %v", resp.StatusCode)
+			fmt.Printf("Unexpected response status code %v", resp.StatusCode)
 			rb, _ := io.ReadAll(resp.Body)
 			fmt.Printf("Response %v\n", string(rb))
 			if retries == 0 {
@@ -185,7 +188,7 @@ func listMediaItemsForAlbum(albumId string, photosMediaItem chan<- db.PhotosMedi
 		for _, mediaItem := range listMediaItemResponse.MediaItems {
 			err := throttler.Wait(context.Background())
 			checkError(err, fmt.Sprintf("Error with limiter: %s", err))
-			processMediaItem(mediaItem, photosMediaItem, wg)
+			processMediaItem(photosScan, mediaItem, photosMediaItem, wg)
 		}
 		if len(nextPageToken) == 0 {
 			hasNextPage = false
@@ -193,7 +196,7 @@ func listMediaItemsForAlbum(albumId string, photosMediaItem chan<- db.PhotosMedi
 	}
 }
 
-func listMediaItems(photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGroup) {
+func listMediaItems(photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGroup) {
 	var retries int = 25
 	url := photosApiBaseUrl + "v1/mediaItems"
 	nextPageToken := ""
@@ -207,7 +210,7 @@ func listMediaItems(photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGrou
 		resp, err := client.Do(req)
 		checkError(err)
 		if resp.StatusCode != 200 {
-			fmt.Printf("Unexepcted response status code %v", resp.StatusCode)
+			fmt.Printf("Unexpected response status code %v", resp.StatusCode)
 			rb, _ := io.ReadAll(resp.Body)
 			fmt.Printf("Response %v\n", string(rb))
 			if retries == 0 {
@@ -225,7 +228,7 @@ func listMediaItems(photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGrou
 		for _, mediaItem := range listMediaItemResponse.MediaItems {
 			err := throttler.Wait(context.Background())
 			checkError(err, fmt.Sprintf("Error with limiter: %s", err))
-			processMediaItem(mediaItem, photosMediaItem, wg)
+			processMediaItem(photosScan, mediaItem, photosMediaItem, wg)
 		}
 		if len(nextPageToken) == 0 {
 			hasNextPage = false
@@ -255,7 +258,7 @@ func getContentSize(url string, mimeType string) int64 {
 			continue
 		}
 		if resp.StatusCode != 200 {
-			fmt.Printf("Unexepcted response status code %v", resp.StatusCode)
+			fmt.Printf("Unexpected response status code %v", resp.StatusCode)
 			rb, _ := io.ReadAll(resp.Body)
 			fmt.Printf("Response %v\n", string(rb))
 			fmt.Printf("Will retry %v times\n", retries)
@@ -345,4 +348,8 @@ type SearchMediaItemRequest struct {
 	OrderBy   string `json:"orderBy"`
 }
 
-type GPhotosScan struct{}
+type GPhotosScan struct {
+	AlbumId      string
+	FetchSize    bool
+	FetchMd5Hash bool
+}

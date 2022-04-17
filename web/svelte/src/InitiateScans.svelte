@@ -2,6 +2,8 @@
   let selected: string;
   let readyToSubmit = false;
   let submittedScans: number[] = [];
+  let albums: Album[] = [];
+  let status: string = "";
   selected = "None";
   const apiEndpoint = "http://localhost:8090";
 
@@ -21,7 +23,11 @@
     Filter: string;
   }
 
-  interface GPhotosScan {}
+  interface GPhotosScan {
+    AlbumId: string;
+    FetchSize: boolean;
+    FetchMd5Hash: boolean;
+  }
 
   enum ScanType {
     Local = "Local",
@@ -40,12 +46,25 @@
     GPhotosScan: GPhotosScan;
   }
 
+  interface Album {
+    Id: string;
+    Title: string;
+    ProductUrl: string;
+    MediaItemsCount: string;
+    CoverPhotoBaseUrl: string;
+    CoverPhotoMediaItemId: string;
+  }
+
   let scanMetadata: ScanMetadata = {
     LocalScan: { Path: "" },
     GDriveScan: { QueryString: "" },
     GStorageScan: { Bucket: "" },
     GMailScan: { Filter: "" },
-    GPhotosScan: {},
+    GPhotosScan: {
+      AlbumId: "",
+      FetchSize: false,
+      FetchMd5Hash: false,
+    },
   };
 
   async function submit() {
@@ -57,6 +76,23 @@
     submittedScans.push(json.scan_id);
     submittedScans = submittedScans; // needed for svelte to react.
   }
+
+  let fetchListAlbums = async () => {
+    try {
+      status = "fetching albums";
+      const res = await fetch(`${apiEndpoint}/api/photos/albums`);
+      let response = await res.json();
+      let albumSize = response.pagination_info.size;
+      if (albumSize == 0) {
+        status = "no albums";
+        return;
+      }
+      albums = response.albums;
+      status = "";
+    } catch (err) {
+      status = "error getting albums";
+    }
+  };
 
   function validate() {
     switch (selected) {
@@ -82,6 +118,13 @@
         return;
       case "GMail":
         scanMetadata.ScanType = ScanType.GMail;
+        readyToSubmit = true;
+        return;
+      case "GPhotos":
+        if (albums.length == 0) {
+          fetchListAlbums();
+        }
+        scanMetadata.ScanType = ScanType.GPhotos;
         readyToSubmit = true;
         return;
     }
@@ -168,6 +211,55 @@
       </div>
     {/if}
 
+    {#if selected == "GPhotos"}
+      <div class="row">
+        <div class="column">
+          <label for="scanType">Albums selection</label>
+        </div>
+        <div class="column">
+          <select
+            id="scanType"
+            bind:value={scanMetadata.GPhotosScan.AlbumId}
+            on:change={validate}
+          >
+            <option value=""> All Albums </option>
+            {#each albums as album}
+              <option value={album.Id}>
+                {album.Title}
+              </option>
+            {/each}
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="column">
+          <label for="scanType">Accurate Size:</label>
+        </div>
+        <div class="column">
+          <label>
+            <input
+              type="radio"
+              bind:group={scanMetadata.GPhotosScan.FetchSize}
+              name="fetchSize"
+              value={false}
+              on:change={validate}
+            />
+            No
+          </label>
+          <label>
+            <input
+              type="radio"
+              bind:group={scanMetadata.GPhotosScan.FetchSize}
+              name="fetchSize"
+              value={true}
+              on:change={validate}
+            />
+            Yes
+          </label>
+        </div>
+      </div>
+    {/if}
+
     <div class="row">
       <div class="column center">
         <input
@@ -179,6 +271,8 @@
       </div>
     </div>
   </form>
+
+  <p>{status}</p>
 
   {#each submittedScans as submittedScanId}
     <div class="row">
@@ -231,6 +325,10 @@
 
   input[type="button"]:disabled {
     background-color: #acacbb;
+  }
+
+  label {
+    padding-right: 1.5em;
   }
 
   /* Responsive layout - when the screen is less than 600px wide, make the two columns stack on top of each other instead of next to each other */

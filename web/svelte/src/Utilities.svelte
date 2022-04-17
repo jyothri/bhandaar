@@ -1,5 +1,8 @@
 <script lang="ts">
   export const getSize = (bytes: number) => {
+    if (bytes < 0) {
+      return "N/A";
+    }
     if (bytes < 1024) {
       return Math.round(bytes) + " B";
     }

@@ -37,6 +37,10 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 		body = DoScanResponse{
 			ScanId: collect.Gmail(doScanRequest.GMailScan),
 		}
+	case "GPhotos":
+		body = DoScanResponse{
+			ScanId: collect.Photos(doScanRequest.GPhotosScan),
+		}
 	default:
 		body = DoScanResponse{
 			ScanId: -1,
@@ -76,6 +80,18 @@ func ListMessageMetaDataHandler(w http.ResponseWriter, r *http.Request) {
 	body := MessageMetadataResponse{
 		PageInfo:        pageInfo,
 		MessageMetadata: messageMetadata,
+	}
+	serializedBody, _ := json.Marshal(body)
+	setJsonHeader(w)
+	_, _ = w.Write(serializedBody)
+}
+
+func ListAlbumsHandler(w http.ResponseWriter, r *http.Request) {
+	albums := collect.ListAlbums()
+	pageInfo := PaginationInfo{Page: 1, Size: len(albums)}
+	body := ListAlbumsResponse{
+		PageInfo: pageInfo,
+		Albums:   albums,
 	}
 	serializedBody, _ := json.Marshal(body)
 	setJsonHeader(w)
@@ -124,6 +140,7 @@ func StartWebServer() {
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET")
 	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET")
+	api.HandleFunc("/photos/albums", ListAlbumsHandler).Methods("GET")
 	api.HandleFunc("/photos/{scan_id}", ListPhotosHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/photos/{scan_id}", ListPhotosHandler).Methods("GET")
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir("web/svelte/public"))).Methods("GET")
@@ -177,7 +194,7 @@ type ScanDataResponse struct {
 }
 
 type DoScanRequest struct {
-	ScanType     string `json:"scanType"`
+	ScanType     string
 	LocalScan    collect.LocalScan
 	GDriveScan   collect.GDriveScan
 	GStorageScan collect.GStorageScan
@@ -197,4 +214,9 @@ type MessageMetadataResponse struct {
 type PhotosMediaItemResponse struct {
 	PageInfo        PaginationInfo           `json:"pagination_info"`
 	PhotosMediaItem []db.PhotosMediaItemRead `json:"photos_media_item"`
+}
+
+type ListAlbumsResponse struct {
+	PageInfo PaginationInfo  `json:"pagination_info"`
+	Albums   []collect.Album `json:"albums"`
 }
