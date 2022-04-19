@@ -152,7 +152,7 @@
     {#if selected == "Local"}
       <div class="row">
         <div class="column">
-          <label for="scanType">Local Path</label>
+          <label for="path">Local Path</label>
         </div>
         <div class="column">
           <input
@@ -167,7 +167,7 @@
     {#if selected == "GDrive"}
       <div class="row">
         <div class="column">
-          <label for="scanType">File filter</label>
+          <label for="filter">File filter</label>
         </div>
         <div class="column">
           <input
@@ -182,7 +182,7 @@
     {#if selected == "GStorage"}
       <div class="row">
         <div class="column">
-          <label for="scanType">Google Storage Bucket</label>
+          <label for="filter">Google Storage Bucket</label>
         </div>
         <div class="column">
           <input
@@ -198,7 +198,7 @@
     {#if selected == "GMail"}
       <div class="row">
         <div class="column">
-          <label for="scanType">Query filter</label>
+          <label for="filter">Query filter</label>
         </div>
         <div class="column">
           <input
@@ -214,11 +214,11 @@
     {#if selected == "GPhotos"}
       <div class="row">
         <div class="column">
-          <label for="scanType">Albums selection</label>
+          <label for="album">Albums selection</label>
         </div>
         <div class="column">
           <select
-            id="scanType"
+            id="album"
             bind:value={scanMetadata.GPhotosScan.AlbumId}
             on:change={validate}
           >
@@ -233,29 +233,56 @@
       </div>
       <div class="row">
         <div class="column">
-          <label for="scanType">Accurate Size:</label>
+          <label for="fetchMd5Hash">Md5Hash:</label>
         </div>
         <div class="column">
-          <label>
-            <input
-              type="radio"
-              bind:group={scanMetadata.GPhotosScan.FetchSize}
-              name="fetchSize"
-              value={false}
-              on:change={validate}
-            />
-            No
-          </label>
-          <label>
-            <input
-              type="radio"
-              bind:group={scanMetadata.GPhotosScan.FetchSize}
-              name="fetchSize"
-              value={true}
-              on:change={validate}
-            />
-            Yes
-          </label>
+          <input
+            type="radio"
+            id="fetchMd5HashNo"
+            bind:group={scanMetadata.GPhotosScan.FetchMd5Hash}
+            name="fetchMd5Hash"
+            value={false}
+            on:change={validate}
+          />
+          <label for="fetchMd5HashNo">No</label>
+
+          <input
+            type="radio"
+            id="fetchMd5HashYes"
+            bind:group={scanMetadata.GPhotosScan.FetchMd5Hash}
+            name="fetchMd5Hash"
+            value={true}
+            on:change={validate}
+          />
+          <label for="fetchMd5HashYes">Yes</label>
+        </div>
+      </div>
+      <div class="row">
+        <div class="column">
+          <label for="fetchSize">Accurate Size:</label>
+        </div>
+        <div class="column">
+          <input
+            type="radio"
+            id="fetchSizeNo"
+            bind:group={scanMetadata.GPhotosScan.FetchSize}
+            name="fetchSize"
+            value={false}
+            disabled={scanMetadata.GPhotosScan.FetchMd5Hash}
+            on:change={validate}
+          />
+          <label for="fetchSizeNo">No</label>
+
+          <input
+            type="radio"
+            id="fetchSizeYes"
+            bind:group={scanMetadata.GPhotosScan.FetchSize}
+            name="fetchSize"
+            value={true}
+            disabled={scanMetadata.GPhotosScan.FetchMd5Hash}
+            on:change={validate}
+          />
+          <label for="fetchSizeYes">Yes</label>
         </div>
       </div>
     {/if}

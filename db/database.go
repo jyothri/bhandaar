@@ -82,13 +82,13 @@ func SavePhotosMediaItemToDb(scanId int, photosMediaItem <-chan PhotosMediaItem)
 		}
 		insert_row := `insert into photosmediaitem 
 			(media_item_id, product_url, mime_type, filename, size, scan_id, file_mod_time, 
-				contributor_display_name) 
+				contributor_display_name, md5hash) 
 		values 
-			($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
+			($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`
 		var err error
 		lastInsertId := 0
 		err = db.QueryRow(insert_row, pmi.MediaItemId, pmi.ProductUrl, pmi.MimeType, pmi.Filename,
-			pmi.Size, scanId, pmi.FileModTime, pmi.ContributorDisplayName).Scan(&lastInsertId)
+			pmi.Size, scanId, pmi.FileModTime, pmi.ContributorDisplayName, pmi.Md5hash).Scan(&lastInsertId)
 		checkError(err, fmt.Sprintf("While inserting to photosmediaitem mediaItemId:%v", pmi.MediaItemId))
 
 		switch pmi.MimeType[:5] {

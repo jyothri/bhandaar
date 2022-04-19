@@ -2,6 +2,8 @@ package collect
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -69,7 +71,10 @@ func startPhotosScan(scanId int, photosScan GPhotosScan, photosMediaItem chan<- 
 func processMediaItem(photosScan GPhotosScan, mediaItem MediaItem, photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGroup) {
 	defer wg.Done()
 	var size int64 = -1
-	if photosScan.FetchSize {
+	var md5Hash string
+	if photosScan.FetchMd5Hash {
+		size, md5Hash = getContentSizeAndHash(mediaItem.BaseUrl, mediaItem.MimeType)
+	} else if photosScan.FetchSize {
 		size = getContentSize(mediaItem.BaseUrl, mediaItem.MimeType)
 	}
 	var cameraMake string
@@ -105,6 +110,7 @@ func processMediaItem(photosScan GPhotosScan, mediaItem MediaItem, photosMediaIt
 		Iso:                    iso,
 		ExposureTime:           exposureTime,
 		Fps:                    fps,
+		Md5hash:                md5Hash,
 	}
 	layout := "2006-01-02T15:04:05Z"
 	str := mediaItem.MediaMetadata.CreationTime
@@ -234,6 +240,49 @@ func listMediaItems(photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMedi
 			hasNextPage = false
 		}
 	}
+}
+
+func getContentSizeAndHash(url string, mimeType string) (int64, string) {
+	var retries int = 5
+	var resp *http.Response
+	var err error
+	switch mimeType[:5] {
+	case "image":
+		//e.g. image/jpeg image/png image/gif
+		url = url + "=d"
+	case "video":
+		//e.g. video/mp4
+		url = url + "=dv"
+	default:
+		fmt.Printf("Unhandled mime type: %v\n", mimeType)
+	}
+	for retries > 0 {
+		resp, err = http.Get(url)
+		if err != nil {
+			fmt.Printf("Got error:%v. Will retry %v times\n", err, retries)
+			retries -= 1
+			continue
+		}
+		if resp.StatusCode != 200 {
+			fmt.Printf("Unexpected response status code %v", resp.StatusCode)
+			rb, _ := io.ReadAll(resp.Body)
+			fmt.Printf("Response %v\n", string(rb))
+			fmt.Printf("Will retry %v times\n", retries)
+			retries -= 1
+		}
+		break
+	}
+	if resp == nil || resp.StatusCode != 200 {
+		return 0, ""
+	}
+	defer resp.Body.Close()
+	contentLength, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
+	checkError(err)
+
+	hash := md5.New()
+	_, err = io.Copy(ioutil.Discard, io.TeeReader(resp.Body, hash))
+	checkError(err)
+	return contentLength, hex.EncodeToString(hash.Sum(nil))
 }
 
 func getContentSize(url string, mimeType string) int64 {
