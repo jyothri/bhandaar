@@ -95,7 +95,6 @@
   };
 
   onMount(async () => {
-    scanId = parseInt(params.scanId);
     scanType = params.scanType;
     if (scanId > 0) {
       await fetchListScanData();

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Pagination from "./Pagination.svelte";
-  import { link } from "svelte-spa-router";
+  import { Link } from "svelte-navigator";
 
   interface OptionalTime {
     Time: string;
@@ -106,9 +106,9 @@
       <tr>
         <td>{scan.scan_id}</td>
         <td>
-          <a href="/scan/{scan.ScanType}/{scan.scan_id}" use:link>
+          <Link to="scan/{scan.ScanType}/{scan.scan_id}">
             <i class="material-icons">forward</i>
-          </a>
+          </Link>
         </td>
         <td>{scan.ScanType}</td>
         <td>{scan.ScanStartTime}</td>

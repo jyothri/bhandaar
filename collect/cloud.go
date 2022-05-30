@@ -21,34 +21,38 @@ var paginationFields []string = []string{"nextPageToken", "incompleteSearch"}
 
 const pageSize = 1000
 
-var driveService *drive.Service
+var cloudConfig *oauth2.Config
 
 func init() {
-	config := &oauth2.Config{
+	cloudConfig = &oauth2.Config{
 		ClientID:     constants.OauthClientId,
 		ClientSecret: constants.OauthClientSecret,
 		Endpoint:     google.Endpoint,
 		Scopes:       []string{drive.DriveReadonlyScope},
 	}
+}
+
+func getDriveService(refreshToken string) *drive.Service {
 	tokenSrc := oauth2.Token{
-		RefreshToken: constants.RefreshToken,
+		RefreshToken: refreshToken,
 	}
 	ctx := context.Background()
-	var err error
-	driveService, err = drive.NewService(ctx, option.WithTokenSource(config.TokenSource(ctx, &tokenSrc)))
+	driveService, err := drive.NewService(ctx, option.WithTokenSource(cloudConfig.TokenSource(ctx, &tokenSrc)))
 	checkError(err)
+	return driveService
 }
 
 func CloudDrive(driveScan GDriveScan) int {
 	scanData := make(chan db.FileData, 10)
 	scanId := db.LogStartScan("google_drive")
+	driveService := getDriveService(driveScan.RefreshToken)
 	go db.SaveScanMetadata("", driveScan.QueryString, scanId)
-	go startCloudDrive(scanId, driveScan.QueryString, scanData)
+	go startCloudDrive(driveService, scanId, driveScan.QueryString, scanData)
 	go db.SaveStatToDb(scanId, scanData)
 	return scanId
 }
 
-func startCloudDrive(scanId int, queryString string, scanData chan<- db.FileData) {
+func startCloudDrive(driveService *drive.Service, scanId int, queryString string, scanData chan<- db.FileData) {
 	lock.Lock()
 	defer lock.Unlock()
 	filesListCall := driveService.Files.List().PageSize(pageSize).Q(queryString).Fields(googleapi.Field(strings.Join(append(addPrefix(fields, "files/"), paginationFields...), ",")))
@@ -101,5 +105,6 @@ func parseTime(inputTime string) time.Time {
 }
 
 type GDriveScan struct {
-	QueryString string
+	QueryString  string
+	RefreshToken string
 }

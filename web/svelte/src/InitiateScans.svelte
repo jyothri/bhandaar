@@ -1,18 +1,21 @@
 <script lang="ts">
+  import { token } from "./stores";
+  import OAuthLink from "./OAuthLink.svelte";
   let selected: string;
   let readyToSubmit = false;
   let submittedScans: number[] = [];
   let albums: Album[] = [];
   let status: string = "";
-  selected = "None";
   const apiEndpoint = "http://localhost:8090";
 
+  selected = "None";
   interface LocalScan {
     Path: string;
   }
 
   interface GDriveScan {
     QueryString: string;
+    RefreshToken: string;
   }
 
   interface GStorageScan {
@@ -21,12 +24,14 @@
 
   interface GMailScan {
     Filter: string;
+    RefreshToken: string;
   }
 
   interface GPhotosScan {
     AlbumId: string;
     FetchSize: boolean;
     FetchMd5Hash: boolean;
+    RefreshToken: string;
   }
 
   enum ScanType {
@@ -57,13 +62,14 @@
 
   let scanMetadata: ScanMetadata = {
     LocalScan: { Path: "" },
-    GDriveScan: { QueryString: "" },
+    GDriveScan: { QueryString: "", RefreshToken: $token },
     GStorageScan: { Bucket: "" },
-    GMailScan: { Filter: "" },
+    GMailScan: { Filter: "", RefreshToken: $token },
     GPhotosScan: {
       AlbumId: "",
       FetchSize: false,
       FetchMd5Hash: false,
+      RefreshToken: $token,
     },
   };
 
@@ -80,7 +86,9 @@
   let fetchListAlbums = async () => {
     try {
       status = "fetching albums";
-      const res = await fetch(`${apiEndpoint}/api/photos/albums`);
+      const res = await fetch(
+        `${apiEndpoint}/api/photos/albums?refresh_token=${$token}`
+      );
       let response = await res.json();
       let albumSize = response.pagination_info.size;
       if (albumSize == 0) {
@@ -161,6 +169,14 @@
             on:change={validate}
             bind:value={scanMetadata.LocalScan.Path}
           />
+        </div>
+      </div>
+    {/if}
+    {#if selected == "GDrive" || selected == "GMail" || selected == "GPhotos"}
+      <div class="row">
+        <div class="column" />
+        <div class="column">
+          <OAuthLink />
         </div>
       </div>
     {/if}

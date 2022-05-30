@@ -21,12 +21,12 @@ import (
 	"golang.org/x/time/rate"
 )
 
-var client *http.Client
 var photosApiBaseUrl = "https://photoslibrary.googleapis.com/"
 var throttler = rate.NewLimiter(150, 10)
+var photosConfig *oauth2.Config
 
 func init() {
-	config := &oauth2.Config{
+	photosConfig = &oauth2.Config{
 		ClientID:     constants.OauthClientId,
 		ClientSecret: constants.OauthClientSecret,
 		Endpoint:     google.Endpoint,
@@ -34,11 +34,15 @@ func init() {
 			"https://www.googleapis.com/auth/photoslibrary.readonly",
 			"https://www.googleapis.com/auth/photoslibrary.sharing"},
 	}
+}
+
+func getPhotosService(refreshToken string) *http.Client {
 	tokenSrc := oauth2.Token{
-		RefreshToken: constants.RefreshToken,
+		RefreshToken: refreshToken,
 	}
-	client = config.Client(context.Background(), &tokenSrc)
+	client := photosConfig.Client(context.Background(), &tokenSrc)
 	client.Timeout = 10 * time.Second
+	return client
 }
 
 func Photos(photosScan GPhotosScan) int {
@@ -127,11 +131,12 @@ func processMediaItem(photosScan GPhotosScan, mediaItem MediaItem, photosMediaIt
 	counter_pending -= 1
 }
 
-func ListAlbums() []Album {
+func ListAlbums(refreshToken string) []Album {
 	albums := make([]Album, 0)
 	url := photosApiBaseUrl + "v1/albums"
 	nextPageToken := ""
 	hasNextPage := true
+	client := getPhotosService(refreshToken)
 	for hasNextPage {
 		err := throttler.Wait(context.Background())
 		checkError(err, fmt.Sprintf("Error with limiter: %s", err))
@@ -163,6 +168,7 @@ func listMediaItemsForAlbum(photosScan GPhotosScan, photosMediaItem chan<- db.Ph
 	url := photosApiBaseUrl + "v1/mediaItems:search"
 	nextPageToken := ""
 	hasNextPage := true
+	client := getPhotosService(photosScan.RefreshToken)
 	for hasNextPage {
 		err := throttler.Wait(context.Background())
 		checkError(err, fmt.Sprintf("Error with limiter: %s", err))
@@ -207,6 +213,7 @@ func listMediaItems(photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMedi
 	url := photosApiBaseUrl + "v1/mediaItems"
 	nextPageToken := ""
 	hasNextPage := true
+	client := getPhotosService(photosScan.RefreshToken)
 	for hasNextPage {
 		err := throttler.Wait(context.Background())
 		checkError(err, fmt.Sprintf("Error with limiter: %s", err))
@@ -401,4 +408,5 @@ type GPhotosScan struct {
 	AlbumId      string
 	FetchSize    bool
 	FetchMd5Hash bool
+	RefreshToken string
 }

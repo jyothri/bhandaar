@@ -7,28 +7,25 @@
 	import Menu from "./Menu.svelte";
 	import NotFound from "./NotFound.svelte";
 	import Photos from "./Photos.svelte";
-	import Router from "svelte-spa-router";
+	import { Router, Route } from "svelte-navigator";
 
 	let heading = "Backup Manager";
-
-	const routes = {
-		"/": ListScans,
-		"/scan/photos/:scanId": Photos,
-		"/scan/gmail/:scanId": MessageMetaData,
-		"/scan/:scanType/:scanId": ListScanData,
-		"/startScan": InitiateScans,
-
-		// Catch-all
-		// This is optional, but if present it must be the last
-		"*": NotFound,
-	};
 </script>
 
-<main>
-	<Header {heading} />
-	<Menu />
-	<Router {routes} />
-</main>
+<Router>
+	<header>
+		<Header {heading} />
+		<Menu />
+	</header>
+	<main>
+		<Route path="/" component={ListScans} />
+		<Route path="startScan" component={InitiateScans} />
+		<Route path="scan/photos/:scanId" component={Photos} />
+		<Route path="scan/gmail/:scanId" component={MessageMetaData} />
+		<Route path="scan/:scanType/:scanId" component={ListScanData} />
+		<Route component={NotFound} />
+	</main>
+</Router>
 
 <style>
 	main {

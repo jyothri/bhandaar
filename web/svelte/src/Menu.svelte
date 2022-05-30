@@ -1,16 +1,21 @@
 <script lang="ts">
-  import { link } from "svelte-spa-router";
+  import { Link } from "svelte-navigator";
 </script>
 
-<a href="/" use:link> Scan Info </a>
-<a href="/startScan" use:link> Start a scan </a>
-<br />
+<div>
+  <Link to="/"><span class="navOption">Scan Info</span></Link>
+  <Link to="startScan"><span class="navOption">Start a scan</span></Link>
+</div>
 <br />
 <hr />
 
 <style>
-  a {
+  div {
+    text-align: center;
+  }
+  .navOption {
     cursor: pointer;
+    text-decoration: none;
     padding: 0.5rem 1.5rem;
     border-radius: 3.75rem;
     font-size: 1.2rem;
@@ -21,20 +26,5 @@
     background-image: linear-gradient(-180deg, #8f89ff 0%, #b4b6cd 100%);
     box-shadow: 0 0.75rem 0.5rem rgba(255, 255, 255, 0.4) inset,
       0 0.25rem 0.5rem 0 rgba(180, 70, 207, 1) inset;
-  }
-  a:link {
-    text-decoration: none;
-  }
-
-  a:visited {
-    text-decoration: none;
-  }
-
-  a:hover {
-    text-decoration: none;
-  }
-
-  a:active {
-    text-decoration: none;
   }
 </style>

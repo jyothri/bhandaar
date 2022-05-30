@@ -4,7 +4,6 @@
   import Utilities from "./Utilities.svelte";
 
   export let scanId: number;
-  export let params: { [key: string]: string } = {};
   let utilities: any;
 
   class OptionalString {
@@ -85,7 +84,6 @@
   };
 
   onMount(async () => {
-    scanId = parseInt(params.scanId);
     if (scanId > 0) {
       await fetchListPhotosData();
     }

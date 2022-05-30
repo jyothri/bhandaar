@@ -15,36 +15,40 @@ import (
 	"google.golang.org/api/option"
 )
 
-var gmailService *gmail.Service
 var counter_processed int
 var counter_pending int
+var gmailConfig *oauth2.Config
 
 func init() {
-	config := &oauth2.Config{
+	gmailConfig = &oauth2.Config{
 		ClientID:     constants.OauthClientId,
 		ClientSecret: constants.OauthClientSecret,
 		Endpoint:     google.Endpoint,
 		Scopes:       []string{gmail.GmailReadonlyScope},
 	}
+}
+
+func getGmailService(refreshToken string) *gmail.Service {
 	tokenSrc := oauth2.Token{
-		RefreshToken: constants.RefreshToken,
+		RefreshToken: refreshToken,
 	}
 	ctx := context.Background()
-	var err error
-	gmailService, err = gmail.NewService(ctx, option.WithTokenSource(config.TokenSource(ctx, &tokenSrc)))
+	gmailService, err := gmail.NewService(ctx, option.WithTokenSource(gmailConfig.TokenSource(ctx, &tokenSrc)))
 	checkError(err)
+	return gmailService
 }
 
 func Gmail(gMailScan GMailScan) int {
 	messageMetaData := make(chan db.MessageMetadata, 10)
 	scanId := db.LogStartScan("gmail")
 	go db.SaveScanMetadata("", gMailScan.Filter, scanId)
-	go startGmailScan(scanId, gMailScan.Filter, messageMetaData)
+	gmailService := getGmailService(gMailScan.RefreshToken)
+	go startGmailScan(gmailService, scanId, gMailScan.Filter, messageMetaData)
 	go db.SaveMessageMetadataToDb(scanId, messageMetaData)
 	return scanId
 }
 
-func startGmailScan(scanId int, queryString string, messageMetaData chan<- db.MessageMetadata) {
+func startGmailScan(gmailService *gmail.Service, scanId int, queryString string, messageMetaData chan<- db.MessageMetadata) {
 	lock.Lock()
 	defer lock.Unlock()
 	var wg sync.WaitGroup
@@ -63,7 +67,7 @@ func startGmailScan(scanId int, queryString string, messageMetaData chan<- db.Me
 
 		wg.Add(len(messageList.Messages))
 		counter_pending += len(messageList.Messages)
-		parseMessageList(messageList, messageMetaData, &wg, throttler)
+		parseMessageList(gmailService, messageList, messageMetaData, &wg, throttler)
 		if messageList.NextPageToken == "" {
 			hasNextPage = false
 		}
@@ -75,14 +79,14 @@ func startGmailScan(scanId int, queryString string, messageMetaData chan<- db.Me
 	close(messageMetaData)
 }
 
-func parseMessageList(messageList *gmail.ListMessagesResponse, messageMetaData chan<- db.MessageMetadata, wg *sync.WaitGroup, throttler *rate.Limiter) {
+func parseMessageList(gmailService *gmail.Service, messageList *gmail.ListMessagesResponse, messageMetaData chan<- db.MessageMetadata, wg *sync.WaitGroup, throttler *rate.Limiter) {
 	for _, message := range messageList.Messages {
 		throttler.Wait(context.Background())
-		go getMessageInfo(message.Id, messageMetaData, wg)
+		go getMessageInfo(gmailService, message.Id, messageMetaData, wg)
 	}
 }
 
-func getMessageInfo(id string, messageMetaData chan<- db.MessageMetadata, wg *sync.WaitGroup) {
+func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan<- db.MessageMetadata, wg *sync.WaitGroup) {
 	messageListCall := gmailService.Users.Messages.Get("me", id).Format("metadata").MetadataHeaders("From", "To", "Subject", "Date")
 	message, err := messageListCall.Do()
 	checkError(err)
@@ -130,5 +134,6 @@ func logProgressToConsole(done <-chan bool, ticker *time.Ticker) {
 }
 
 type GMailScan struct {
-	Filter string
+	Filter       string
+	RefreshToken string
 }
