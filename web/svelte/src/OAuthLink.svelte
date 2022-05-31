@@ -1,13 +1,20 @@
 <script lang="ts">
   import { token } from "./stores";
+  export let selected: string;
 
   const urlParams = new URLSearchParams(window.location.search);
-
   if (urlParams.has("refresh_token")) {
     token.set(urlParams.get("refresh_token"));
   }
+  let linked: boolean = $token != "";
 
-  async function linkAccount() {
+  function unlinkAccount() {
+    token.set("");
+    linked = false;
+    window.location.href = `${window.location.origin}/startScan`;
+  }
+
+  function linkAccount() {
     const spiUrl = "https://accounts.google.com/o/oauth2/v2/auth";
     const driveScope = "https://www.googleapis.com/auth/drive.readonly";
     const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
@@ -26,16 +33,39 @@
   }
 </script>
 
-<input
-  type="button"
-  class="secondaycta"
-  on:click={linkAccount}
-  value="Link Google Account"
-/>
+{#if selected == "GDrive" || selected == "GMail" || selected == "GPhotos"}
+  <input
+    type="button"
+    on:click={linkAccount}
+    value="Link Google Account"
+    disabled={linked}
+  />
+  <input
+    type="button"
+    on:click={unlinkAccount}
+    value="Unlink Google Account"
+    disabled={!linked}
+  />
+{/if}
 
 <style>
-  .secondaycta {
+  input[type="button"] {
     background-color: #cc4caf;
+    color: white;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    float: right;
     width: 40%;
+    margin: 0 1em 1em 1em;
+  }
+
+  input[type="button"]:hover {
+    background-color: #b636b0;
+  }
+
+  input[type="button"]:disabled {
+    background-color: #acacbb;
   }
 </style>

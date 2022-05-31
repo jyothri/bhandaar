@@ -172,14 +172,12 @@
         </div>
       </div>
     {/if}
-    {#if selected == "GDrive" || selected == "GMail" || selected == "GPhotos"}
-      <div class="row">
-        <div class="column" />
-        <div class="column">
-          <OAuthLink />
-        </div>
+    <div class="row">
+      <div class="column" />
+      <div class="column">
+        <OAuthLink {selected} />
       </div>
-    {/if}
+    </div>
     {#if selected == "GDrive"}
       <div class="row">
         <div class="column">
