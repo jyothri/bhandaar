@@ -11,6 +11,8 @@ require (
 	google.golang.org/api v0.63.0
 )
 
+require github.com/rs/cors v1.11.1 // indirect
+
 require (
 	cloud.google.com/go v0.99.0 // indirect
 	github.com/census-instrumentation/opencensus-proto v0.2.1 // indirect

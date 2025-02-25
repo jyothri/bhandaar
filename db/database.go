@@ -136,6 +136,27 @@ func SaveStatToDb(scanId int, scanData <-chan FileData) {
 	}
 }
 
+func SaveOAuthToken(accessToken string, refreshToken string, displayName string, clientKey string, scope string, expiresIn int16, tokenType string) {
+	insert_row := `insert into privatetokens 
+			(access_token, refresh_token, display_name, client_key, scope, expires_in, token_type, created_on) 
+		values 
+			($1, $2, $3, $4, $5, $6, $7, current_timestamp) RETURNING id`
+	var err error
+	_, err = db.Exec(insert_row, accessToken, refreshToken, displayName, clientKey, scope, expiresIn, tokenType)
+	checkError(err)
+}
+
+func GetOAuthToken(clientKey string) PrivateToken {
+	read_row :=
+		`select id, access_token, refresh_token, display_name, client_key, created_on, scope, expires_in, token_type
+		FROM privatetokens
+		WHERE client_key = $1`
+	tokenData := PrivateToken{}
+	err := db.Get(&tokenData, read_row, clientKey)
+	checkError(err)
+	return tokenData
+}
+
 func GetScansFromDb(pageNo int) ([]Scan, int) {
 	limit := 10
 	offset := limit * (pageNo - 1)
@@ -261,7 +282,6 @@ func logCompleteScan(scanId int) {
 
 func migrateDB() {
 	var count int
-	var version int
 	has_table_query := `select count(*) 
 		from information_schema.tables 
 		where table_name = $1`
@@ -271,30 +291,32 @@ func migrateDB() {
 		migrateDBv0()
 		return
 	}
-	select_version_table := `select COALESCE(MAX(id),0) from version`
-	err = db.Get(&version, select_version_table)
-	checkError(err)
-
-	if version < 2 {
-		migrateDBv1To2()
-	}
-	if version < 3 {
-		migrateDBv2To3()
-	}
-	if version < 4 {
-		migrateDBv3To4()
-	}
 }
 
 func migrateDBv0() {
-	create_scans_table := `CREATE TABLE scans (
+	insert_version_table := `delete from version; 
+		INSERT INTO version (id) VALUES (4)`
+	db.MustExec(create_scans_table)
+	db.MustExec(create_scandata_table)
+	db.MustExec(create_scanmetadata_table)
+	db.MustExec(create_messagemetadata_table)
+	db.MustExec(create_photosmediaitem_table)
+	db.MustExec(create_photometadata_table)
+	db.MustExec(create_videometadata_table)
+	db.MustExec(create_privatetokens_table)
+	db.MustExec(create_version_table)
+	db.MustExec(insert_version_table)
+}
+
+const create_scans_table string = `CREATE TABLE IF NOT EXISTS scans (
 		  id serial PRIMARY KEY,
 		  scan_type VARCHAR (50) NOT NULL,
 		  created_on TIMESTAMP NOT NULL,
 		  scan_start_time TIMESTAMP NOT NULL,
 		  scan_end_time TIMESTAMP
 		)`
-	create_scandata_table := `CREATE TABLE IF NOT EXISTS scandata (
+
+const create_scandata_table string = `CREATE TABLE IF NOT EXISTS scandata (
 		  id serial PRIMARY KEY,
 		  name VARCHAR(200),
 		  path VARCHAR(2000),
@@ -307,41 +329,10 @@ func migrateDBv0() {
 		  FOREIGN KEY (scan_id)
 			  REFERENCES Scans (id)
 		)`
-	create_version_table := `CREATE TABLE IF NOT EXISTS version (
+
+const create_version_table string = `CREATE TABLE IF NOT EXISTS version (
 		  id INT PRIMARY KEY
 		)`
-
-	insert_version_table := `delete from version; 
-		INSERT INTO version (id) VALUES (2)`
-	db.MustExec(create_scans_table)
-	db.MustExec(create_scandata_table)
-	db.MustExec(create_scanmetadata_table)
-	db.MustExec(create_version_table)
-	db.MustExec(insert_version_table)
-}
-
-func migrateDBv1To2() {
-	insert_version_table := `delete from version; 
-		INSERT INTO version (id) VALUES (2)`
-	db.MustExec(create_scanmetadata_table)
-	db.MustExec(insert_version_table)
-}
-
-func migrateDBv2To3() {
-	insert_version_table := `delete from version; 
-		INSERT INTO version (id) VALUES (3)`
-	db.MustExec(create_messagemetadata_table)
-	db.MustExec(insert_version_table)
-}
-
-func migrateDBv3To4() {
-	insert_version_table := `delete from version; 
-		INSERT INTO version (id) VALUES (4)`
-	db.MustExec(create_photosmediaitem_table)
-	db.MustExec(create_photometadata_table)
-	db.MustExec(create_videometadata_table)
-	db.MustExec(insert_version_table)
-}
 
 const create_scanmetadata_table string = `CREATE TABLE IF NOT EXISTS scanmetadata (
 	id serial PRIMARY KEY,
@@ -405,6 +396,30 @@ const create_videometadata_table string = `CREATE TABLE IF NOT EXISTS videometad
 	FOREIGN KEY (photos_media_item_id)
 		REFERENCES photosmediaitem (id)
 )`
+
+const create_privatetokens_table string = `CREATE TABLE IF NOT EXISTS privatetokens (
+	id serial PRIMARY KEY NOT NULL,
+	access_token VARCHAR(800),
+	refresh_token VARCHAR(800),
+	display_name VARCHAR(100),
+	client_key VARCHAR(100) NOT NULL UNIQUE,
+	created_on TIMESTAMP NOT NULL,
+	scope VARCHAR(500), 
+	expires_in INT, 
+	token_type VARCHAR(100)
+)`
+
+type PrivateToken struct {
+	Id           int       `db:"id" json:"scan_id"`
+	AccessToken  string    `db:"access_token"`
+	RefreshToken string    `db:"refresh_token"`
+	Client_key   string    `db:"client_key"`
+	CreatedOn    time.Time `db:"created_on"`
+	DisplayName  string    `db:"display_name"`
+	Scope        string    `db:"scope"`
+	ExpiresIn    int       `db:"expires_in"`
+	TokenType    string    `db:"token_type"`
+}
 
 type Scan struct {
 	Id            int          `db:"id" json:"scan_id"`
