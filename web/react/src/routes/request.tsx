@@ -51,7 +51,7 @@ function Request() {
 
   async function submitRequest() {
     if (scanClientKey === "none") {
-      setErrorMessage("Select an account");
+      setErrorMessage("Please select an account.");
       return;
     }
     if (queryFilter === "") {
@@ -81,20 +81,24 @@ function Request() {
   }
 
   return (
-    <div className="flex flex-col">
-      <div className="p-2">Make new Request!</div>
-      <form>
-        <div className="flex flex-row ml-2">
-          <div className="flex flex-row ml-10">
-            <input
-              type="button"
+    <div>
+      <h2 className="p-2 justify-self-center heading font-bold text-xl">
+        Make new Request
+      </h2>
+      <div
+        id="container"
+        className="grid grid-cols-2 border-8 border-gray-200 gap-2"
+      >
+        <div className="justify-self-center col-span-2">
+          <button
+            className="items-center justify-center py-2 px-4 rounded"
               value="Link Google A/C"
               onClick={linkGoogleAccount}
-            />
-          </div>
+          >
+            <img src="web_neutral_rd_ctn.svg" alt="Continue with Google" />
+          </button>
         </div>
-        <div className="flex flex-row ml-2">
-          <div className="pl-3">
+        <div className="justify-self-end pl-3">
             <label htmlFor="scanClientKey">Accounts</label>
           </div>
           <div className="pl-3">
@@ -107,9 +111,7 @@ function Request() {
               {clientKey && <option value={clientKey}> {clientKey} </option>}
             </select>
           </div>
-        </div>
-        <div className="flex flex-row ml-2">
-          <div className="pl-3">
+        <div className="justify-self-end pl-3">
             <label htmlFor="filter">Query filter</label>
           </div>
           <div className="pl-3">
@@ -121,12 +123,18 @@ function Request() {
               onChange={(e) => setQueryFilter(e.target.value)}
             />
           </div>
+        <div className="justify-self-center col-span-2">
+          <input
+            className="items-center justify-center bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+            type="button"
+            value="Submit"
+            onClick={submitRequest}
+          />
         </div>
-        <div className="flex flex-row ml-10">
-          <input type="button" value="Submit" onClick={submitRequest} />
+        {errorMessage && (
+          <div className="text-red-500 h-1/5 text-lg">{errorMessage}</div>
+        )}
         </div>
-      </form>
-      {errorMessage && <div className="text-red-500 h-1/5">{errorMessage}</div>}
     </div>
   );
 }
