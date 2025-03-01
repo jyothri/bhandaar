@@ -21,7 +21,7 @@ type MessageMetadata struct {
 	From         string
 	To           string
 	Subject      string
-	Date         string
+	Date         time.Time
 	SizeEstimate int64
 }
 

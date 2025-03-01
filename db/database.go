@@ -74,7 +74,7 @@ func SaveMessageMetadataToDb(scanId int, username string, messageMetaData <-chan
 		values 
 			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`
 
-		_, err = db.Exec(insert_row, mmd.MessageId, mmd.ThreadId, mmd.Date, substr(mmd.From, 500),
+		_, err = db.Exec(insert_row, mmd.MessageId, mmd.ThreadId, mmd.Date.UTC(), substr(mmd.From, 500),
 			substr(mmd.To, 500), substr(mmd.Subject, 2000), mmd.SizeEstimate,
 			substr(strings.Join(mmd.LabelIds, ","), 500), scanId, username)
 		checkError(err, fmt.Sprintf("While inserting to messagemetadata messageId:%v", mmd.MessageId))
@@ -367,7 +367,7 @@ const create_messagemetadata_table string = `CREATE TABLE IF NOT EXISTS messagem
 	message_id VARCHAR(200),
 	thread_id VARCHAR(200),
 	username  VARCHAR(200),
-	date VARCHAR(200),
+	date TIMESTAMP,
 	mail_from VARCHAR(500),
 	mail_to VARCHAR(500),
 	subject VARCHAR(2000),

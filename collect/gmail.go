@@ -113,7 +113,7 @@ func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan
 	from := ""
 	to := ""
 	subject := ""
-	date := ""
+	date := time.Unix(message.InternalDate/1000, 0)
 	for _, headers := range message.Payload.Headers {
 		switch headers.Name {
 		case "From":
@@ -122,8 +122,6 @@ func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan
 			to = headers.Value
 		case "Subject":
 			subject = headers.Value
-		case "Date":
-			date = headers.Value
 		}
 	}
 	md := db.MessageMetadata{
