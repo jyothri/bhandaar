@@ -1,12 +1,14 @@
 import { Account } from "../types/accounts";
-import { ScanMetadata } from "../types/scans";
+import { RequestScanResponse, ScanMetadata } from "../types/scans";
 
 export const backend_url = "http://localhost:8090";
 
 /**
  * Function to submit scan request.
  */
-export const requestScan = async (scanData: ScanMetadata): Promise<void> => {
+export const requestScan = async (
+  scanData: ScanMetadata
+): Promise<RequestScanResponse> => {
   const response = await fetch(backend_url + "/api/scans", {
     method: "POST",
     headers: {

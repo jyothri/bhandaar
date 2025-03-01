@@ -17,3 +17,7 @@ export type ScanMetadata = {
   ScanType?: ScanType;
   GMailScan?: GMailScan;
 };
+
+export type RequestScanResponse = {
+  scan_id: number;
+};

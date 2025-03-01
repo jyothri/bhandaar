@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -9,42 +9,35 @@ export const Route = createFileRoute("/request")({
   component: Request,
 });
 
-function linkGoogleAccount() {
-  console.log("Linking Google Account");
-  const spiUrl = "https://accounts.google.com/o/oauth2/v2/auth";
-  const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
-  const scope = `${gmailScope}`;
-  const clientId =
-    "112106509963-uluv01bacctqgd7mr003u7r1lpq3899n.apps.googleusercontent.com";
-  const state = "YOUR_CUSTOM_STATE";
-  const redirectUri = `${window.location.protocol}//${window.location.host}/oauth/glink`;
-  const addtionalParams = "&access_type=offline&prompt=consent";
-  const url = `${spiUrl}?response_type=code&scope=${scope}&client_id=${clientId}&state=${state}&redirect_uri=${redirectUri}${addtionalParams}`;
-  window.location.href = url;
-}
-
 function Request() {
-  const [scanClientKey, setScanClientKey] = useState("none");
-  const [username, setUsername] = useState("");
-  const [queryFilter, setQueryFilter] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
-  const [infoMessage, setInfoMessage] = useState("");
   const queryClient = useQueryClient();
 
-  const { mutateAsync: requestScanMutation } = useMutation({
-    mutationFn: requestScan,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scans"] });
-    },
-    onError: (error: any) => {
-      console.log("got error response for addRequest", error);
-    },
-  });
+  const [errorMessage, setErrorMessage] = useState("");
+  const [infoMessage, setInfoMessage] = useState("");
+
+  const [scanClientKey, setScanClientKey] = useState("none");
+  const [username, setUsername] = useState("");
+  const [inbox, setInbox] = useState(false);
+  const [unread, setUnread] = useState(false);
+  const [queryFilter, setQueryFilter] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   const { data: accounts } = useQuery({
     queryKey: ["getAccounts"],
     queryFn: () => getAccounts(),
     staleTime: Infinity,
+  });
+
+  const { mutateAsync: requestScanMutation } = useMutation({
+    mutationFn: requestScan,
+    onSuccess: (resp) => {
+      queryClient.invalidateQueries({ queryKey: ["scans"] });
+      setInfoMessage("Request submitted successfully. ID: " + resp.scan_id);
+    },
+    onError: (error: any) => {
+      console.log("got error response for addRequest", error);
+    },
   });
 
   async function submitRequest() {
@@ -53,15 +46,9 @@ function Request() {
       return;
     }
     if (queryFilter === "") {
-      setErrorMessage("Enter a query filter");
+      setErrorMessage("Cannot submit request without any filter.");
       return;
     }
-    console.log(
-      "Submitting Request with setScanClientKey:%s, query filter: %s",
-      scanClientKey,
-      queryFilter
-    );
-
     const request: ScanMetadata = {
       ScanType: ScanType.GMail,
       GMailScan: {
@@ -73,7 +60,6 @@ function Request() {
     };
     try {
       await requestScanMutation(request);
-      setInfoMessage("Request submitted successfully");
     } catch (e) {
       console.log(e);
       setErrorMessage("Failed to submit request");
@@ -83,6 +69,66 @@ function Request() {
   function handleSelectAccount(e: React.ChangeEvent<HTMLSelectElement>) {
     setScanClientKey(e.target.value);
     setUsername(e.target.selectedOptions[0].text);
+  }
+
+  const dateFromDatePicker = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.value === "") {
+      return "";
+    }
+    const [year, month, day] = e.target.value.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    return date.toISOString().split("T")[0];
+  };
+
+  const dateForApi = (input: string): string => {
+    if (input === "") {
+      return "";
+    }
+    const [year, month, day] = input.split("-").map(Number);
+    return (
+      year +
+      "/" +
+      (month < 10 ? "0" : "") +
+      month +
+      "/" +
+      (day < 10 ? "0" : "") +
+      day
+    );
+  };
+
+  useEffect(() => {
+    updateQueryFilter();
+  }, [inbox, unread, startDate, endDate]);
+
+  const updateQueryFilter = () => {
+    let filter = "";
+    if (inbox) {
+      filter += "label:inbox ";
+    }
+    if (unread) {
+      filter += "label:unread ";
+    }
+    if (startDate !== "") {
+      filter += `after:${dateForApi(startDate)}  `;
+    }
+    if (endDate !== "") {
+      filter += `before:${dateForApi(endDate)} `;
+    }
+    setQueryFilter(filter);
+  };
+
+  function linkGoogleAccount() {
+    console.log("Linking Google Account");
+    const spiUrl = "https://accounts.google.com/o/oauth2/v2/auth";
+    const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
+    const scope = `${gmailScope}`;
+    const clientId =
+      "112106509963-uluv01bacctqgd7mr003u7r1lpq3899n.apps.googleusercontent.com";
+    const state = "YOUR_CUSTOM_STATE";
+    const redirectUri = `${window.location.protocol}//${window.location.host}/oauth/glink`;
+    const addtionalParams = "&access_type=offline&prompt=consent";
+    const url = `${spiUrl}?response_type=code&scope=${scope}&client_id=${clientId}&state=${state}&redirect_uri=${redirectUri}${addtionalParams}`;
+    window.location.href = url;
   }
 
   return (
@@ -121,6 +167,61 @@ function Request() {
               ))}
           </select>
         </div>
+
+        <div className="justify-self-end pl-3 flex items-center">
+          <label htmlFor="filter">Inbox</label>
+        </div>
+        <div className="pl-3">
+          <input
+            type="checkbox"
+            id="inbox"
+            name="inbox"
+            checked={inbox}
+            onChange={(e) => setInbox(e.target.checked)}
+          />
+        </div>
+
+        <div className="justify-self-end pl-3 flex items-center">
+          <label htmlFor="filter">Unread</label>
+        </div>
+        <div className="pl-3">
+          <input
+            type="checkbox"
+            id="unread"
+            name="unread"
+            checked={unread}
+            onChange={(e) => setUnread(e.target.checked)}
+          />
+        </div>
+
+        <div className="justify-self-end pl-3 flex items-center">
+          <label htmlFor="filter">Date range</label>
+        </div>
+        <div className="pl-3">
+          <input
+            id="datepicker-range-start"
+            name="start"
+            type="date"
+            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5  dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
+            placeholder="Select date start"
+            value={startDate}
+            onChange={(e) => {
+              setStartDate(dateFromDatePicker(e));
+            }}
+          />
+          <span className="mx-4 text-gray-500">to</span>
+          <input
+            id="datepicker-range-end"
+            name="end"
+            type="date"
+            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5  dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
+            placeholder="Select date end"
+            value={endDate}
+            onChange={(e) => {
+              setEndDate(dateFromDatePicker(e));
+            }}
+          />
+        </div>
         <div className="justify-self-end pl-3">
           <label htmlFor="filter">Query filter</label>
         </div>
@@ -128,12 +229,13 @@ function Request() {
           <input
             id="filter"
             type="text"
-            placeholder="label:inbox label:unread"
+            placeholder=""
+            disabled={true}
             value={queryFilter}
-            onChange={(e) => setQueryFilter(e.target.value)}
+            className="border-2 border-gray-200 rounded-lg w-10/12"
           />
         </div>
-        <div className="justify-self-center col-span-2">
+        <div className="justify-self-center col-span-2 p-3">
           <input
             className="items-center justify-center bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
             type="button"
