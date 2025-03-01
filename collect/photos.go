@@ -48,7 +48,7 @@ func getPhotosService(refreshToken string) *http.Client {
 func Photos(photosScan GPhotosScan) int {
 	photosMediaItem := make(chan db.PhotosMediaItem, 10)
 	scanId := db.LogStartScan("photos")
-	go db.SaveScanMetadata("", "", scanId)
+	go db.SaveScanMetadata("", "", "", scanId)
 	go startPhotosScan(scanId, photosScan, photosMediaItem)
 	go db.SavePhotosMediaItemToDb(scanId, photosMediaItem)
 	return scanId

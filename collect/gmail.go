@@ -41,7 +41,7 @@ func getGmailService(refreshToken string) *gmail.Service {
 func Gmail(gMailScan GMailScan) int {
 	messageMetaData := make(chan db.MessageMetadata, 10)
 	scanId := db.LogStartScan("gmail")
-	go db.SaveScanMetadata("", gMailScan.Filter, scanId)
+	go db.SaveScanMetadata(gMailScan.Username, "", gMailScan.Filter, scanId)
 	if gMailScan.ClientKey != "" {
 		token := db.GetOAuthToken(gMailScan.ClientKey)
 		gMailScan.RefreshToken = token.RefreshToken
@@ -52,7 +52,7 @@ func Gmail(gMailScan GMailScan) int {
 	}
 	gmailService := getGmailService(gMailScan.RefreshToken)
 	go startGmailScan(gmailService, scanId, gMailScan.Filter, messageMetaData)
-	go db.SaveMessageMetadataToDb(scanId, messageMetaData)
+	go db.SaveMessageMetadataToDb(scanId, gMailScan.Username, messageMetaData)
 	return scanId
 }
 
@@ -157,4 +157,5 @@ type GMailScan struct {
 	Filter       string
 	RefreshToken string
 	ClientKey    string
+	Username     string
 }

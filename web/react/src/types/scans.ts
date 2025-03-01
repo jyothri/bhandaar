@@ -2,6 +2,7 @@ export interface GMailScan {
   Filter: string;
   ClientKey: string;
   RefreshToken: string;
+  Username: string;
 }
 
 export enum ScanType {

@@ -39,6 +39,7 @@ function Request() {
   const [scanClientKey, setScanClientKey] = useState("none");
   const [queryFilter, setQueryFilter] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [infoMessage, setInfoMessage] = useState("");
   const queryClient = useQueryClient();
 
   const { mutateAsync: requestScanMutation } = useMutation({
@@ -72,10 +73,12 @@ function Request() {
         Filter: queryFilter,
         ClientKey: scanClientKey,
         RefreshToken: "",
+        Username: displayName,
       },
     };
     try {
       await requestScanMutation(request);
+      setInfoMessage("Request submitted successfully");
     } catch (e) {
       console.log(e);
       setErrorMessage("Failed to submit request");
@@ -135,6 +138,9 @@ function Request() {
         </div>
         {errorMessage && (
           <div className="text-red-500 h-1/5 text-lg">{errorMessage}</div>
+        )}
+        {infoMessage && (
+          <div className="text-blue-400 h-1/5 text-lg">{infoMessage}</div>
         )}
       </div>
     </div>

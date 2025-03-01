@@ -46,7 +46,7 @@ func CloudDrive(driveScan GDriveScan) int {
 	scanData := make(chan db.FileData, 10)
 	scanId := db.LogStartScan("google_drive")
 	driveService := getDriveService(driveScan.RefreshToken)
-	go db.SaveScanMetadata("", driveScan.QueryString, scanId)
+	go db.SaveScanMetadata("", "", driveScan.QueryString, scanId)
 	go startCloudDrive(driveService, scanId, driveScan.QueryString, scanData)
 	go db.SaveStatToDb(scanId, scanData)
 	return scanId

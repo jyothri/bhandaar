@@ -44,31 +44,39 @@ func LogStartScan(scanType string) int {
 	return lastInsertId
 }
 
-func SaveScanMetadata(searchPath string, searchFilter string, scanId int) {
+func SaveScanMetadata(name string, searchPath string, searchFilter string, scanId int) {
 	insert_row := `insert into scanmetadata 
 			(name, search_path, search_filter, scan_id) 
 		values 
 			($1, $2, $3, $4) RETURNING id`
 	var err error
-	_, err = db.Exec(insert_row, nil, searchPath, searchFilter, scanId)
+	_, err = db.Exec(insert_row, name, searchPath, searchFilter, scanId)
 	checkError(err)
 }
 
-func SaveMessageMetadataToDb(scanId int, messageMetaData <-chan MessageMetadata) {
+func SaveMessageMetadataToDb(scanId int, username string, messageMetaData <-chan MessageMetadata) {
 	for {
 		mmd, more := <-messageMetaData
 		if !more {
 			logCompleteScan(scanId)
 			break
 		}
-		insert_row := `insert into messagemetadata 
-			(message_id, thread_id, date, mail_from, mail_to, subject, size_estimate, labels, scan_id) 
-		values 
-			($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`
 		var err error
+		count_row := `select count(*) from messagemetadata where username= $1 AND message_id = $2 AND thread_id = $3`
+		var count int
+		err = db.Get(&count, count_row, username, mmd.MessageId, mmd.ThreadId)
+		checkError(err)
+		if count > 0 {
+			continue
+		}
+		insert_row := `insert into messagemetadata 
+			(message_id, thread_id, date, mail_from, mail_to, subject, size_estimate, labels, scan_id, username) 
+		values 
+			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`
+
 		_, err = db.Exec(insert_row, mmd.MessageId, mmd.ThreadId, mmd.Date, substr(mmd.From, 500),
 			substr(mmd.To, 500), substr(mmd.Subject, 2000), mmd.SizeEstimate,
-			substr(strings.Join(mmd.LabelIds, ","), 500), scanId)
+			substr(strings.Join(mmd.LabelIds, ","), 500), scanId, username)
 		checkError(err, fmt.Sprintf("While inserting to messagemetadata messageId:%v", mmd.MessageId))
 	}
 }
@@ -348,6 +356,7 @@ const create_messagemetadata_table string = `CREATE TABLE IF NOT EXISTS messagem
 	id serial PRIMARY KEY,
 	message_id VARCHAR(200),
 	thread_id VARCHAR(200),
+	username  VARCHAR(200),
 	date VARCHAR(200),
 	mail_from VARCHAR(500),
 	mail_to VARCHAR(500),
