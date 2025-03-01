@@ -56,6 +56,18 @@ func Gmail(gMailScan GMailScan) int {
 	return scanId
 }
 
+func GetIdentity(refreshToken string) string {
+	if refreshToken == "" {
+		fmt.Println("Refresh token not found. Cannot proceed.")
+		return ""
+	}
+	gmailService := getGmailService(refreshToken)
+	profile := gmailService.Users.GetProfile("me")
+	profileInfo, err := profile.Do()
+	checkError(err)
+	return profileInfo.EmailAddress
+}
+
 func startGmailScan(gmailService *gmail.Service, scanId int, queryString string, messageMetaData chan<- db.MessageMetadata) {
 	lock.Lock()
 	defer lock.Unlock()

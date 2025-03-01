@@ -7,6 +7,7 @@ import { ScanMetadata, ScanType } from "../types/scans";
 
 type requestKey = {
   clientKey: string;
+  displayName: string;
 };
 
 export const Route = createFileRoute("/request")({
@@ -14,6 +15,7 @@ export const Route = createFileRoute("/request")({
   validateSearch: (search: Record<string, unknown>): requestKey => {
     return {
       clientKey: (search.client_key as string) || "",
+      displayName: (search.display_name as string) || "",
     };
   },
 });
@@ -33,7 +35,7 @@ function linkGoogleAccount() {
 }
 
 function Request() {
-  const { clientKey } = Route.useSearch();
+  const { clientKey, displayName } = Route.useSearch();
   const [scanClientKey, setScanClientKey] = useState("none");
   const [queryFilter, setQueryFilter] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -92,37 +94,37 @@ function Request() {
         <div className="justify-self-center col-span-2">
           <button
             className="items-center justify-center py-2 px-4 rounded"
-              value="Link Google A/C"
-              onClick={linkGoogleAccount}
+            value="Link Google A/C"
+            onClick={linkGoogleAccount}
           >
             <img src="web_neutral_rd_ctn.svg" alt="Continue with Google" />
           </button>
         </div>
         <div className="justify-self-end pl-3">
-            <label htmlFor="scanClientKey">Accounts</label>
-          </div>
-          <div className="pl-3">
-            <select
-              id="scanClientKey"
-              value={scanClientKey}
-              onChange={(e) => setScanClientKey(e.target.value)}
-            >
-              <option value="none"> Select One </option>
-              {clientKey && <option value={clientKey}> {clientKey} </option>}
-            </select>
-          </div>
+          <label htmlFor="scanClientKey">Accounts</label>
+        </div>
+        <div className="pl-3">
+          <select
+            id="scanClientKey"
+            value={scanClientKey}
+            onChange={(e) => setScanClientKey(e.target.value)}
+          >
+            <option value="none"> Select One </option>
+            {clientKey && <option value={clientKey}> {displayName} </option>}
+          </select>
+        </div>
         <div className="justify-self-end pl-3">
-            <label htmlFor="filter">Query filter</label>
-          </div>
-          <div className="pl-3">
-            <input
-              id="filter"
-              type="text"
-              placeholder="label:inbox label:unread"
-              value={queryFilter}
-              onChange={(e) => setQueryFilter(e.target.value)}
-            />
-          </div>
+          <label htmlFor="filter">Query filter</label>
+        </div>
+        <div className="pl-3">
+          <input
+            id="filter"
+            type="text"
+            placeholder="label:inbox label:unread"
+            value={queryFilter}
+            onChange={(e) => setQueryFilter(e.target.value)}
+          />
+        </div>
         <div className="justify-self-center col-span-2">
           <input
             className="items-center justify-center bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
@@ -134,7 +136,7 @@ function Request() {
         {errorMessage && (
           <div className="text-red-500 h-1/5 text-lg">{errorMessage}</div>
         )}
-        </div>
+      </div>
     </div>
   );
 }

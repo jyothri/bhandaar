@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/jyothri/hdd/collect"
 	"github.com/jyothri/hdd/constants"
 	"github.com/jyothri/hdd/db"
 )
@@ -74,12 +76,13 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-
 	client_key := generateRandomString(12)
-	db.SaveOAuthToken(t.AccessToken, t.RefreshToken, "display_name", client_key, t.Scope, t.ExpiresIn, t.TokenType)
+	email := collect.GetIdentity(t.RefreshToken)
+	display_name := getDisplayName(email, client_key)
+	db.SaveOAuthToken(t.AccessToken, t.RefreshToken, display_name, client_key, t.Scope, t.ExpiresIn, t.TokenType)
 
 	u, _ := url.Parse(redirectUri)
-	returnUrl := u.Scheme + "://" + u.Host + "/request?client_key=" + client_key
+	returnUrl := u.Scheme + "://" + u.Host + "/request?client_key=" + client_key + "&display_name=" + display_name
 	w.Header().Set("Location", returnUrl)
 	w.WriteHeader(http.StatusFound)
 }
@@ -90,6 +93,20 @@ type OAuthAccessResponse struct {
 	Scope        string `json:"scope"`
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int16  `json:"expires_in"`
+}
+
+func getDisplayName(email string, client_key string) string {
+	username := ""
+	if email == "" || !strings.Contains(email, "@") {
+		return client_key
+	} else {
+		username = email[0:strings.Index(email, "@")]
+		if len(username) < 6 {
+			return client_key
+		} else {
+			return username[0:3] + "****" + username[len(username)-2:] + email[strings.Index(email, "@"):]
+		}
+	}
 }
 
 func generateRandomString(length int) string {
