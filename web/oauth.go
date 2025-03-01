@@ -82,7 +82,7 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 	db.SaveOAuthToken(t.AccessToken, t.RefreshToken, display_name, client_key, t.Scope, t.ExpiresIn, t.TokenType)
 
 	u, _ := url.Parse(redirectUri)
-	returnUrl := u.Scheme + "://" + u.Host + "/request?client_key=" + client_key + "&display_name=" + display_name
+	returnUrl := u.Scheme + "://" + u.Host + "/request"
 	w.Header().Set("Location", returnUrl)
 	w.WriteHeader(http.StatusFound)
 }

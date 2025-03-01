@@ -165,6 +165,16 @@ func GetOAuthToken(clientKey string) PrivateToken {
 	return tokenData
 }
 
+func GetAccountsFromDb() []Account {
+	read_row :=
+		`select distinct display_name, client_key from privatetokens p
+		`
+	accounts := []Account{}
+	err := db.Select(&accounts, read_row)
+	checkError(err)
+	return accounts
+}
+
 func GetScansFromDb(pageNo int) ([]Scan, int) {
 	limit := 10
 	offset := limit * (pageNo - 1)
@@ -476,6 +486,11 @@ type PhotosMediaItemRead struct {
 	ModifiedTime           sql.NullTime `db:"file_mod_time"`
 	Md5hash                sql.NullString
 	ContributorDisplayName sql.NullString `db:"contributor_display_name"`
+}
+
+type Account struct {
+	ClientKey   string `db:"client_key" json:"clientKey"`
+	DisplayName string `db:"display_name" json:"displayName"`
 }
 
 func substr(s string, end int) string {

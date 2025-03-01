@@ -1,23 +1,12 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { requestScan } from "../api";
+import { requestScan, getAccounts } from "../api";
 import { ScanMetadata, ScanType } from "../types/scans";
-
-type requestKey = {
-  clientKey: string;
-  displayName: string;
-};
 
 export const Route = createFileRoute("/request")({
   component: Request,
-  validateSearch: (search: Record<string, unknown>): requestKey => {
-    return {
-      clientKey: (search.client_key as string) || "",
-      displayName: (search.display_name as string) || "",
-    };
-  },
 });
 
 function linkGoogleAccount() {
@@ -35,8 +24,8 @@ function linkGoogleAccount() {
 }
 
 function Request() {
-  const { clientKey, displayName } = Route.useSearch();
   const [scanClientKey, setScanClientKey] = useState("none");
+  const [username, setUsername] = useState("");
   const [queryFilter, setQueryFilter] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [infoMessage, setInfoMessage] = useState("");
@@ -50,6 +39,12 @@ function Request() {
     onError: (error: any) => {
       console.log("got error response for addRequest", error);
     },
+  });
+
+  const { data: accounts } = useQuery({
+    queryKey: ["getAccounts"],
+    queryFn: () => getAccounts(),
+    staleTime: Infinity,
   });
 
   async function submitRequest() {
@@ -73,7 +68,7 @@ function Request() {
         Filter: queryFilter,
         ClientKey: scanClientKey,
         RefreshToken: "",
-        Username: displayName,
+        Username: username,
       },
     };
     try {
@@ -83,6 +78,11 @@ function Request() {
       console.log(e);
       setErrorMessage("Failed to submit request");
     }
+  }
+
+  function handleSelectAccount(e: React.ChangeEvent<HTMLSelectElement>) {
+    setScanClientKey(e.target.value);
+    setUsername(e.target.selectedOptions[0].text);
   }
 
   return (
@@ -110,10 +110,15 @@ function Request() {
           <select
             id="scanClientKey"
             value={scanClientKey}
-            onChange={(e) => setScanClientKey(e.target.value)}
+            onChange={handleSelectAccount}
           >
-            <option value="none"> Select One </option>
-            {clientKey && <option value={clientKey}> {displayName} </option>}
+            <option value="none">Select One</option>
+            {accounts &&
+              accounts.map((account) => (
+                <option key={account.clientKey} value={account.clientKey}>
+                  {account.displayName}
+                </option>
+              ))}
           </select>
         </div>
         <div className="justify-self-end pl-3">
