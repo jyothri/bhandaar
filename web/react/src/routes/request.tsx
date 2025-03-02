@@ -33,6 +33,7 @@ function Request() {
     mutationFn: requestScan,
     onSuccess: (resp) => {
       queryClient.invalidateQueries({ queryKey: ["scans"] });
+      setErrorMessage("");
       setInfoMessage("Request submitted successfully. ID: " + resp.scan_id);
     },
     onError: (error: any) => {
@@ -243,13 +244,13 @@ function Request() {
             onClick={submitRequest}
           />
         </div>
-        {errorMessage && (
-          <div className="text-red-500 h-1/5 text-lg">{errorMessage}</div>
-        )}
-        {infoMessage && (
-          <div className="text-blue-400 h-1/5 text-lg">{infoMessage}</div>
-        )}
       </div>
+      {errorMessage && (
+        <div className="text-red-500 h-1/5 text-lg">{errorMessage}</div>
+      )}
+      {infoMessage && (
+        <div className="text-blue-400 h-1/5 text-lg">{infoMessage}</div>
+      )}
     </div>
   );
 }

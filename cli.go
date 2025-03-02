@@ -45,7 +45,7 @@ func main() {
 			}
 			go collect.Gmail(gmailScan)
 		case 5:
-			gphotosScan := collect.GPhotosScan {}
+			gphotosScan := collect.GPhotosScan{}
 			go collect.Photos(gphotosScan)
 		case 6:
 			go web.StartWebServer()
