@@ -19,6 +19,11 @@ var counter_processed int
 var counter_pending int
 var gmailConfig *oauth2.Config
 
+const (
+	MaxRetryCount = 3
+	SleepTime     = 500 * time.Millisecond
+)
+
 func init() {
 	gmailConfig = &oauth2.Config{
 		ClientID:     constants.OauthClientId,
@@ -80,10 +85,21 @@ func startGmailScan(gmailService *gmail.Service, scanId int, queryString string,
 	messageListCall := gmailService.Users.Messages.List("me").Q(queryString)
 	hasNextPage := true
 	for hasNextPage {
-		messageList, err := messageListCall.Do()
-		checkError(err)
-		err = throttler.Wait(context.Background())
-		checkError(err, fmt.Sprintf("Error with limiter: %s", err))
+		var messageList *gmail.ListMessagesResponse
+		for i := 0; i < MaxRetryCount; i++ {
+			messageListLocal, err := messageListCall.Do()
+			if err == nil {
+				messageList = messageListLocal
+				break
+			}
+			if !isRetryError(err) || i == MaxRetryCount-1 {
+				checkError(err)
+			}
+			fmt.Printf("Got retryable error for Query: %s. Retry count: %d.\n", queryString, i)
+			time.Sleep(SleepTime)
+			err = throttler.Wait(context.Background())
+			checkError(err, fmt.Sprintf("Error with limiter: %s", err))
+		}
 
 		wg.Add(len(messageList.Messages))
 		counter_pending += len(messageList.Messages)
@@ -97,19 +113,31 @@ func startGmailScan(gmailService *gmail.Service, scanId int, queryString string,
 	done <- true
 	ticker.Stop()
 	close(messageMetaData)
+	fmt.Println("Finished Scan. ScanId: ", scanId)
 }
 
 func parseMessageList(gmailService *gmail.Service, messageList *gmail.ListMessagesResponse, messageMetaData chan<- db.MessageMetadata, wg *sync.WaitGroup, throttler *rate.Limiter) {
 	for _, message := range messageList.Messages {
 		throttler.Wait(context.Background())
-		go getMessageInfo(gmailService, message.Id, messageMetaData, wg)
+		go getMessageInfo(gmailService, message.Id, messageMetaData, MaxRetryCount, wg)
 	}
 }
 
-func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan<- db.MessageMetadata, wg *sync.WaitGroup) {
+func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan<- db.MessageMetadata, retryCount int, wg *sync.WaitGroup) {
 	messageListCall := gmailService.Users.Messages.Get("me", id).Format("metadata").MetadataHeaders("From", "To", "Subject", "Date")
 	message, err := messageListCall.Do()
-	checkError(err)
+	if err != nil {
+		if isRetryError(err) {
+			fmt.Printf("Got retryable error for message: %s. Retry count: %d\n", id, retryCount)
+			if retryCount > 0 {
+				fmt.Printf("Retrying for message: %s after wait.\n", id)
+				time.Sleep(SleepTime)
+				getMessageInfo(gmailService, id, messageMetaData, retryCount-1, wg)
+				return
+			}
+		}
+		checkError(err)
+	}
 	from := ""
 	to := ""
 	subject := ""
