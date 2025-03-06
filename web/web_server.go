@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/jyothri/hdd/constants"
 	"github.com/rs/cors"
 )
 
@@ -15,7 +16,7 @@ func StartWebServer() {
 	oauth(r)
 	// spa(r)
 	cors := cors.New(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173"},
+		AllowedOrigins:   []string{constants.FrontendUrl},
 		AllowCredentials: true,
 	})
 	handler := cors.Handler(r)

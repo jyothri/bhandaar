@@ -188,10 +188,6 @@ func setJsonHeader(w http.ResponseWriter) {
 		"Content-Type",
 		"application/json",
 	)
-	w.Header().Set(
-		"Access-Control-Allow-Origin",
-		"http://localhost:8080",
-	)
 }
 
 type PaginationInfo struct {
