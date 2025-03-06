@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -38,7 +39,7 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Received request: %v\n", doScanRequest)
+	slog.Info(fmt.Sprintf("Received request: %v", doScanRequest))
 	var body DoScanResponse
 	switch doScanRequest.ScanType {
 	case "Local":
@@ -117,7 +118,7 @@ func ListAlbumsHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	refresh_token, present := vars["refresh_token"]
 	if !present {
-		fmt.Println("No refresh token to execute ListAlbumsHandler.")
+		slog.Warn("No refresh token to execute ListAlbumsHandler.")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}

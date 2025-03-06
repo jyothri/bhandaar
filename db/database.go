@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -29,7 +30,7 @@ func init() {
 	checkError(err)
 	err = db.Ping()
 	checkError(err)
-	fmt.Println("Successfully connected to DB!")
+	slog.Info("Successfully connected to DB!")
 	migrateDB()
 }
 
@@ -118,7 +119,7 @@ func SavePhotosMediaItemToDb(scanId int, photosMediaItem <-chan PhotosMediaItem)
 			_, err = db.Exec(insert_video_row, lastInsertId, pmi.CameraMake, pmi.CameraModel, pmi.Fps)
 			checkError(err, fmt.Sprintf("While inserting to videometadata mediaItemId:%v", pmi.MediaItemId))
 		default:
-			fmt.Println("Unsupported mime type.")
+			slog.Warn("Unsupported mime type.")
 		}
 	}
 }
@@ -294,7 +295,7 @@ func logCompleteScan(scanId int) {
 	count, err := res.RowsAffected()
 	checkError(err)
 	if count != 1 {
-		fmt.Printf("Could not perform update. query=%s, expected:%d actual: %d", update_row, 1, count)
+		slog.Error(fmt.Sprintf("Could not perform update. query=%s, expected:%d actual: %d", update_row, 1, count))
 	}
 }
 

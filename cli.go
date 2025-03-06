@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/jyothri/hdd/collect"
@@ -11,9 +12,26 @@ import (
 
 var parentDir string
 
+func init() {
+	options := &slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				a.Value = slog.StringValue(a.Value.Time().Format("2006-01-02 15:04:05.999"))
+			}
+			return a
+		},
+		Level: slog.LevelDebug,
+	}
+
+	handler := slog.NewTextHandler(os.Stdout, options)
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+	slog.SetLogLoggerLevel(slog.LevelDebug)
+}
+
 func main() {
 	if constants.StartWebServer {
-		fmt.Println("Starting web server on startup.")
+		slog.Info("Starting web server on startup.")
 		go web.StartWebServer()
 	}
 
@@ -23,7 +41,7 @@ func main() {
 	for {
 		printOptions()
 		fmt.Scan(&choice)
-		fmt.Println()
+		slog.Info("")
 		switch choice {
 		case 0:
 			os.Exit(0)
@@ -50,18 +68,18 @@ func main() {
 		case 6:
 			go web.StartWebServer()
 		default:
-			fmt.Println("Invalid selection")
+			slog.Error("Invalid selection")
 		}
 	}
 }
 
 func optionLocalDrive() {
-	fmt.Printf("Current dir: %v Change directory to scan (y/n)? \n", parentDir)
+	slog.Info(fmt.Sprintf("Current dir: %v Change directory to scan (y/n)?", parentDir))
 	var newParentDir string
 	var changeDir string
 	fmt.Scan(&changeDir)
 	if changeDir == "y" {
-		fmt.Println("Enter new directory to scan")
+		slog.Info("Enter new directory to scan")
 		fmt.Scan(&newParentDir)
 		parentDir = newParentDir
 	}
@@ -72,14 +90,14 @@ func optionLocalDrive() {
 }
 
 func printOptions() {
-	fmt.Println("#################   Choice   #################")
-	fmt.Println(" Please make a choice")
-	fmt.Println("0 Exit")
-	fmt.Println("1 Scan Local Drive")
-	fmt.Println("2 Scan Google Drive")
-	fmt.Println("3 Scan Cloud Storage")
-	fmt.Println("4 Scan GMail")
-	fmt.Println("5 Scan Google Photos")
-	fmt.Println("6 Start web server")
-	fmt.Print(" > ")
+	slog.Info("#################   Choice   #################")
+	slog.Info(" Please make a choice")
+	slog.Info("0 Exit")
+	slog.Info("1 Scan Local Drive")
+	slog.Info("2 Scan Google Drive")
+	slog.Info("3 Scan Cloud Storage")
+	slog.Info("4 Scan GMail")
+	slog.Info("5 Scan Google Photos")
+	slog.Info("6 Start web server")
+	slog.Info(" > ")
 }

@@ -3,6 +3,7 @@ package collect
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -52,7 +53,7 @@ func Gmail(gMailScan GMailScan) int {
 		gMailScan.RefreshToken = token.RefreshToken
 	}
 	if gMailScan.RefreshToken == "" {
-		fmt.Println("Refresh token not found. Cannot proceed.")
+		slog.Warn("Refresh token not found. Cannot proceed.")
 		return -1
 	}
 	gmailService := getGmailService(gMailScan.RefreshToken)
@@ -63,7 +64,7 @@ func Gmail(gMailScan GMailScan) int {
 
 func GetIdentity(refreshToken string) string {
 	if refreshToken == "" {
-		fmt.Println("Refresh token not found. Cannot proceed.")
+		slog.Warn("Refresh token not found. Cannot proceed.")
 		return ""
 	}
 	gmailService := getGmailService(refreshToken)
@@ -95,7 +96,7 @@ func startGmailScan(gmailService *gmail.Service, scanId int, queryString string,
 			if !isRetryError(err) || i == MaxRetryCount-1 {
 				checkError(err)
 			}
-			fmt.Printf("Got retryable error for Query: %s. Retry count: %d.\n", queryString, i)
+			slog.Info(fmt.Sprintf("Got retryable error for Query: %s. Retry count: %d.", queryString, i))
 			time.Sleep(SleepTime)
 			err = throttler.Wait(context.Background())
 			checkError(err, fmt.Sprintf("Error with limiter: %s", err))
@@ -113,7 +114,7 @@ func startGmailScan(gmailService *gmail.Service, scanId int, queryString string,
 	done <- true
 	ticker.Stop()
 	close(messageMetaData)
-	fmt.Println("Finished Scan. ScanId: ", scanId)
+	slog.Info(fmt.Sprintf("Finished Scan. ScanId: %v", scanId))
 }
 
 func parseMessageList(gmailService *gmail.Service, messageList *gmail.ListMessagesResponse, messageMetaData chan<- db.MessageMetadata, wg *sync.WaitGroup, throttler *rate.Limiter) {
@@ -128,9 +129,9 @@ func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan
 	message, err := messageListCall.Do()
 	if err != nil {
 		if isRetryError(err) {
-			fmt.Printf("Got retryable error for message: %s. Retry count: %d\n", id, retryCount)
+			slog.Info(fmt.Sprintf("Got retryable error for message: %s. Retry count: %d", id, retryCount))
 			if retryCount > 0 {
-				fmt.Printf("Retrying for message: %s after wait.\n", id)
+				slog.Info(fmt.Sprintf("Retrying for message: %s after wait.", id))
 				time.Sleep(SleepTime)
 				getMessageInfo(gmailService, id, messageMetaData, retryCount-1, wg)
 				return
@@ -173,8 +174,8 @@ func logProgressToConsole(done <-chan bool, ticker *time.Ticker) {
 		select {
 		case <-done:
 			return
-		case t := <-ticker.C:
-			fmt.Printf("At: %v. Processed= %v, in-progress= %v\n", t, counter_processed, counter_pending)
+		case <-ticker.C:
+			slog.Info(fmt.Sprintf("Processed= %v, in-progress= %v", counter_processed, counter_pending))
 		}
 	}
 }

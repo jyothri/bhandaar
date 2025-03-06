@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -123,7 +124,7 @@ func processMediaItem(photosScan GPhotosScan, mediaItem MediaItem, photosMediaIt
 	if err == nil {
 		pmi.FileModTime = t
 	} else {
-		fmt.Printf("err parsing time. err=%v\n", err)
+		slog.Error(fmt.Sprintf("err parsing time. err=%v", err))
 	}
 
 	photosMediaItem <- pmi
@@ -146,9 +147,9 @@ func ListAlbums(refreshToken string) []Album {
 		resp, err := client.Do(req)
 		checkError(err)
 		if resp.StatusCode != 200 {
-			fmt.Printf("Unexpected response status code %v\n", resp.StatusCode)
+			slog.Warn(fmt.Sprintf("Unexpected response status code %v", resp.StatusCode))
 			rb, _ := io.ReadAll(resp.Body)
-			fmt.Printf("Response %v\n", string(rb))
+			slog.Warn(fmt.Sprintf("Response %v", string(rb)))
 			return albums
 		}
 		albumResponse := new(ListAlbumsResponse)
@@ -182,9 +183,9 @@ func listMediaItemsForAlbum(photosScan GPhotosScan, photosMediaItem chan<- db.Ph
 		resp, err := client.Do(req)
 		checkError(err)
 		if resp.StatusCode != 200 {
-			fmt.Printf("Unexpected response status code %v", resp.StatusCode)
+			slog.Warn(fmt.Sprintf("Unexpected response status code %v", resp.StatusCode))
 			rb, _ := io.ReadAll(resp.Body)
-			fmt.Printf("Response %v\n", string(rb))
+			slog.Warn(fmt.Sprintf("Response %v", string(rb)))
 			if retries == 0 {
 				return
 			}
@@ -223,9 +224,9 @@ func listMediaItems(photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMedi
 		resp, err := client.Do(req)
 		checkError(err)
 		if resp.StatusCode != 200 {
-			fmt.Printf("Unexpected response status code %v", resp.StatusCode)
+			slog.Warn(fmt.Sprintf("Unexpected response status code %v", resp.StatusCode))
 			rb, _ := io.ReadAll(resp.Body)
-			fmt.Printf("Response %v\n", string(rb))
+			slog.Warn(fmt.Sprintf("Response %v", string(rb)))
 			if retries == 0 {
 				return
 			}
@@ -261,20 +262,20 @@ func getContentSizeAndHash(url string, mimeType string) (int64, string) {
 		//e.g. video/mp4
 		url = url + "=dv"
 	default:
-		fmt.Printf("Unhandled mime type: %v\n", mimeType)
+		slog.Warn(fmt.Sprintf("Unhandled mime type: %v", mimeType))
 	}
 	for retries > 0 {
 		resp, err = http.Get(url)
 		if err != nil {
-			fmt.Printf("Got error:%v. Will retry %v times\n", err, retries)
+			slog.Warn(fmt.Sprintf("Got error:%v. Will retry %v times", err, retries))
 			retries -= 1
 			continue
 		}
 		if resp.StatusCode != 200 {
-			fmt.Printf("Unexpected response status code %v", resp.StatusCode)
+			slog.Warn(fmt.Sprintf("Unexpected response status code %v", resp.StatusCode))
 			rb, _ := io.ReadAll(resp.Body)
-			fmt.Printf("Response %v\n", string(rb))
-			fmt.Printf("Will retry %v times\n", retries)
+			slog.Warn(fmt.Sprintf("Response %v", string(rb)))
+			slog.Warn(fmt.Sprintf("Will retry %v times", retries))
 			retries -= 1
 		}
 		break
@@ -304,20 +305,20 @@ func getContentSize(url string, mimeType string) int64 {
 		//e.g. video/mp4
 		url = url + "=dv"
 	default:
-		fmt.Printf("Unhandled mime type: %v\n", mimeType)
+		slog.Warn(fmt.Sprintf("Unhandled mime type: %v", mimeType))
 	}
 	for retries > 0 {
 		resp, err = http.Head(url)
 		if err != nil {
-			fmt.Printf("Got error:%v. Will retry %v times\n", err, retries)
+			slog.Warn(fmt.Sprintf("Got error:%v. Will retry %v times", err, retries))
 			retries -= 1
 			continue
 		}
 		if resp.StatusCode != 200 {
-			fmt.Printf("Unexpected response status code %v", resp.StatusCode)
+			slog.Warn(fmt.Sprintf("Unexpected response status code %v", resp.StatusCode))
 			rb, _ := io.ReadAll(resp.Body)
-			fmt.Printf("Response %v\n", string(rb))
-			fmt.Printf("Will retry %v times\n", retries)
+			slog.Warn(fmt.Sprintf("Response %v", string(rb)))
+			slog.Warn(fmt.Sprintf("Will retry %v times", retries))
 			retries -= 1
 		}
 		break

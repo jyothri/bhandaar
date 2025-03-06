@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -44,7 +45,7 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 	reqURL := fmt.Sprintf("%s?client_id=%s&client_secret=%s&code=%s&grant_type=%s&redirect_uri=%s", googleTokenUrl, clientId, clientSecret, code, grantType, redirectUri)
 	req, err := http.NewRequest(http.MethodPost, reqURL, nil)
 	if err != nil {
-		fmt.Printf("could not create HTTP request: %v", err)
+		slog.Warn(fmt.Sprintf("could not create HTTP request: %v", err))
 		w.WriteHeader(http.StatusBadRequest)
 	}
 	// We set this header since we want the response
@@ -57,7 +58,7 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 	// Send out the HTTP request
 	res, err := httpClient.Do(req)
 	if err != nil {
-		fmt.Printf("could not send HTTP request: %v", err)
+		slog.Warn(fmt.Sprintf("could not send HTTP request: %v", err))
 		w.WriteHeader(http.StatusInternalServerError)
 	}
 	defer res.Body.Close()
@@ -65,13 +66,13 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse the request body into the `OAuthAccessResponse` struct
 	var t OAuthAccessResponse
 	if err := json.NewDecoder(res.Body).Decode(&t); err != nil {
-		fmt.Printf("could not parse JSON response: %v", err)
+		slog.Warn(fmt.Sprintf("could not parse JSON response: %v", err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
 	if t.AccessToken == "" || t.RefreshToken == "" {
-		fmt.Printf("Access or Refresh token could not be obtained. Response: %v\n", json.NewDecoder(res.Body))
+		slog.Warn(fmt.Sprintf("Access or Refresh token could not be obtained. Response: %v\n", json.NewDecoder(res.Body)))
 		w.Write([]byte("Access or Refresh token could not be obtained."))
 		w.WriteHeader(http.StatusBadRequest)
 		return
