@@ -1,0 +1,41 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "**.go"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "**.go"
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lowercase the repo name and username
+        run: echo "REPO=${GITHUB_REPOSITORY,,}" >>${GITHUB_ENV}
+
+      - uses: mr-smithers-excellent/docker-build-push@v6
+        name: Build & push Docker image to Dockerhub
+        with:
+          image: ${{ env.REPO }}
+          addLatest: true
+          registry: docker.io
+          dockerfile: ./be/build/Dockerfile
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - uses: mr-smithers-excellent/docker-build-push@v6
+        name: Build & push Docker image to GHCR
+        with:
+          image: ${{ env.REPO }}
+          addLatest: true
+          registry: ghcr.io
+          dockerfile: ./be/build/Dockerfile
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_TOKEN }}

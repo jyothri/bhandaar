@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -12,8 +13,8 @@ import (
 )
 
 const (
-	host     = "postgres"
-	port     = 5432
+	host     = "localhost"
+	port     = 5433
 	user     = "postgres"
 	password = "postgres"
 	dbname   = "postgres"
@@ -22,6 +23,21 @@ const (
 var db *sqlx.DB
 
 func init() {
+	options := &slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				a.Value = slog.StringValue(a.Value.Time().Format("2006-01-02 15:04:05.999"))
+			}
+			return a
+		},
+		Level: slog.LevelDebug,
+	}
+
+	handler := slog.NewTextHandler(os.Stdout, options)
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+	slog.SetLogLoggerLevel(slog.LevelDebug)
+
 	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
 		"password=%s dbname=%s sslmode=disable",
 		host, port, user, password, dbname)

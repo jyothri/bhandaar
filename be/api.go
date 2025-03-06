@@ -1,4 +1,4 @@
-package web
+package main
 
 import (
 	"encoding/json"
@@ -49,10 +49,6 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 	case "GDrive":
 		body = DoScanResponse{
 			ScanId: collect.CloudDrive(doScanRequest.GDriveScan),
-		}
-	case "GStorage":
-		body = DoScanResponse{
-			ScanId: collect.CloudStorage(doScanRequest.GStorageScan),
 		}
 	case "GMail":
 		body = DoScanResponse{
@@ -206,12 +202,11 @@ type ScanDataResponse struct {
 }
 
 type DoScanRequest struct {
-	ScanType     string
-	LocalScan    collect.LocalScan
-	GDriveScan   collect.GDriveScan
-	GStorageScan collect.GStorageScan
-	GMailScan    collect.GMailScan
-	GPhotosScan  collect.GPhotosScan
+	ScanType    string
+	LocalScan   collect.LocalScan
+	GDriveScan  collect.GDriveScan
+	GMailScan   collect.GMailScan
+	GPhotosScan collect.GPhotosScan
 }
 
 type DoScanResponse struct {

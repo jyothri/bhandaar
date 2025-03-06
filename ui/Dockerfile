@@ -1,12 +1,13 @@
 # build environment
 FROM node:latest AS builder
+LABEL org.opencontainers.image.source=https://github.com/jyothri/bhandaar
 RUN mkdir /usr/src/app
 WORKDIR /usr/src/app
 ENV PATH=/usr/src/app/node_modules/.bin:$PATH
-COPY package.json /usr/src/app/
-COPY package-lock.json /usr/src/app/
+COPY ui/package.json /usr/src/app/
+COPY ui/package-lock.json /usr/src/app/
 RUN npm install --silent
-COPY . /usr/src/app
+COPY ui/ /usr/src/app
 RUN npm run build
 
 # production environment
