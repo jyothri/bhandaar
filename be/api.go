@@ -19,10 +19,11 @@ func api(r *mux.Router) {
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	})
 	api.HandleFunc("/scans", DoScansHandler).Methods("POST")
+	api.HandleFunc("/scans/accounts", GetAccountsHandler).Methods("GET")
 	api.HandleFunc("/scans/{scan_id}", DeleteScanHandler).Methods("DELETE")
 	api.HandleFunc("/scans", ListScansHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/scans", ListScansHandler).Methods("GET")
-	api.HandleFunc("/accounts", GetAccountsHandler).Methods("GET")
+	api.HandleFunc("/accounts", GetRequestAccountsHandler).Methods("GET")
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET")
 	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET").Queries("page", "{page}")
@@ -77,6 +78,13 @@ func ListScansHandler(w http.ResponseWriter, r *http.Request) {
 		Scans:    scans,
 	}
 	serializedBody, _ := json.Marshal(body)
+	setJsonHeader(w)
+	_, _ = w.Write(serializedBody)
+}
+
+func GetRequestAccountsHandler(w http.ResponseWriter, r *http.Request) {
+	accounts := db.GetRequestAccountsFromDb()
+	serializedBody, _ := json.Marshal(accounts)
 	setJsonHeader(w)
 	_, _ = w.Write(serializedBody)
 }

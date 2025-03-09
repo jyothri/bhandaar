@@ -182,11 +182,21 @@ func GetOAuthToken(clientKey string) PrivateToken {
 	return tokenData
 }
 
-func GetAccountsFromDb() []Account {
+func GetRequestAccountsFromDb() []Account {
 	read_row :=
 		`select distinct display_name, client_key from privatetokens p
 		`
 	accounts := []Account{}
+	err := db.Select(&accounts, read_row)
+	checkError(err)
+	return accounts
+}
+
+func GetAccountsFromDb() []string {
+	read_row := `select distinct name  from scanmetadata
+			where name is not null  
+			order by 1 `
+	accounts := []string{}
 	err := db.Select(&accounts, read_row)
 	checkError(err)
 	return accounts
