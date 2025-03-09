@@ -33,3 +33,12 @@ export const getAccounts = async (): Promise<Account[]> => {
   let data: Account[] = await response.json();
   return data;
 };
+
+/**
+ * Function to get accounts for which requests were submitted.
+ */
+export const getScannedAccounts = async (): Promise<string[]> => {
+  const response = await fetch(backend_url + "/api/scans/accounts");
+  let data: string[] = await response.json();
+  return data;
+};
