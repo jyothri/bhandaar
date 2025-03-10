@@ -16,8 +16,8 @@ import (
 )
 
 func oauth(r *mux.Router) {
-	oauth := r.PathPrefix("/oauth/").Subrouter()
-	oauth.HandleFunc("/glink", GoogleAccountLinkingHandler).Methods("GET")
+	api := r.PathPrefix("/api/").Subrouter()
+	api.HandleFunc("/glink", GoogleAccountLinkingHandler).Methods("GET")
 }
 
 func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
