@@ -1,7 +1,7 @@
 import { Account } from "../types/accounts";
 import { RequestScanResponse, ScanMetadata } from "../types/scans";
 
-export const backend_url = "http://localhost:8090";
+export const backend_url = "https://sm.jkurapati.com";
 
 /**
  * Function to submit scan request.
