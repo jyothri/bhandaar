@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	host     = "postgres"
+	host     = "hdd_db"
 	port     = 5432
-	user     = "postgres"
-	password = "postgres"
-	dbname   = "postgres"
+	user     = "hddb"
+	password = "hddb"
+	dbname   = "hdd_db"
 )
 
 var db *sqlx.DB
