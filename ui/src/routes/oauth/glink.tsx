@@ -21,9 +21,8 @@ export const Route = createFileRoute("/oauth/glink")({
 
 function RouteComponent() {
   const { code, state, scope } = Route.useSearch();
-  const redirectUri = `${window.location.protocol}//${window.location.host}/api/glink`;
-  const url = 
-    `${backend_url}/oauth/glink?code=${code}&redirectUri=${redirectUri}&state=${state}&scope=${scope}`;
+  const redirectUri = `${window.location.protocol}//${window.location.host}/oauth/glink`;
+  const url = `${backend_url}/api/glink?code=${code}&redirectUri=${redirectUri}&state=${state}&scope=${scope}`;
   window.location.href = url;
   return (
     <div>
