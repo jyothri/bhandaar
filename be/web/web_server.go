@@ -1,10 +1,9 @@
-package main
+package web
 
 import (
 	"log"
 	"log/slog"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -12,28 +11,12 @@ import (
 	"github.com/rs/cors"
 )
 
-func init() {
-	options := &slog.HandlerOptions{
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if a.Key == slog.TimeKey {
-				a.Value = slog.StringValue(a.Value.Time().Format("2006-01-02 15:04:05.999"))
-			}
-			return a
-		},
-		Level: slog.LevelDebug,
-	}
-
-	handler := slog.NewTextHandler(os.Stdout, options)
-	logger := slog.New(handler)
-	slog.SetDefault(logger)
-	slog.SetLogLoggerLevel(slog.LevelDebug)
-}
-
-func main() {
+func Server() {
 	slog.Info("Starting web server.")
 	r := mux.NewRouter()
 	api(r)
 	oauth(r)
+	sse(r)
 	cors := cors.New(cors.Options{
 		AllowedOrigins:   []string{constants.FrontendUrl},
 		AllowCredentials: true,

@@ -1,4 +1,4 @@
-package main
+package web
 
 import (
 	"crypto/rand"
@@ -72,7 +72,7 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if t.AccessToken == "" || t.RefreshToken == "" {
-		slog.Warn(fmt.Sprintf("Access or Refresh token could not be obtained. Response: %v\n", json.NewDecoder(res.Body)))
+		slog.Warn(fmt.Sprintf("Access or Refresh token could not be obtained. JSON resp: %v raw resp:%v.\n", t, res.Body))
 		w.Write([]byte("Access or Refresh token could not be obtained."))
 		w.WriteHeader(http.StatusBadRequest)
 		return

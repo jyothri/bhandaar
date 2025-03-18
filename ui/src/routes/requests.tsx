@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { getScannedAccounts } from "../api";
+import { backend_url, getScannedAccounts } from "../api";
+import useSSE from "../components/hooks/useSse";
 import { useState } from "react";
 
 export const Route = createFileRoute("/requests")({
@@ -8,6 +9,9 @@ export const Route = createFileRoute("/requests")({
 });
 
 function Requests() {
+  const [selectedAccount, setSelectedAccount] = useState("none");
+  const [sseData, setSseData] = useState<string>("");
+
   const {
     data: scannedAccounts,
     isLoading,
@@ -17,7 +21,13 @@ function Requests() {
     queryFn: () => getScannedAccounts(),
     staleTime: Infinity,
   });
-  const [selectedAccount, setSelectedAccount] = useState("none");
+
+  const { error: sseError } = useSSE(
+    backend_url + "/sse/events",
+    "timer",
+    "close",
+    setSseData
+  );
 
   function handleSelectAccount(e: React.ChangeEvent<HTMLSelectElement>) {
     setSelectedAccount(e.target.value);
@@ -61,6 +71,8 @@ function Requests() {
           </select>
         </div>
       </div>
+      <div>sseData: {sseData}</div>
+      {sseError && <div>sseError: {sseError}</div>}
     </div>
   );
 }
