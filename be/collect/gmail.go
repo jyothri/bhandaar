@@ -9,6 +9,7 @@ import (
 
 	"github.com/jyothri/hdd/constants"
 	"github.com/jyothri/hdd/db"
+	"github.com/jyothri/hdd/notification"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"golang.org/x/time/rate"
@@ -18,6 +19,7 @@ import (
 
 var counter_processed int
 var counter_pending int
+var start time.Time
 var gmailConfig *oauth2.Config
 
 const (
@@ -57,7 +59,7 @@ func Gmail(gMailScan GMailScan) int {
 		return -1
 	}
 	gmailService := getGmailService(gMailScan.RefreshToken)
-	go startGmailScan(gmailService, scanId, gMailScan.Filter, messageMetaData)
+	go startGmailScan(gmailService, scanId, gMailScan, messageMetaData)
 	go db.SaveMessageMetadataToDb(scanId, gMailScan.Username, messageMetaData)
 	return scanId
 }
@@ -74,13 +76,16 @@ func GetIdentity(refreshToken string) string {
 	return profileInfo.EmailAddress
 }
 
-func startGmailScan(gmailService *gmail.Service, scanId int, queryString string, messageMetaData chan<- db.MessageMetadata) {
+func startGmailScan(gmailService *gmail.Service, scanId int, gMailScan GMailScan, messageMetaData chan<- db.MessageMetadata) {
+	queryString := gMailScan.Filter
+	start = time.Now()
 	lock.Lock()
 	defer lock.Unlock()
 	var wg sync.WaitGroup
 	ticker := time.NewTicker(5 * time.Second)
 	done := make(chan bool)
-	go logProgressToConsole(done, ticker)
+	notificationChannel := notification.GetPublisher(gMailScan.ClientKey)
+	go logProgress(scanId, gMailScan.ClientKey, done, ticker, notificationChannel)
 	throttler := rate.NewLimiter(50, 5)
 
 	messageListCall := gmailService.Users.Messages.List("me").Q(queryString)
@@ -101,7 +106,6 @@ func startGmailScan(gmailService *gmail.Service, scanId int, queryString string,
 			err = throttler.Wait(context.Background())
 			checkError(err, fmt.Sprintf("Error with limiter: %s", err))
 		}
-
 		wg.Add(len(messageList.Messages))
 		counter_pending += len(messageList.Messages)
 		parseMessageList(gmailService, messageList, messageMetaData, &wg, throttler)
@@ -169,13 +173,29 @@ func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan
 	wg.Done()
 }
 
-func logProgressToConsole(done <-chan bool, ticker *time.Ticker) {
+func logProgress(scanId int, ClientKey string, done <-chan bool, ticker *time.Ticker, notificationChannel chan<- notification.Progress) {
+	defer close(notificationChannel)
 	for {
 		select {
 		case <-done:
+			progress := notification.Progress{
+				ProcessedCount: counter_processed,
+				ActiveCount:    counter_pending,
+				ScanId:         scanId,
+				ClientKey:      ClientKey,
+				ElapsedInSec:   int(time.Since(start).Seconds()),
+			}
+			notificationChannel <- progress
 			return
 		case <-ticker.C:
-			slog.Info(fmt.Sprintf("Processed= %v, in-progress= %v", counter_processed, counter_pending))
+			progress := notification.Progress{
+				ProcessedCount: counter_processed,
+				ActiveCount:    counter_pending,
+				ScanId:         scanId,
+				ClientKey:      ClientKey,
+				ElapsedInSec:   int(time.Since(start).Seconds()),
+			}
+			notificationChannel <- progress
 		}
 	}
 }

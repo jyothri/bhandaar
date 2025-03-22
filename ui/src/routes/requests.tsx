@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { backend_url, getScannedAccounts } from "../api";
 import useSSE from "../components/hooks/useSse";
 import { useState } from "react";
+import { Progress } from "../types/scans";
 
 export const Route = createFileRoute("/requests")({
   component: Requests,
@@ -22,11 +23,28 @@ function Requests() {
     staleTime: Infinity,
   });
 
+  const setData: (arg0: Progress) => void = (scansProgress: Progress) => {
+    setSseData(
+      "Scan Id: " +
+        scansProgress.scan_id +
+        "Elapsed Time: " +
+        scansProgress.elapsed_in_sec +
+        " ETA: " +
+        scansProgress.eta_in_sec +
+        " Client Key: " +
+        scansProgress.client_key +
+        " Processed Count: " +
+        scansProgress.processed_count +
+        " Active count: " +
+        scansProgress.active_count
+    );
+  };
+
   const { error: sseError } = useSSE(
-    backend_url + "/sse/events",
-    "timer",
+    backend_url + "/sse/scanprogress",
+    "progress",
     "close",
-    setSseData
+    setData
   );
 
   function handleSelectAccount(e: React.ChangeEvent<HTMLSelectElement>) {

@@ -21,3 +21,13 @@ export type ScanMetadata = {
 export type RequestScanResponse = {
   scan_id: number;
 };
+
+export type Progress = {
+  client_key: string;
+  processed_count: number;
+  active_count: number;
+  completion_pct: number;
+  elapsed_in_sec: number;
+  eta_in_sec: number;
+  scan_id: number;
+};

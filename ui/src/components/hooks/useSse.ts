@@ -1,10 +1,10 @@
-import { Dispatch, SetStateAction, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 function useSse(
   url: string,
   messageKey: string,
   endMessageKey: string,
-  setData: Dispatch<SetStateAction<string>>
+  setData: (arg0: any) => void
 ) {
   const [error, setError] = useState<string | null>(null);
 
@@ -14,7 +14,7 @@ function useSse(
     // Handle incoming data
     eventSource.addEventListener(messageKey, (e) => {
       if (e.data) {
-        setData(e.data);
+        setData(JSON.parse(e.data));
         setError("");
       }
     });

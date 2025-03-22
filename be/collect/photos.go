@@ -17,6 +17,7 @@ import (
 
 	"github.com/jyothri/hdd/constants"
 	"github.com/jyothri/hdd/db"
+	"github.com/jyothri/hdd/notification"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"golang.org/x/time/rate"
@@ -60,7 +61,8 @@ func startPhotosScan(scanId int, photosScan GPhotosScan, photosMediaItem chan<- 
 	defer lock.Unlock()
 	ticker := time.NewTicker(5 * time.Second)
 	done := make(chan bool)
-	go logProgressToConsole(done, ticker)
+	notificationChannel := notification.GetPublisher(photosScan.AlbumId)
+	go logProgress(scanId, photosScan.AlbumId, done, ticker, notificationChannel)
 	var wg sync.WaitGroup
 	if photosScan.AlbumId != "" {
 		listMediaItemsForAlbum(photosScan, photosMediaItem, &wg)
