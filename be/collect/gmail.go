@@ -101,7 +101,7 @@ func startGmailScan(gmailService *gmail.Service, scanId int, gMailScan GMailScan
 			if !isRetryError(err) || i == MaxRetryCount-1 {
 				checkError(err)
 			}
-			slog.Info(fmt.Sprintf("Got retryable error for Query: %s. Retry count: %d.", queryString, i))
+			slog.Info(fmt.Sprintf("Got retryable error for Query: %s. Attempt #: %d of %d.", queryString, i, MaxRetryCount))
 			time.Sleep(SleepTime)
 			err = throttler.Wait(context.Background())
 			checkError(err, fmt.Sprintf("Error with limiter: %s", err))
@@ -133,7 +133,7 @@ func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan
 	message, err := messageListCall.Do()
 	if err != nil {
 		if isRetryError(err) {
-			slog.Info(fmt.Sprintf("Got retryable error for message: %s. Retry count: %d", id, retryCount))
+			slog.Info(fmt.Sprintf("Got retryable error for message: %s. Retries remaining: %d", id, retryCount))
 			if retryCount > 0 {
 				slog.Info(fmt.Sprintf("Retrying for message: %s after wait.", id))
 				time.Sleep(SleepTime)
