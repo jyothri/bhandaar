@@ -202,6 +202,25 @@ func GetAccountsFromDb() []string {
 	return accounts
 }
 
+func GetScanRequestsFromDb(accountKey string) []ScanRequests {
+	if len(strings.TrimSpace(accountKey)) == 0 {
+		return []ScanRequests{}
+	}
+	read_row := `select distinct COALESCE(sm.name, '') as name, sm.search_filter, s.id,
+			s.scan_type,
+			scan_start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles' as scan_start_time,
+			COALESCE(EXTRACT(EPOCH FROM (scan_end_time - scan_start_time)), -1) as scan_duration_in_sec
+			from scans s
+			join scanmetadata sm on sm.scan_id = s.id
+			where sm.name = $1
+			group by sm.name, sm.search_filter, s.id, s.scan_start_time, s.scan_type
+			order by s.id desc`
+	scanRequests := []ScanRequests{}
+	err := db.Select(&scanRequests, read_row, accountKey)
+	checkError(err)
+	return scanRequests
+}
+
 func GetScansFromDb(pageNo int) ([]Scan, int) {
 	limit := 10
 	offset := limit * (pageNo - 1)
@@ -475,6 +494,15 @@ type Scan struct {
 	ScanEndTime   sql.NullTime `db:"scan_end_time"`
 	Metadata      string       `db:"metadata"`
 	Duration      string       `db:"duration"`
+}
+
+type ScanRequests struct {
+	Id                int       `db:"id" json:"scan_id"`
+	Name              string    `db:"name" json:"name"`
+	ScanType          string    `db:"scan_type" json:"scan_type"`
+	SearchFilter      string    `db:"search_filter" json:"search_filter"`
+	ScanStartTime     time.Time `db:"scan_start_time" json:"scan_start_time"`
+	ScanDurationInSec string    `db:"scan_duration_in_sec" json:"scan_duration_in_sec"`
 }
 
 type ScanData struct {

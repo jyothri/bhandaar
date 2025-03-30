@@ -24,7 +24,7 @@ var gmailConfig *oauth2.Config
 
 const (
 	MaxRetryCount = 3
-	SleepTime     = 500 * time.Millisecond
+	SleepTime     = 1 * time.Second
 )
 
 func init() {

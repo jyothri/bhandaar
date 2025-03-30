@@ -19,6 +19,7 @@ func api(r *mux.Router) {
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	})
 	api.HandleFunc("/scans", DoScansHandler).Methods("POST")
+	api.HandleFunc("/scans/requests/{account_key}", GetScanRequestsHandler).Methods("GET")
 	api.HandleFunc("/scans/accounts", GetAccountsHandler).Methods("GET")
 	api.HandleFunc("/scans/{scan_id}", DeleteScanHandler).Methods("DELETE")
 	api.HandleFunc("/scans", ListScansHandler).Methods("GET").Queries("page", "{page}")
@@ -85,6 +86,15 @@ func ListScansHandler(w http.ResponseWriter, r *http.Request) {
 func GetRequestAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	accounts := db.GetRequestAccountsFromDb()
 	serializedBody, _ := json.Marshal(accounts)
+	setJsonHeader(w)
+	_, _ = w.Write(serializedBody)
+}
+
+func GetScanRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	accountKey := vars["account_key"]
+	accountRequests := db.GetScanRequestsFromDb(accountKey)
+	serializedBody, _ := json.Marshal(accountRequests)
 	setJsonHeader(w)
 	_, _ = w.Write(serializedBody)
 }

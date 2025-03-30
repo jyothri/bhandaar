@@ -28,7 +28,13 @@ func isRetryError(err error) bool {
 		if statusCode == http.StatusTooManyRequests {
 			return true
 		}
-		fmt.Printf("Unknown Google API error: code: %v %v. Message: %v\n", statusCode, err, err.Error())
+		if statusCode == http.StatusForbidden {
+			if len(googleErr.Errors) > 0 && googleErr.Errors[0].Reason == "rateLimitExceeded" {
+				fmt.Printf("rateLimitExceeded error. Message: %v\n", googleErr.Message)
+				return true
+			}
+		}
+		fmt.Printf("Unknown Google API error: code: %v Message: %v error: %v\n", statusCode, googleErr.Message, err)
 	}
 	return false
 }
