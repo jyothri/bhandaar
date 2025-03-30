@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { requestScan, getAccounts } from "../api";
 import { ScanMetadata, ScanType } from "../types/scans";
+import ScanProgress from "../components/ScanProgress";
 
 export const Route = createFileRoute("/request")({
   component: Request,
@@ -251,6 +252,8 @@ function Request() {
       {infoMessage && (
         <div className="text-blue-400 h-1/5 text-lg">{infoMessage}</div>
       )}
+
+      <ScanProgress />
     </div>
   );
 }

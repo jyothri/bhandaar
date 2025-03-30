@@ -1,5 +1,5 @@
 import { Account } from "../types/accounts";
-import { RequestScanResponse, ScanMetadata } from "../types/scans";
+import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 
 export const backend_url = "https://sm.jkurapati.com";
 
@@ -41,4 +41,23 @@ export const getScannedAccounts = async (): Promise<string[]> => {
   const response = await fetch(backend_url + "/api/scans/accounts");
   let data: string[] = await response.json();
   return data;
+};
+
+/**
+ * Function to get details for selected account.
+ */
+export const getScanRequests = async (
+  accountKey: string
+): Promise<ScanRequest[]> => {
+  if (accountKey === "none") {
+    return [];
+  }
+  const response = await fetch(
+    backend_url + "/api/scans/requests/" + accountKey
+  );
+  const content = await response.json();
+  if (content.error != null) {
+    throw new Error(content);
+  }
+  return content;
 };

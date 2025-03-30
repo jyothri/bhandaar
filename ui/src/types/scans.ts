@@ -31,3 +31,12 @@ export type Progress = {
   eta_in_sec: number;
   scan_id: number;
 };
+
+export type ScanRequest = {
+  scan_id: number;
+  name: string;
+  scan_type: string;
+  search_filter: string;
+  scan_start_time: string;
+  scan_duration_in_sec: number;
+};
