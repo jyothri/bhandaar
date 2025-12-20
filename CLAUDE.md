@@ -39,9 +39,10 @@ The application consists of:
 ### Frontend Structure (`ui/`)
 
 - **src/routes/**: TanStack Router route components
+  - `index.tsx`: Home page/landing
   - `request.tsx`: Main scan request form and results display
   - `requests.tsx`: List view of scan requests by account
-  - `oauth/callback.tsx`: OAuth callback handler
+  - `oauth/glink.tsx`: OAuth callback handler
 - **src/api/**: Backend API client functions
 - **src/components/**: Reusable UI components
 - **src/types/**: TypeScript type definitions for API contracts
@@ -64,17 +65,15 @@ Navigate to `be/` directory for all backend commands:
 # Run the server locally
 # Requires environment variables:
 #   - GOOGLE_APPLICATION_CREDENTIALS (path to GCP credentials JSON)
-#   - OAUTH_CLIENT_ID
-#   - OAUTH_CLIENT_SECRET
-#   - REFRESH_TOKEN (optional, for non-OAuth scans)
-# Requires PostgreSQL running on localhost:5432
+# Requires PostgreSQL running (update db/database.go host constant if needed)
+# Backend listens on port 8090
 go run .
 
 # Build the backend
 go build -o hdd
 
 # Run with custom flags
-go run . -oauth_client_id=$OAUTH_CLIENT_ID -oauth_client_secret=$OAUTH_CLIENT_SECRET -refresh_token=$REFRESH_TOKEN
+go run . -oauth_client_id=$OAUTH_CLIENT_ID -oauth_client_secret=$OAUTH_CLIENT_SECRET -frontend_url=http://localhost:5173
 
 # Build Docker image (from repository root)
 docker build . -f ./build/Dockerfile -t jyothri/hdd-go-build
@@ -144,7 +143,7 @@ For Cloud Storage access, set `GOOGLE_APPLICATION_CREDENTIALS` to service accoun
 ## Important Notes
 
 - **No tests**: The codebase currently has no test files
-- **Database connection**: Update `be/db/database.go` if PostgreSQL is not on localhost
+- **Database connection**: Default connection in `be/db/database.go` expects host `hdd_db`, port `5432`, user/password `hddb/hddb`, database `hdd_db`. Update constants if using different configuration (e.g., `localhost` for local development)
 - **Backend API URL**: Hardcoded in `ui/src/api/index.ts` as `https://sm.jkurapati.com`
 - **Known issue**: Directory size calculation differs between local scans (recursive) and cloud scans (directory-level only) - see be/README.md "Kinks" section
 - **CORS**: Backend configured to allow requests from frontend origin
