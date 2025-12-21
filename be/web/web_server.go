@@ -14,6 +14,10 @@ import (
 func Server() {
 	slog.Info("Starting web server.")
 	r := mux.NewRouter()
+
+	// Apply global default size limit to all routes (512 KB)
+	r.Use(RequestSizeLimitMiddleware(DefaultMaxBodySize))
+
 	api(r)
 	oauth(r)
 	sse(r)

@@ -18,7 +18,13 @@ func api(r *mux.Router) {
 	api.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	})
-	api.HandleFunc("/scans", DoScansHandler).Methods("POST")
+
+	// Scan POST endpoint with larger body limit (1 MB)
+	scanPostRouter := api.PathPrefix("/scans").Subrouter()
+	scanPostRouter.Use(RequestSizeLimitMiddleware(ScanRequestMaxBodySize))
+	scanPostRouter.HandleFunc("", DoScansHandler).Methods("POST")
+
+	// Other scan endpoints use default limit
 	api.HandleFunc("/scans/requests/{account_key}", GetScanRequestsHandler).Methods("GET")
 	api.HandleFunc("/scans/accounts", GetAccountsHandler).Methods("GET")
 	api.HandleFunc("/scans/{scan_id}", DeleteScanHandler).Methods("DELETE")
@@ -38,6 +44,12 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	var doScanRequest DoScanRequest
 	err := decoder.Decode(&doScanRequest)
+
+	// Check if error is due to size limit
+	if handleMaxBytesError(w, r, err, ScanRequestMaxBodySize) {
+		return
+	}
+
 	if err != nil {
 		slog.Error("Failed to decode scan request", "error", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)

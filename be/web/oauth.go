@@ -16,8 +16,10 @@ import (
 )
 
 func oauth(r *mux.Router) {
-	api := r.PathPrefix("/api/").Subrouter()
-	api.HandleFunc("/glink", GoogleAccountLinkingHandler).Methods("GET")
+	// OAuth routes with smaller body limit (16 KB)
+	oauthRouter := r.PathPrefix("/api/").Subrouter()
+	oauthRouter.Use(RequestSizeLimitMiddleware(OAuthCallbackMaxBodySize))
+	oauthRouter.HandleFunc("/glink", GoogleAccountLinkingHandler).Methods("GET")
 }
 
 func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +38,10 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Retrieve authZ code from query params.
 	err := r.ParseForm()
+	if handleMaxBytesError(w, r, err, OAuthCallbackMaxBodySize) {
+		return
+	}
+
 	if err != nil {
 		slog.Error("Failed to parse OAuth form", "error", err)
 		http.Error(w, "Invalid request format", http.StatusBadRequest)
