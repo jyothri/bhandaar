@@ -37,7 +37,9 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 	// Retrieve authZ code from query params.
 	err := r.ParseForm()
 	if err != nil {
-		panic(err)
+		slog.Error("Failed to parse OAuth form", "error", err)
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
+		return
 	}
 	code := r.FormValue("code")
 
@@ -45,8 +47,9 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 	reqURL := fmt.Sprintf("%s?client_id=%s&client_secret=%s&code=%s&grant_type=%s&redirect_uri=%s", googleTokenUrl, clientId, clientSecret, code, grantType, redirectUri)
 	req, err := http.NewRequest(http.MethodPost, reqURL, nil)
 	if err != nil {
-		slog.Warn(fmt.Sprintf("could not create HTTP request: %v", err))
-		w.WriteHeader(http.StatusBadRequest)
+		slog.Error("Failed to create HTTP request", "error", err)
+		http.Error(w, "Failed to create OAuth request", http.StatusBadRequest)
+		return
 	}
 	// We set this header since we want the response
 	// as JSON
@@ -73,16 +76,40 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 
 	if t.AccessToken == "" || t.RefreshToken == "" {
 		slog.Warn(fmt.Sprintf("Access or Refresh token could not be obtained. JSON resp: %v raw resp:%v.\n", t, res.Body))
-		w.Write([]byte("Access or Refresh token could not be obtained."))
-		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, "Access or Refresh token could not be obtained", http.StatusBadRequest)
 		return
 	}
-	client_key := generateRandomString(12)
-	email := collect.GetIdentity(t.RefreshToken)
-	display_name := getDisplayName(email, client_key)
-	db.SaveOAuthToken(t.AccessToken, t.RefreshToken, display_name, client_key, t.Scope, t.ExpiresIn, t.TokenType)
 
-	u, _ := url.Parse(redirectUri)
+	client_key := generateRandomString(12)
+
+	email, err := collect.GetIdentity(t.RefreshToken)
+	if err != nil {
+		slog.Error("Failed to get user identity",
+			"error", err)
+		http.Error(w, "Failed to verify account", http.StatusInternalServerError)
+		return
+	}
+
+	display_name := getDisplayName(email, client_key)
+
+	err = db.SaveOAuthToken(t.AccessToken, t.RefreshToken, display_name, client_key, t.Scope, t.ExpiresIn, t.TokenType)
+	if err != nil {
+		slog.Error("Failed to save OAuth token",
+			"client_key", client_key,
+			"error", err)
+		http.Error(w, "Failed to save account information", http.StatusInternalServerError)
+		return
+	}
+
+	u, err := url.Parse(redirectUri)
+	if err != nil {
+		slog.Error("Failed to parse redirect URI",
+			"redirect_uri", redirectUri,
+			"error", err)
+		http.Error(w, "Invalid redirect URI", http.StatusBadRequest)
+		return
+	}
+
 	returnUrl := u.Scheme + "://" + u.Host + "/request"
 	w.Header().Set("Location", returnUrl)
 	w.WriteHeader(http.StatusFound)

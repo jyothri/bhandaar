@@ -43,47 +43,95 @@ func resetCounters() {
 	counter_pending.Store(0)
 }
 
-func getGmailService(refreshToken string) *gmail.Service {
+func getGmailService(refreshToken string) (*gmail.Service, error) {
 	tokenSrc := oauth2.Token{
 		RefreshToken: refreshToken,
 	}
 	ctx := context.Background()
 	gmailService, err := gmail.NewService(ctx, option.WithTokenSource(gmailConfig.TokenSource(ctx, &tokenSrc)))
-	checkError(err)
-	return gmailService
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gmail service: %w", err)
+	}
+	return gmailService, nil
 }
 
-func Gmail(gMailScan GMailScan) int {
-	messageMetaData := make(chan db.MessageMetadata, 10)
-	scanId := db.LogStartScan("gmail")
-	go db.SaveScanMetadata(gMailScan.Username, "", gMailScan.Filter, scanId)
+func Gmail(gMailScan GMailScan) (int, error) {
+	// Phase 1: Create scan record (synchronous)
+	scanId, err := db.LogStartScan("gmail")
+	if err != nil {
+		return 0, fmt.Errorf("failed to start gmail scan (account=%s, filter=%s): %w",
+			gMailScan.ClientKey, gMailScan.Filter, err)
+	}
+
+	// Save metadata in background
+	go func() {
+		if err := db.SaveScanMetadata(gMailScan.Username, "", gMailScan.Filter, scanId); err != nil {
+			slog.Error("Failed to save scan metadata",
+				"scan_id", scanId,
+				"error", err)
+		}
+	}()
+
+	// Get refresh token
 	if gMailScan.ClientKey != "" {
-		token := db.GetOAuthToken(gMailScan.ClientKey)
+		token, err := db.GetOAuthToken(gMailScan.ClientKey)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get OAuth token for client %s: %w", gMailScan.ClientKey, err)
+		}
 		gMailScan.RefreshToken = token.RefreshToken
 	}
 	if gMailScan.RefreshToken == "" {
-		slog.Warn("Refresh token not found. Cannot proceed.")
-		return -1
+		return 0, fmt.Errorf("refresh token is empty for account %s", gMailScan.ClientKey)
 	}
-	gmailService := getGmailService(gMailScan.RefreshToken)
-	go startGmailScan(gmailService, scanId, gMailScan, messageMetaData)
+
+	// Get Gmail service
+	gmailService, err := getGmailService(gMailScan.RefreshToken)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get gmail service for scan %d: %w", scanId, err)
+	}
+
+	// Phase 2: Start collection in background (asynchronous)
+	messageMetaData := make(chan db.MessageMetadata, 10)
+	go func() {
+		defer close(messageMetaData)
+
+		err := startGmailScan(gmailService, scanId, gMailScan, messageMetaData)
+		if err != nil {
+			slog.Error("Gmail scan collection failed",
+				"scan_id", scanId,
+				"account", gMailScan.ClientKey,
+				"error", err)
+			db.MarkScanFailed(scanId, err.Error())
+			return
+		}
+	}()
+
+	// Start processing messages in background
 	go db.SaveMessageMetadataToDb(scanId, gMailScan.Username, messageMetaData)
-	return scanId
+
+	return scanId, nil
 }
 
-func GetIdentity(refreshToken string) string {
+func GetIdentity(refreshToken string) (string, error) {
 	if refreshToken == "" {
-		slog.Warn("Refresh token not found. Cannot proceed.")
-		return ""
+		return "", fmt.Errorf("refresh token is empty")
 	}
-	gmailService := getGmailService(refreshToken)
+
+	gmailService, err := getGmailService(refreshToken)
+	if err != nil {
+		return "", fmt.Errorf("failed to get gmail service: %w", err)
+	}
+
 	profile := gmailService.Users.GetProfile("me")
 	profileInfo, err := profile.Do()
-	checkError(err)
-	return profileInfo.EmailAddress
+	if err != nil {
+		return "", fmt.Errorf("failed to get user profile from Gmail API: %w", err)
+	}
+
+	return profileInfo.EmailAddress, nil
 }
 
-func startGmailScan(gmailService *gmail.Service, scanId int, gMailScan GMailScan, messageMetaData chan<- db.MessageMetadata) {
+func startGmailScan(gmailService *gmail.Service, scanId int, gMailScan GMailScan, messageMetaData chan<- db.MessageMetadata) error {
 	queryString := gMailScan.Filter
 	start = time.Now()
 	lock.Lock()
@@ -100,19 +148,34 @@ func startGmailScan(gmailService *gmail.Service, scanId int, gMailScan GMailScan
 	hasNextPage := true
 	for hasNextPage {
 		var messageList *gmail.ListMessagesResponse
+		var lastErr error
 		for i := 0; i < MaxRetryCount; i++ {
 			messageListLocal, err := messageListCall.Do()
 			if err == nil {
 				messageList = messageListLocal
+				lastErr = nil
 				break
 			}
+			lastErr = err
 			if !isRetryError(err) || i == MaxRetryCount-1 {
-				checkError(err)
+				done <- true
+				ticker.Stop()
+				return fmt.Errorf("failed to list messages for query '%s' after %d retries: %w",
+					queryString, MaxRetryCount, err)
 			}
 			slog.Info(fmt.Sprintf("Got retryable error for Query: %s. Attempt #: %d of %d.", queryString, i, MaxRetryCount))
 			time.Sleep(SleepTime)
 			err = throttler.Wait(context.Background())
-			checkError(err, fmt.Sprintf("Error with limiter: %s", err))
+			if err != nil {
+				done <- true
+				ticker.Stop()
+				return fmt.Errorf("rate limiter error: %w", err)
+			}
+		}
+		if lastErr != nil {
+			done <- true
+			ticker.Stop()
+			return fmt.Errorf("failed to get message list: %w", lastErr)
 		}
 		wg.Add(len(messageList.Messages))
 		counter_pending.Add(int64(len(messageList.Messages)))
@@ -125,8 +188,8 @@ func startGmailScan(gmailService *gmail.Service, scanId int, gMailScan GMailScan
 	wg.Wait()
 	done <- true
 	ticker.Stop()
-	close(messageMetaData)
 	slog.Info(fmt.Sprintf("Finished Scan. ScanId: %v", scanId))
+	return nil
 }
 
 func parseMessageList(gmailService *gmail.Service, messageList *gmail.ListMessagesResponse, messageMetaData chan<- db.MessageMetadata, wg *sync.WaitGroup, throttler *rate.Limiter) {
@@ -137,6 +200,8 @@ func parseMessageList(gmailService *gmail.Service, messageList *gmail.ListMessag
 }
 
 func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan<- db.MessageMetadata, retryCount int, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	messageListCall := gmailService.Users.Messages.Get("me", id).Format("metadata").MetadataHeaders("From", "To", "Subject", "Date")
 	message, err := messageListCall.Do()
 	if err != nil {
@@ -145,11 +210,18 @@ func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan
 			if retryCount > 0 {
 				slog.Info(fmt.Sprintf("Retrying for message: %s after wait.", id))
 				time.Sleep(SleepTime)
-				getMessageInfo(gmailService, id, messageMetaData, retryCount-1, wg)
+				// Note: Don't call wg.Done() again - already deferred above
+				wg.Add(1)
+				go getMessageInfo(gmailService, id, messageMetaData, retryCount-1, wg)
 				return
 			}
 		}
-		checkError(err)
+		// Log and skip this message instead of crashing
+		slog.Error("Failed to get message info, skipping",
+			"message_id", id,
+			"retries_exhausted", retryCount == 0,
+			"error", err)
+		return
 	}
 	from := ""
 	to := ""
@@ -178,7 +250,7 @@ func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan
 	messageMetaData <- md
 	counter_processed.Add(1)
 	counter_pending.Add(-1)
-	wg.Done()
+	// wg.Done() is handled by defer at function start
 }
 
 func logProgress(scanId int, ClientKey string, done <-chan bool, ticker *time.Ticker, notificationChannel chan<- notification.Progress) {

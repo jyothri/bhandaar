@@ -38,25 +38,67 @@ func init() {
 	}
 }
 
-func getPhotosService(refreshToken string) *http.Client {
+func getPhotosService(refreshToken string) (*http.Client, error) {
+	if refreshToken == "" {
+		return nil, fmt.Errorf("refresh token is empty")
+	}
 	tokenSrc := oauth2.Token{
 		RefreshToken: refreshToken,
 	}
 	client := photosConfig.Client(context.Background(), &tokenSrc)
+	if client == nil {
+		return nil, fmt.Errorf("failed to create photos client")
+	}
 	client.Timeout = 10 * time.Second
-	return client
+	return client, nil
 }
 
-func Photos(photosScan GPhotosScan) int {
+func Photos(photosScan GPhotosScan) (int, error) {
+	// Phase 1: Create scan record (synchronous)
+	scanId, err := db.LogStartScan("photos")
+	if err != nil {
+		return 0, fmt.Errorf("failed to start photos scan (album=%s): %w", photosScan.AlbumId, err)
+	}
+
+	// Validate photos client
+	_, err = getPhotosService(photosScan.RefreshToken)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get photos service for scan %d: %w", scanId, err)
+	}
+
+	// Save metadata in background
+	go func() {
+		if err := db.SaveScanMetadata("", "", "", scanId); err != nil {
+			slog.Error("Failed to save scan metadata",
+				"scan_id", scanId,
+				"album_id", photosScan.AlbumId,
+				"error", err)
+		}
+	}()
+
+	// Phase 2: Start collection in background (asynchronous)
 	photosMediaItem := make(chan db.PhotosMediaItem, 10)
-	scanId := db.LogStartScan("photos")
-	go db.SaveScanMetadata("", "", "", scanId)
-	go startPhotosScan(scanId, photosScan, photosMediaItem)
+	go func() {
+		defer close(photosMediaItem)
+
+		err := startPhotosScan(scanId, photosScan, photosMediaItem)
+		if err != nil {
+			slog.Error("Photos scan collection failed",
+				"scan_id", scanId,
+				"album_id", photosScan.AlbumId,
+				"error", err)
+			db.MarkScanFailed(scanId, err.Error())
+			return
+		}
+	}()
+
+	// Start processing photo data in background
 	go db.SavePhotosMediaItemToDb(scanId, photosMediaItem)
-	return scanId
+
+	return scanId, nil
 }
 
-func startPhotosScan(scanId int, photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMediaItem) {
+func startPhotosScan(scanId int, photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMediaItem) error {
 	lock.Lock()
 	defer lock.Unlock()
 	resetCounters()
@@ -65,15 +107,19 @@ func startPhotosScan(scanId int, photosScan GPhotosScan, photosMediaItem chan<- 
 	notificationChannel := notification.GetPublisher(photosScan.AlbumId)
 	go logProgress(scanId, photosScan.AlbumId, done, ticker, notificationChannel)
 	var wg sync.WaitGroup
+	var err error
 	if photosScan.AlbumId != "" {
-		listMediaItemsForAlbum(photosScan, photosMediaItem, &wg)
+		err = listMediaItemsForAlbum(photosScan, photosMediaItem, &wg)
 	} else {
-		listMediaItems(photosScan, photosMediaItem, &wg)
+		err = listMediaItems(photosScan, photosMediaItem, &wg)
 	}
 	wg.Wait()
 	done <- true
 	ticker.Stop()
-	close(photosMediaItem)
+	if err != nil {
+		return fmt.Errorf("failed to list media items: %w", err)
+	}
+	return nil
 }
 
 func processMediaItem(photosScan GPhotosScan, mediaItem MediaItem, photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGroup) {
@@ -140,15 +186,28 @@ func ListAlbums(refreshToken string) []Album {
 	url := photosApiBaseUrl + "v1/albums"
 	nextPageToken := ""
 	hasNextPage := true
-	client := getPhotosService(refreshToken)
+	client, err := getPhotosService(refreshToken)
+	if err != nil {
+		slog.Error("Failed to get photos service for ListAlbums", "error", err)
+		return albums
+	}
 	for hasNextPage {
 		err := throttler.Wait(context.Background())
-		checkError(err, fmt.Sprintf("Error with limiter: %s", err))
+		if err != nil {
+			slog.Error("Throttler wait error in ListAlbums", "error", err)
+			return albums
+		}
 		nextPageUrl := url + "?pageToken=" + nextPageToken
 		req, err := http.NewRequest("GET", nextPageUrl, nil)
-		checkError(err)
+		if err != nil {
+			slog.Error("Failed to create album list request", "error", err)
+			return albums
+		}
 		resp, err := client.Do(req)
-		checkError(err)
+		if err != nil {
+			slog.Error("Failed to fetch albums", "error", err)
+			return albums
+		}
 		if resp.StatusCode != 200 {
 			slog.Warn(fmt.Sprintf("Unexpected response status code %v", resp.StatusCode))
 			rb, _ := io.ReadAll(resp.Body)
@@ -157,7 +216,10 @@ func ListAlbums(refreshToken string) []Album {
 		}
 		albumResponse := new(ListAlbumsResponse)
 		err = getJson(resp, albumResponse)
-		checkError(err)
+		if err != nil {
+			slog.Error("Failed to decode album response JSON", "error", err)
+			return albums
+		}
 		nextPageToken = albumResponse.NextPageToken
 		albums = append(albums, albumResponse.Albums...)
 		if len(nextPageToken) == 0 {
@@ -167,90 +229,130 @@ func ListAlbums(refreshToken string) []Album {
 	return albums
 }
 
-func listMediaItemsForAlbum(photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGroup) {
+func listMediaItemsForAlbum(photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGroup) error {
 	var retries int = 25
 	url := photosApiBaseUrl + "v1/mediaItems:search"
 	nextPageToken := ""
 	hasNextPage := true
-	client := getPhotosService(photosScan.RefreshToken)
+	client, err := getPhotosService(photosScan.RefreshToken)
+	if err != nil {
+		return fmt.Errorf("failed to get photos service: %w", err)
+	}
 	for hasNextPage {
 		err := throttler.Wait(context.Background())
-		checkError(err, fmt.Sprintf("Error with limiter: %s", err))
+		if err != nil {
+			return fmt.Errorf("throttler wait error: %w", err)
+		}
 		nextPageUrl := url + "?pageToken=" + nextPageToken
 		request := &SearchMediaItemRequest{AlbumId: photosScan.AlbumId}
 		reqJson, err := json.Marshal(request)
-		checkError(err)
+		if err != nil {
+			return fmt.Errorf("failed to marshal search request: %w", err)
+		}
 		reqBody := strings.NewReader(string(reqJson))
 		req, err := http.NewRequest("POST", nextPageUrl, reqBody)
-		checkError(err)
+		if err != nil {
+			return fmt.Errorf("failed to create search request: %w", err)
+		}
 		resp, err := client.Do(req)
-		checkError(err)
+		if err != nil {
+			return fmt.Errorf("failed to execute search request: %w", err)
+		}
 		if resp.StatusCode != 200 {
 			slog.Warn(fmt.Sprintf("Unexpected response status code %v", resp.StatusCode))
 			rb, _ := io.ReadAll(resp.Body)
 			slog.Warn(fmt.Sprintf("Response %v", string(rb)))
 			if retries == 0 {
-				return
+				return fmt.Errorf("exceeded retry limit for album media items")
 			}
 			retries -= 1
 			continue
 		}
 		listMediaItemResponse := new(ListMediaItemResponse)
 		err = getJson(resp, listMediaItemResponse)
-		checkError(err)
+		if err != nil {
+			return fmt.Errorf("failed to decode media items response: %w", err)
+		}
 		nextPageToken = listMediaItemResponse.NextPageToken
 		wg.Add(len(listMediaItemResponse.MediaItems))
 		counter_pending.Add(int64(len(listMediaItemResponse.MediaItems)))
 		for _, mediaItem := range listMediaItemResponse.MediaItems {
 			err := throttler.Wait(context.Background())
-			checkError(err, fmt.Sprintf("Error with limiter: %s", err))
+			if err != nil {
+				slog.Warn("Throttler wait error while processing media item, skipping",
+					"error", err,
+					"media_item_id", mediaItem.Id)
+				wg.Done()
+				counter_pending.Add(-1)
+				continue
+			}
 			processMediaItem(photosScan, mediaItem, photosMediaItem, wg)
 		}
 		if len(nextPageToken) == 0 {
 			hasNextPage = false
 		}
 	}
+	return nil
 }
 
-func listMediaItems(photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGroup) {
+func listMediaItems(photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMediaItem, wg *sync.WaitGroup) error {
 	var retries int = 25
 	url := photosApiBaseUrl + "v1/mediaItems"
 	nextPageToken := ""
 	hasNextPage := true
-	client := getPhotosService(photosScan.RefreshToken)
+	client, err := getPhotosService(photosScan.RefreshToken)
+	if err != nil {
+		return fmt.Errorf("failed to get photos service: %w", err)
+	}
 	for hasNextPage {
 		err := throttler.Wait(context.Background())
-		checkError(err, fmt.Sprintf("Error with limiter: %s", err))
+		if err != nil {
+			return fmt.Errorf("throttler wait error: %w", err)
+		}
 		nextPageUrl := url + "?pageToken=" + nextPageToken
 		req, err := http.NewRequest("GET", nextPageUrl, nil)
-		checkError(err)
+		if err != nil {
+			return fmt.Errorf("failed to create media items request: %w", err)
+		}
 		resp, err := client.Do(req)
-		checkError(err)
+		if err != nil {
+			return fmt.Errorf("failed to execute media items request: %w", err)
+		}
 		if resp.StatusCode != 200 {
 			slog.Warn(fmt.Sprintf("Unexpected response status code %v", resp.StatusCode))
 			rb, _ := io.ReadAll(resp.Body)
 			slog.Warn(fmt.Sprintf("Response %v", string(rb)))
 			if retries == 0 {
-				return
+				return fmt.Errorf("exceeded retry limit for media items")
 			}
 			retries -= 1
 			continue
 		}
 		listMediaItemResponse := new(ListMediaItemResponse)
 		err = getJson(resp, listMediaItemResponse)
-		checkError(err)
+		if err != nil {
+			return fmt.Errorf("failed to decode media items response: %w", err)
+		}
 		nextPageToken = listMediaItemResponse.NextPageToken
 		wg.Add(len(listMediaItemResponse.MediaItems))
 		counter_pending.Add(int64(len(listMediaItemResponse.MediaItems)))
 		for _, mediaItem := range listMediaItemResponse.MediaItems {
 			err := throttler.Wait(context.Background())
-			checkError(err, fmt.Sprintf("Error with limiter: %s", err))
+			if err != nil {
+				slog.Warn("Throttler wait error while processing media item, skipping",
+					"error", err,
+					"media_item_id", mediaItem.Id)
+				wg.Done()
+				counter_pending.Add(-1)
+				continue
+			}
 			processMediaItem(photosScan, mediaItem, photosMediaItem, wg)
 		}
 		if len(nextPageToken) == 0 {
 			hasNextPage = false
 		}
 	}
+	return nil
 }
 
 func getContentSizeAndHash(url string, mimeType string) (int64, string) {
@@ -288,11 +390,21 @@ func getContentSizeAndHash(url string, mimeType string) (int64, string) {
 	}
 	defer resp.Body.Close()
 	contentLength, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
-	checkError(err)
+	if err != nil {
+		slog.Warn("Failed to parse Content-Length header, skipping size/hash",
+			"error", err,
+			"url", url)
+		return 0, ""
+	}
 
 	hash := md5.New()
 	_, err = io.Copy(ioutil.Discard, io.TeeReader(resp.Body, hash))
-	checkError(err)
+	if err != nil {
+		slog.Warn("Failed to calculate MD5 hash for photo, skipping hash",
+			"error", err,
+			"url", url)
+		return contentLength, ""
+	}
 	return contentLength, hex.EncodeToString(hash.Sum(nil))
 }
 
@@ -331,7 +443,12 @@ func getContentSize(url string, mimeType string) int64 {
 	}
 	defer resp.Body.Close()
 	contentLength, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
-	checkError(err)
+	if err != nil {
+		slog.Warn("Failed to parse Content-Length header, skipping size",
+			"error", err,
+			"url", url)
+		return 0
+	}
 	io.Copy(ioutil.Discard, resp.Body)
 	return contentLength
 }

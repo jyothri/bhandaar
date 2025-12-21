@@ -39,71 +39,91 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 	var doScanRequest DoScanRequest
 	err := decoder.Decode(&doScanRequest)
 	if err != nil {
-		panic(err)
+		slog.Error("Failed to decode scan request", "error", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
 	}
 	slog.Info(fmt.Sprintf("Received request: %v", doScanRequest))
-	var body DoScanResponse
+
+	var scanId int
 	switch doScanRequest.ScanType {
 	case "Local":
-		body = DoScanResponse{
-			ScanId: collect.LocalDrive(doScanRequest.LocalScan),
-		}
+		scanId, err = collect.LocalDrive(doScanRequest.LocalScan)
 	case "GDrive":
-		body = DoScanResponse{
-			ScanId: collect.CloudDrive(doScanRequest.GDriveScan),
-		}
+		scanId, err = collect.CloudDrive(doScanRequest.GDriveScan)
 	case "GMail":
-		body = DoScanResponse{
-			ScanId: collect.Gmail(doScanRequest.GMailScan),
-		}
+		scanId, err = collect.Gmail(doScanRequest.GMailScan)
 	case "GPhotos":
-		body = DoScanResponse{
-			ScanId: collect.Photos(doScanRequest.GPhotosScan),
-		}
+		scanId, err = collect.Photos(doScanRequest.GPhotosScan)
 	default:
-		body = DoScanResponse{
-			ScanId: -1,
-		}
+		slog.Error("Unknown scan type", "scan_type", doScanRequest.ScanType)
+		http.Error(w, fmt.Sprintf("Unknown scan type: %s", doScanRequest.ScanType), http.StatusBadRequest)
+		return
 	}
-	serializedBody, _ := json.Marshal(body)
-	setJsonHeader(w)
-	_, _ = w.Write(serializedBody)
+
+	if err != nil {
+		slog.Error("Failed to start scan",
+			"scan_type", doScanRequest.ScanType,
+			"error", err)
+		http.Error(w, fmt.Sprintf("Failed to start scan: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	body := DoScanResponse{ScanId: scanId}
+	writeJSONResponse(w, body, http.StatusOK)
 }
 
 func ListScansHandler(w http.ResponseWriter, r *http.Request) {
 	pageNo := getPageNumber(mux.Vars(r))
-	scans, totResults := db.GetScansFromDb(pageNo)
+	scans, totResults, err := db.GetScansFromDb(pageNo)
+	if err != nil {
+		slog.Error("Failed to get scans from database",
+			"page", pageNo,
+			"error", err)
+		http.Error(w, "Failed to retrieve scans", http.StatusInternalServerError)
+		return
+	}
+
 	pageInfo := PaginationInfo{Page: pageNo, Size: totResults}
 	body := ScansResponse{
 		PageInfo: pageInfo,
 		Scans:    scans,
 	}
-	serializedBody, _ := json.Marshal(body)
-	setJsonHeader(w)
-	_, _ = w.Write(serializedBody)
+	writeJSONResponse(w, body, http.StatusOK)
 }
 
 func GetRequestAccountsHandler(w http.ResponseWriter, r *http.Request) {
-	accounts := db.GetRequestAccountsFromDb()
-	serializedBody, _ := json.Marshal(accounts)
-	setJsonHeader(w)
-	_, _ = w.Write(serializedBody)
+	accounts, err := db.GetRequestAccountsFromDb()
+	if err != nil {
+		slog.Error("Failed to get request accounts from database", "error", err)
+		http.Error(w, "Failed to retrieve accounts", http.StatusInternalServerError)
+		return
+	}
+	writeJSONResponse(w, accounts, http.StatusOK)
 }
 
 func GetScanRequestsHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	accountKey := vars["account_key"]
-	accountRequests := db.GetScanRequestsFromDb(accountKey)
-	serializedBody, _ := json.Marshal(accountRequests)
-	setJsonHeader(w)
-	_, _ = w.Write(serializedBody)
+	accountRequests, err := db.GetScanRequestsFromDb(accountKey)
+	if err != nil {
+		slog.Error("Failed to get scan requests from database",
+			"account_key", accountKey,
+			"error", err)
+		http.Error(w, "Failed to retrieve scan requests", http.StatusInternalServerError)
+		return
+	}
+	writeJSONResponse(w, accountRequests, http.StatusOK)
 }
 
 func GetAccountsHandler(w http.ResponseWriter, r *http.Request) {
-	accounts := db.GetAccountsFromDb()
-	serializedBody, _ := json.Marshal(accounts)
-	setJsonHeader(w)
-	_, _ = w.Write(serializedBody)
+	accounts, err := db.GetAccountsFromDb()
+	if err != nil {
+		slog.Error("Failed to get accounts from database", "error", err)
+		http.Error(w, "Failed to retrieve accounts", http.StatusInternalServerError)
+		return
+	}
+	writeJSONResponse(w, accounts, http.StatusOK)
 }
 
 func DeleteScanHandler(w http.ResponseWriter, r *http.Request) {
@@ -126,16 +146,28 @@ func DeleteScanHandler(w http.ResponseWriter, r *http.Request) {
 func ListMessageMetaDataHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	pageNo := getPageNumber(mux.Vars(r))
-	scanId, _ := getIntFromMap(vars, "scan_id")
-	messageMetadata, totResults := db.GetMessageMetadataFromDb(scanId, pageNo)
+	scanId, ok := getIntFromMap(vars, "scan_id")
+	if !ok {
+		http.Error(w, "Invalid scan ID", http.StatusBadRequest)
+		return
+	}
+
+	messageMetadata, totResults, err := db.GetMessageMetadataFromDb(scanId, pageNo)
+	if err != nil {
+		slog.Error("Failed to get message metadata from database",
+			"scan_id", scanId,
+			"page", pageNo,
+			"error", err)
+		http.Error(w, "Failed to retrieve message metadata", http.StatusInternalServerError)
+		return
+	}
+
 	pageInfo := PaginationInfo{Page: pageNo, Size: totResults}
 	body := MessageMetadataResponse{
 		PageInfo:        pageInfo,
 		MessageMetadata: messageMetadata,
 	}
-	serializedBody, _ := json.Marshal(body)
-	setJsonHeader(w)
-	_, _ = w.Write(serializedBody)
+	writeJSONResponse(w, body, http.StatusOK)
 }
 
 func ListAlbumsHandler(w http.ResponseWriter, r *http.Request) {
@@ -160,31 +192,55 @@ func ListAlbumsHandler(w http.ResponseWriter, r *http.Request) {
 func ListPhotosHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	pageNo := getPageNumber(mux.Vars(r))
-	scanId, _ := getIntFromMap(vars, "scan_id")
-	photosMediaItem, totResults := db.GetPhotosMediaItemFromDb(scanId, pageNo)
+	scanId, ok := getIntFromMap(vars, "scan_id")
+	if !ok {
+		http.Error(w, "Invalid scan ID", http.StatusBadRequest)
+		return
+	}
+
+	photosMediaItem, totResults, err := db.GetPhotosMediaItemFromDb(scanId, pageNo)
+	if err != nil {
+		slog.Error("Failed to get photos from database",
+			"scan_id", scanId,
+			"page", pageNo,
+			"error", err)
+		http.Error(w, "Failed to retrieve photos", http.StatusInternalServerError)
+		return
+	}
+
 	pageInfo := PaginationInfo{Page: pageNo, Size: totResults}
 	body := PhotosMediaItemResponse{
 		PageInfo:        pageInfo,
 		PhotosMediaItem: photosMediaItem,
 	}
-	serializedBody, _ := json.Marshal(body)
-	setJsonHeader(w)
-	_, _ = w.Write(serializedBody)
+	writeJSONResponse(w, body, http.StatusOK)
 }
 
 func ListScanDataHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	pageNo := getPageNumber(mux.Vars(r))
-	scanId, _ := getIntFromMap(vars, "scan_id")
-	scanData, totResults := db.GetScanDataFromDb(scanId, pageNo)
+	scanId, ok := getIntFromMap(vars, "scan_id")
+	if !ok {
+		http.Error(w, "Invalid scan ID", http.StatusBadRequest)
+		return
+	}
+
+	scanData, totResults, err := db.GetScanDataFromDb(scanId, pageNo)
+	if err != nil {
+		slog.Error("Failed to get scan data from database",
+			"scan_id", scanId,
+			"page", pageNo,
+			"error", err)
+		http.Error(w, "Failed to retrieve scan data", http.StatusInternalServerError)
+		return
+	}
+
 	pageInfo := PaginationInfo{Page: pageNo, Size: totResults}
 	body := ScanDataResponse{
 		PageInfo: pageInfo,
 		ScanData: scanData,
 	}
-	serializedBody, _ := json.Marshal(body)
-	setJsonHeader(w)
-	_, _ = w.Write(serializedBody)
+	writeJSONResponse(w, body, http.StatusOK)
 }
 
 func getIntFromMap(vars map[string]string, field string) (int, bool) {
@@ -212,6 +268,24 @@ func setJsonHeader(w http.ResponseWriter) {
 		"Content-Type",
 		"application/json",
 	)
+}
+
+// writeJSONResponse writes a JSON response with the given status code
+func writeJSONResponse(w http.ResponseWriter, data interface{}, statusCode int) {
+	w.Header().Set("Content-Type", "application/json")
+
+	serializedBody, err := json.Marshal(data)
+	if err != nil {
+		slog.Error("Failed to marshal JSON", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(statusCode)
+
+	if _, err := w.Write(serializedBody); err != nil {
+		slog.Error("Failed to write response", "error", err)
+	}
 }
 
 type PaginationInfo struct {

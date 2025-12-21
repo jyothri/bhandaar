@@ -11,15 +11,6 @@ import (
 
 var lock sync.RWMutex
 
-func checkError(err error, msg ...string) {
-	if err != nil {
-		retryEligible := isRetryError(err)
-		fmt.Printf("retryEligible: %v\n", retryEligible)
-		fmt.Println(msg)
-		panic(err)
-	}
-}
-
 func isRetryError(err error) bool {
 	// Try Google API error
 	var googleErr *googleapi.Error

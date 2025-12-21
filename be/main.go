@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/jyothri/hdd/db"
 	"github.com/jyothri/hdd/web"
 )
 
@@ -25,5 +26,17 @@ func init() {
 }
 
 func main() {
+	// Initialize database connection
+	if err := db.SetupDatabase(); err != nil {
+		slog.Error("Failed to initialize database", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			slog.Error("Failed to close database", "error", err)
+		}
+	}()
+
+	slog.Info("Starting web server")
 	web.Server()
 }

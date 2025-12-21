@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -22,79 +21,124 @@ const (
 
 var db *sqlx.DB
 
-func init() {
-	options := &slog.HandlerOptions{
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if a.Key == slog.TimeKey {
-				a.Value = slog.StringValue(a.Value.Time().Format("2006-01-02 15:04:05.999"))
-			}
-			return a
-		},
-		Level: slog.LevelDebug,
-	}
-
-	handler := slog.NewTextHandler(os.Stdout, options)
-	logger := slog.New(handler)
-	slog.SetDefault(logger)
-	slog.SetLogLoggerLevel(slog.LevelDebug)
-
+// SetupDatabase initializes the database connection and runs migrations
+func SetupDatabase() error {
 	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
 		"password=%s dbname=%s sslmode=disable",
 		host, port, user, password, dbname)
+
 	var err error
 	db, err = sqlx.Open("postgres", psqlInfo)
-	checkError(err)
+	if err != nil {
+		return fmt.Errorf("failed to open database connection: %w", err)
+	}
+
 	err = db.Ping()
-	checkError(err)
-	slog.Info("Successfully connected to DB!")
-	migrateDB()
+	if err != nil {
+		return fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	slog.Info("Successfully connected to database")
+
+	if err := migrateDB(); err != nil {
+		return fmt.Errorf("failed to run database migrations: %w", err)
+	}
+
+	return nil
 }
 
-func LogStartScan(scanType string) int {
-	insert_row := `insert into scans 
-									(scan_type, created_on, scan_start_time) 
-								values 
+// Close closes the database connection
+func Close() error {
+	if db != nil {
+		return db.Close()
+	}
+	return nil
+}
+
+func LogStartScan(scanType string) (int, error) {
+	insert_row := `insert into scans
+									(scan_type, created_on, scan_start_time)
+								values
 									($1, current_timestamp, current_timestamp) RETURNING id`
 	lastInsertId := 0
 	err := db.QueryRow(insert_row, scanType).Scan(&lastInsertId)
-	checkError(err)
-	return lastInsertId
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert scan for type %s: %w", scanType, err)
+	}
+	return lastInsertId, nil
 }
 
-func SaveScanMetadata(name string, searchPath string, searchFilter string, scanId int) {
-	insert_row := `insert into scanmetadata 
-			(name, search_path, search_filter, scan_id) 
-		values 
+func SaveScanMetadata(name string, searchPath string, searchFilter string, scanId int) error {
+	insert_row := `insert into scanmetadata
+			(name, search_path, search_filter, scan_id)
+		values
 			($1, $2, $3, $4) RETURNING id`
-	var err error
-	_, err = db.Exec(insert_row, name, searchPath, searchFilter, scanId)
-	checkError(err)
+	_, err := db.Exec(insert_row, name, searchPath, searchFilter, scanId)
+	if err != nil {
+		return fmt.Errorf("failed to save scan metadata for scan %d (name=%s, path=%s): %w",
+			scanId, name, searchPath, err)
+	}
+	return nil
 }
 
 func SaveMessageMetadataToDb(scanId int, username string, messageMetaData <-chan MessageMetadata) {
 	for {
 		mmd, more := <-messageMetaData
 		if !more {
-			logCompleteScan(scanId)
+			// Channel closed - mark scan as complete if not already failed
+			scan, err := GetScanById(scanId)
+			if err != nil {
+				slog.Error("Failed to get scan status",
+					"scan_id", scanId,
+					"error", err)
+				return
+			}
+
+			if scan.Status != "Failed" {
+				if err := MarkScanCompleted(scanId); err != nil {
+					slog.Error("Failed to mark scan complete",
+						"scan_id", scanId,
+						"error", err)
+				}
+			}
 			break
 		}
-		var err error
+
+		// Check for duplicates
 		count_row := `select count(*) from messagemetadata where username= $1 AND message_id = $2 AND thread_id = $3`
 		var count int
-		err = db.Get(&count, count_row, username, mmd.MessageId, mmd.ThreadId)
-		checkError(err)
+		err := db.Get(&count, count_row, username, mmd.MessageId, mmd.ThreadId)
+		if err != nil {
+			slog.Error("Failed to check for duplicate message, skipping",
+				"scan_id", scanId,
+				"message_id", mmd.MessageId,
+				"username", username,
+				"error", err)
+			continue
+		}
 		if count > 0 {
 			continue
 		}
-		insert_row := `insert into messagemetadata 
-			(message_id, thread_id, date, mail_from, mail_to, subject, size_estimate, labels, scan_id, username) 
-		values 
+
+		insert_row := `insert into messagemetadata
+			(message_id, thread_id, date, mail_from, mail_to, subject, size_estimate, labels, scan_id, username)
+		values
 			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`
 
 		_, err = db.Exec(insert_row, mmd.MessageId, mmd.ThreadId, mmd.Date.UTC(), substr(mmd.From, 500),
 			substr(mmd.To, 500), substr(mmd.Subject, 2000), mmd.SizeEstimate,
 			substr(strings.Join(mmd.LabelIds, ","), 500), scanId, username)
-		checkError(err, fmt.Sprintf("While inserting to messagemetadata messageId:%v", mmd.MessageId))
+
+		if err != nil {
+			slog.Error("Failed to save message metadata, skipping",
+				"scan_id", scanId,
+				"message_id", mmd.MessageId,
+				"username", username,
+				"subject", substr(mmd.Subject, 50),
+				"size_bytes", mmd.SizeEstimate,
+				"error", err)
+			continue
+		}
 	}
 }
 
@@ -102,40 +146,98 @@ func SavePhotosMediaItemToDb(scanId int, photosMediaItem <-chan PhotosMediaItem)
 	for {
 		pmi, more := <-photosMediaItem
 		if !more {
-			logCompleteScan(scanId)
+			// Channel closed - mark scan as complete if not already failed
+			scan, err := GetScanById(scanId)
+			if err != nil {
+				slog.Error("Failed to get scan status",
+					"scan_id", scanId,
+					"error", err)
+				return
+			}
+
+			if scan.Status != "Failed" {
+				if err := MarkScanCompleted(scanId); err != nil {
+					slog.Error("Failed to mark scan complete",
+						"scan_id", scanId,
+						"error", err)
+				}
+			}
 			break
 		}
-		insert_row := `insert into photosmediaitem 
-			(media_item_id, product_url, mime_type, filename, size, scan_id, file_mod_time, 
-				contributor_display_name, md5hash) 
-		values 
+
+		// Use transaction for parent + children (atomicity required)
+		tx, err := db.Beginx()
+		if err != nil {
+			slog.Error("Failed to begin transaction for photos media item, skipping",
+				"scan_id", scanId,
+				"media_item_id", pmi.MediaItemId,
+				"error", err)
+			continue
+		}
+
+		insert_row := `insert into photosmediaitem
+			(media_item_id, product_url, mime_type, filename, size, scan_id, file_mod_time,
+				contributor_display_name, md5hash)
+		values
 			($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`
-		var err error
 		lastInsertId := 0
-		err = db.QueryRow(insert_row, pmi.MediaItemId, pmi.ProductUrl, pmi.MimeType, pmi.Filename,
+		err = tx.QueryRow(insert_row, pmi.MediaItemId, pmi.ProductUrl, pmi.MimeType, pmi.Filename,
 			pmi.Size, scanId, pmi.FileModTime, pmi.ContributorDisplayName, pmi.Md5hash).Scan(&lastInsertId)
-		checkError(err, fmt.Sprintf("While inserting to photosmediaitem mediaItemId:%v", pmi.MediaItemId))
+
+		if err != nil {
+			tx.Rollback()
+			slog.Error("Failed to insert photos media item, skipping",
+				"scan_id", scanId,
+				"media_item_id", pmi.MediaItemId,
+				"filename", pmi.Filename,
+				"error", err)
+			continue
+		}
 
 		switch pmi.MimeType[:5] {
 		case "image":
-			//e.g. image/jpeg image/png image/gif
-			insert_photo_row := `insert into photometadata 
-			(photos_media_item_id, camera_make, camera_model, focal_length, f_number, iso, exposure_time) 
-		values 
+			insert_photo_row := `insert into photometadata
+			(photos_media_item_id, camera_make, camera_model, focal_length, f_number, iso, exposure_time)
+		values
 			($1, $2, $3, $4, $5, $6, $7) RETURNING id`
-			_, err = db.Exec(insert_photo_row, lastInsertId, pmi.CameraMake, pmi.CameraModel, pmi.FocalLength,
+			_, err = tx.Exec(insert_photo_row, lastInsertId, pmi.CameraMake, pmi.CameraModel, pmi.FocalLength,
 				pmi.FNumber, pmi.Iso, pmi.ExposureTime)
-			checkError(err, fmt.Sprintf("While inserting to photometadata mediaItemId:%v", pmi.MediaItemId))
+			if err != nil {
+				tx.Rollback()
+				slog.Error("Failed to insert photo metadata, skipping",
+					"scan_id", scanId,
+					"media_item_id", pmi.MediaItemId,
+					"camera", fmt.Sprintf("%s %s", pmi.CameraMake, pmi.CameraModel),
+					"error", err)
+				continue
+			}
 		case "video":
-			//e.g. video/mp4
-			insert_video_row := `insert into videometadata 
-			(photos_media_item_id, camera_make, camera_model, fps) 
-		values 
+			insert_video_row := `insert into videometadata
+			(photos_media_item_id, camera_make, camera_model, fps)
+		values
 			($1, $2, $3, $4) RETURNING id`
-			_, err = db.Exec(insert_video_row, lastInsertId, pmi.CameraMake, pmi.CameraModel, pmi.Fps)
-			checkError(err, fmt.Sprintf("While inserting to videometadata mediaItemId:%v", pmi.MediaItemId))
+			_, err = tx.Exec(insert_video_row, lastInsertId, pmi.CameraMake, pmi.CameraModel, pmi.Fps)
+			if err != nil {
+				tx.Rollback()
+				slog.Error("Failed to insert video metadata, skipping",
+					"scan_id", scanId,
+					"media_item_id", pmi.MediaItemId,
+					"fps", pmi.Fps,
+					"error", err)
+				continue
+			}
 		default:
-			slog.Warn("Unsupported mime type.")
+			slog.Warn("Unsupported mime type",
+				"mime_type", pmi.MimeType,
+				"media_item_id", pmi.MediaItemId)
+		}
+
+		if err := tx.Commit(); err != nil {
+			slog.Error("Failed to commit transaction for photos media item, skipping",
+				"scan_id", scanId,
+				"media_item_id", pmi.MediaItemId,
+				"error", err)
+			continue
 		}
 	}
 }
@@ -144,12 +246,28 @@ func SaveStatToDb(scanId int, scanData <-chan FileData) {
 	for {
 		fd, more := <-scanData
 		if !more {
-			logCompleteScan(scanId)
+			// Channel closed - mark scan as complete if not already failed
+			scan, err := GetScanById(scanId)
+			if err != nil {
+				slog.Error("Failed to get scan status",
+					"scan_id", scanId,
+					"error", err)
+				return
+			}
+
+			if scan.Status != "Failed" {
+				if err := MarkScanCompleted(scanId); err != nil {
+					slog.Error("Failed to mark scan complete",
+						"scan_id", scanId,
+						"error", err)
+				}
+			}
 			break
 		}
-		insert_row := `insert into scandata 
-			(name, path, size, file_mod_time, md5hash, scan_id, is_dir, file_count) 
-		values 
+
+		insert_row := `insert into scandata
+			(name, path, size, file_mod_time, md5hash, scan_id, is_dir, file_count)
+		values
 			($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
 		var err error
 		if fd.IsDir {
@@ -157,54 +275,71 @@ func SaveStatToDb(scanId int, scanData <-chan FileData) {
 		} else {
 			_, err = db.Exec(insert_row, fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.Md5Hash, scanId, fd.IsDir, nil)
 		}
-		checkError(err)
+
+		if err != nil {
+			slog.Error("Failed to save file scan data, skipping",
+				"scan_id", scanId,
+				"path", fd.FilePath,
+				"is_dir", fd.IsDir,
+				"size_bytes", fd.Size,
+				"error", err)
+			continue
+		}
 	}
 }
 
-func SaveOAuthToken(accessToken string, refreshToken string, displayName string, clientKey string, scope string, expiresIn int16, tokenType string) {
-	insert_row := `insert into privatetokens 
-			(access_token, refresh_token, display_name, client_key, scope, expires_in, token_type, created_on) 
-		values 
+func SaveOAuthToken(accessToken string, refreshToken string, displayName string, clientKey string, scope string, expiresIn int16, tokenType string) error {
+	insert_row := `insert into privatetokens
+			(access_token, refresh_token, display_name, client_key, scope, expires_in, token_type, created_on)
+		values
 			($1, $2, $3, $4, $5, $6, $7, current_timestamp) RETURNING id`
-	var err error
-	_, err = db.Exec(insert_row, accessToken, refreshToken, displayName, clientKey, scope, expiresIn, tokenType)
-	checkError(err)
+	_, err := db.Exec(insert_row, accessToken, refreshToken, displayName, clientKey, scope, expiresIn, tokenType)
+	if err != nil {
+		return fmt.Errorf("failed to save OAuth token for client %s: %w", clientKey, err)
+	}
+	return nil
 }
 
-func GetOAuthToken(clientKey string) PrivateToken {
+func GetOAuthToken(clientKey string) (PrivateToken, error) {
 	read_row :=
 		`select id, access_token, refresh_token, display_name, client_key, created_on, scope, expires_in, token_type
 		FROM privatetokens
 		WHERE client_key = $1`
 	tokenData := PrivateToken{}
 	err := db.Get(&tokenData, read_row, clientKey)
-	checkError(err)
-	return tokenData
+	if err != nil {
+		return PrivateToken{}, fmt.Errorf("failed to get OAuth token for client %s: %w", clientKey, err)
+	}
+	return tokenData, nil
 }
 
-func GetRequestAccountsFromDb() []Account {
+func GetRequestAccountsFromDb() ([]Account, error) {
 	read_row :=
 		`select distinct display_name, client_key from privatetokens p
 		`
 	accounts := []Account{}
 	err := db.Select(&accounts, read_row)
-	checkError(err)
-	return accounts
+	if err != nil {
+		return nil, fmt.Errorf("failed to get request accounts: %w", err)
+	}
+	return accounts, nil
 }
 
-func GetAccountsFromDb() []string {
+func GetAccountsFromDb() ([]string, error) {
 	read_row := `select distinct name  from scanmetadata
-			where name is not null  
+			where name is not null
 			order by 1 `
 	accounts := []string{}
 	err := db.Select(&accounts, read_row)
-	checkError(err)
-	return accounts
+	if err != nil {
+		return nil, fmt.Errorf("failed to get accounts: %w", err)
+	}
+	return accounts, nil
 }
 
-func GetScanRequestsFromDb(accountKey string) []ScanRequests {
+func GetScanRequestsFromDb(accountKey string) ([]ScanRequests, error) {
 	if len(strings.TrimSpace(accountKey)) == 0 {
-		return []ScanRequests{}
+		return []ScanRequests{}, nil
 	}
 	read_row := `select distinct COALESCE(sm.name, '') as name, sm.search_filter, s.id,
 			s.scan_type,
@@ -217,18 +352,20 @@ func GetScanRequestsFromDb(accountKey string) []ScanRequests {
 			order by s.id desc`
 	scanRequests := []ScanRequests{}
 	err := db.Select(&scanRequests, read_row, accountKey)
-	checkError(err)
-	return scanRequests
+	if err != nil {
+		return nil, fmt.Errorf("failed to get scan requests for account %s: %w", accountKey, err)
+	}
+	return scanRequests, nil
 }
 
-func GetScansFromDb(pageNo int) ([]Scan, int) {
+func GetScansFromDb(pageNo int) ([]Scan, int, error) {
 	limit := 10
 	offset := limit * (pageNo - 1)
 	count_rows := `select count(*) from scans`
 	read_row :=
-		`select S.id, scan_type, 
-		 created_on AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles' as created_on, 
-		 scan_start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles' as scan_start_time, 
+		`select S.id, scan_type,
+		 created_on AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles' as created_on,
+		 scan_start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles' as scan_start_time,
 		 scan_end_time, CONCAT(search_path, search_filter) as metadata,
 		 date_trunc('millisecond', COALESCE(scan_end_time,current_timestamp)-scan_start_time) as duration
 	   from scans S LEFT JOIN scanmetadata SM
@@ -238,47 +375,59 @@ func GetScansFromDb(pageNo int) ([]Scan, int) {
 	scans := []Scan{}
 	var count int
 	err := db.Select(&scans, read_row, limit, offset)
-	checkError(err)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get scans for page %d: %w", pageNo, err)
+	}
 	err = db.Get(&count, count_rows)
-	checkError(err)
-	return scans, count
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get scan count: %w", err)
+	}
+	return scans, count, nil
 }
 
-func GetMessageMetadataFromDb(scanId int, pageNo int) ([]MessageMetadataRead, int) {
+func GetMessageMetadataFromDb(scanId int, pageNo int) ([]MessageMetadataRead, int, error) {
 	limit := 10
 	offset := limit * (pageNo - 1)
 	count_rows := `select count(*) from messagemetadata where scan_id = $1`
 	read_row := `select id, message_id, thread_id, date, mail_from, mail_to,
 							 subject, size_estimate, labels, scan_id
-	             from messagemetadata 
+	             from messagemetadata
 							 where scan_id = $1 order by id limit $2 offset $3`
 	messageMetadata := []MessageMetadataRead{}
 	var count int
 	err := db.Get(&count, count_rows, scanId)
-	checkError(err)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get message count for scan %d: %w", scanId, err)
+	}
 	err = db.Select(&messageMetadata, read_row, scanId, limit, offset)
-	checkError(err)
-	return messageMetadata, count
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get message metadata for scan %d, page %d: %w", scanId, pageNo, err)
+	}
+	return messageMetadata, count, nil
 }
 
-func GetPhotosMediaItemFromDb(scanId int, pageNo int) ([]PhotosMediaItemRead, int) {
+func GetPhotosMediaItemFromDb(scanId int, pageNo int) ([]PhotosMediaItemRead, int, error) {
 	limit := 10
 	offset := limit * (pageNo - 1)
 	count_rows := `select count(*) from photosmediaitem where scan_id = $1`
 	read_row := `select id, media_item_id, product_url, mime_type, filename,
-								size, file_mod_time, md5hash, scan_id, contributor_display_name 
-								from photosmediaitem 
+								size, file_mod_time, md5hash, scan_id, contributor_display_name
+								from photosmediaitem
 							 where scan_id = $1 order by id limit $2 offset $3`
 	photosMediaItemRead := []PhotosMediaItemRead{}
 	var count int
 	err := db.Get(&count, count_rows, scanId)
-	checkError(err)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get photo count for scan %d: %w", scanId, err)
+	}
 	err = db.Select(&photosMediaItemRead, read_row, scanId, limit, offset)
-	checkError(err)
-	return photosMediaItemRead, count
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get photos for scan %d, page %d: %w", scanId, pageNo, err)
+	}
+	return photosMediaItemRead, count, nil
 }
 
-func GetScanDataFromDb(scanId int, pageNo int) ([]ScanData, int) {
+func GetScanDataFromDb(scanId int, pageNo int) ([]ScanData, int, error) {
 	limit := 10
 	offset := limit * (pageNo - 1)
 	count_rows := `select count(*) from scandata where scan_id = $1`
@@ -286,10 +435,14 @@ func GetScanDataFromDb(scanId int, pageNo int) ([]ScanData, int) {
 	scandata := []ScanData{}
 	var count int
 	err := db.Get(&count, count_rows, scanId)
-	checkError(err)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get scan data count for scan %d: %w", scanId, err)
+	}
 	err = db.Select(&scandata, read_row, scanId, limit, offset)
-	checkError(err)
-	return scandata, count
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get scan data for scan %d, page %d: %w", scanId, pageNo, err)
+	}
+	return scandata, count, nil
 }
 
 func DeleteScan(scanId int) error {
@@ -347,45 +500,143 @@ func DeleteScan(scanId int) error {
 	return nil
 }
 
-func logCompleteScan(scanId int) {
-	update_row := `update scans 
-								 set scan_end_time = current_timestamp 
+// MarkScanCompleted marks a scan as completed
+func MarkScanCompleted(scanId int) error {
+	update_row := `update scans
+								 set scan_end_time = current_timestamp, status = 'Completed'
 								 where id = $1`
 	res, err := db.Exec(update_row, scanId)
-	checkError(err)
-	count, err := res.RowsAffected()
-	checkError(err)
-	if count != 1 {
-		slog.Error(fmt.Sprintf("Could not perform update. query=%s, expected:%d actual: %d", update_row, 1, count))
+	if err != nil {
+		return fmt.Errorf("failed to mark scan %d as completed: %w", scanId, err)
 	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected for scan %d: %w", scanId, err)
+	}
+	if count != 1 {
+		slog.Warn("Unexpected rows affected when marking scan complete",
+			"scan_id", scanId,
+			"expected", 1,
+			"actual", count)
+	}
+	slog.Info("Scan marked as completed", "scan_id", scanId)
+	return nil
 }
 
-func migrateDB() {
+// MarkScanFailed marks a scan as failed with an error message
+func MarkScanFailed(scanId int, errMsg string) error {
+	update_row := `update scans
+								 set scan_end_time = current_timestamp, status = 'Failed', error_msg = $2
+								 where id = $1`
+	res, err := db.Exec(update_row, scanId, errMsg)
+	if err != nil {
+		return fmt.Errorf("failed to mark scan %d as failed: %w", scanId, err)
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected for scan %d: %w", scanId, err)
+	}
+	if count != 1 {
+		slog.Warn("Unexpected rows affected when marking scan failed",
+			"scan_id", scanId,
+			"expected", 1,
+			"actual", count)
+	}
+	slog.Error("Scan marked as failed", "scan_id", scanId, "error", errMsg)
+	return nil
+}
+
+// GetScanById retrieves a scan by ID
+func GetScanById(scanId int) (*Scan, error) {
+	read_row := `select id, scan_type, COALESCE(status, 'Completed') as status,
+		error_msg, completed_at FROM scans WHERE id = $1`
+
+	var scan Scan
+	err := db.Get(&scan, read_row, scanId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get scan %d: %w", scanId, err)
+	}
+
+	return &scan, nil
+}
+
+func migrateDB() error {
 	var count int
-	has_table_query := `select count(*) 
-		from information_schema.tables 
+	has_table_query := `select count(*)
+		from information_schema.tables
 		where table_name = $1`
 	err := db.Get(&count, has_table_query, "version")
-	checkError(err)
-	if count == 0 {
-		migrateDBv0()
-		return
+	if err != nil {
+		return fmt.Errorf("failed to check for version table: %w", err)
 	}
+	if count == 0 {
+		return migrateDBv0()
+	}
+
+	// Add migration for status column if needed
+	return migrateAddStatusColumn()
 }
 
-func migrateDBv0() {
-	insert_version_table := `delete from version; 
+func migrateDBv0() error {
+	insert_version_table := `delete from version;
 		INSERT INTO version (id) VALUES (4)`
-	db.MustExec(create_scans_table)
-	db.MustExec(create_scandata_table)
-	db.MustExec(create_scanmetadata_table)
-	db.MustExec(create_messagemetadata_table)
-	db.MustExec(create_photosmediaitem_table)
-	db.MustExec(create_photometadata_table)
-	db.MustExec(create_videometadata_table)
-	db.MustExec(create_privatetokens_table)
-	db.MustExec(create_version_table)
-	db.MustExec(insert_version_table)
+
+	// Execute all table creation statements
+	statements := []struct {
+		name string
+		sql  string
+	}{
+		{"scans", create_scans_table},
+		{"scandata", create_scandata_table},
+		{"scanmetadata", create_scanmetadata_table},
+		{"messagemetadata", create_messagemetadata_table},
+		{"photosmediaitem", create_photosmediaitem_table},
+		{"photometadata", create_photometadata_table},
+		{"videometadata", create_videometadata_table},
+		{"privatetokens", create_privatetokens_table},
+		{"version", create_version_table},
+	}
+
+	for _, stmt := range statements {
+		_, err := db.Exec(stmt.sql)
+		if err != nil {
+			return fmt.Errorf("failed to create table %s: %w", stmt.name, err)
+		}
+		slog.Info("Created table", "table", stmt.name)
+	}
+
+	_, err := db.Exec(insert_version_table)
+	if err != nil {
+		return fmt.Errorf("failed to insert version: %w", err)
+	}
+
+	// Add status columns to scans table
+	return migrateAddStatusColumn()
+}
+
+// migrateAddStatusColumn adds status, error_msg, and completed_at columns to scans table
+func migrateAddStatusColumn() error {
+	// Check if status column exists
+	check_column := `SELECT column_name FROM information_schema.columns
+		WHERE table_name='scans' AND column_name='status'`
+	var columnName string
+	err := db.Get(&columnName, check_column)
+
+	// If column doesn't exist (error means no rows), add it
+	if err != nil {
+		alter_table := `ALTER TABLE scans
+			ADD COLUMN status VARCHAR(50) DEFAULT 'Completed',
+			ADD COLUMN error_msg TEXT,
+			ADD COLUMN completed_at TIMESTAMP`
+
+		_, err = db.Exec(alter_table)
+		if err != nil {
+			return fmt.Errorf("failed to add status columns to scans table: %w", err)
+		}
+		slog.Info("Added status, error_msg, and completed_at columns to scans table")
+	}
+
+	return nil
 }
 
 const create_scans_table string = `CREATE TABLE IF NOT EXISTS scans (
@@ -510,6 +761,9 @@ type Scan struct {
 	ScanEndTime   sql.NullTime `db:"scan_end_time"`
 	Metadata      string       `db:"metadata"`
 	Duration      string       `db:"duration"`
+	Status        string       `db:"status"`
+	ErrorMsg      sql.NullString `db:"error_msg"`
+	CompletedAt   sql.NullTime `db:"completed_at"`
 }
 
 type ScanRequests struct {
@@ -576,11 +830,4 @@ func substr(s string, end int) string {
 		counter++
 	}
 	return s
-}
-
-func checkError(err error, msg ...string) {
-	if err != nil {
-		fmt.Println(msg)
-		panic(err)
-	}
 }
