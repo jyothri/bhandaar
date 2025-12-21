@@ -108,8 +108,18 @@ func GetAccountsHandler(w http.ResponseWriter, r *http.Request) {
 
 func DeleteScanHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	scanId, _ := getIntFromMap(vars, "scan_id")
-	db.DeleteScan(scanId)
+	scanId, ok := getIntFromMap(vars, "scan_id")
+	if !ok {
+		http.Error(w, "Invalid scan ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.DeleteScan(scanId); err != nil {
+		slog.Error("Failed to delete scan", "error", err, "scan_id", scanId)
+		http.Error(w, "Failed to delete scan", http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 

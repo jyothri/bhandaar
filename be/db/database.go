@@ -292,43 +292,59 @@ func GetScanDataFromDb(scanId int, pageNo int) ([]ScanData, int) {
 	return scandata, count
 }
 
-func DeleteScan(scanId int) {
-	delete_scandata := `delete from scandata
-	where scan_id = $1`
-	_, err := db.Exec(delete_scandata, scanId)
-	checkError(err)
+func DeleteScan(scanId int) error {
+	// Begin transaction
+	tx, err := db.Beginx()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	// Defer rollback - safe to call even after commit
+	defer tx.Rollback()
 
-	delete_messagemetadata := `delete from messagemetadata
-	where scan_id = $1`
-	_, err = db.Exec(delete_messagemetadata, scanId)
-	checkError(err)
+	// Define tables to delete from in order
+	// Order matters: child tables before parent tables
+	deletions := []struct {
+		table string
+		query string
+	}{
+		{"scandata", `DELETE FROM scandata WHERE scan_id = $1`},
+		{"messagemetadata", `DELETE FROM messagemetadata WHERE scan_id = $1`},
+		{"scanmetadata", `DELETE FROM scanmetadata WHERE scan_id = $1`},
+		{"photometadata", `DELETE FROM photometadata 
+			WHERE photos_media_item_id IN (
+				SELECT id FROM photosmediaitem WHERE scan_id = $1
+			)`},
+		{"videometadata", `DELETE FROM videometadata 
+			WHERE photos_media_item_id IN (
+				SELECT id FROM photosmediaitem WHERE scan_id = $1
+			)`},
+		{"photosmediaitem", `DELETE FROM photosmediaitem WHERE scan_id = $1`},
+		{"scans", `DELETE FROM scans WHERE id = $1`},
+	}
 
-	delete_scanmetadata := `delete from scanmetadata
-	where scan_id = $1`
-	_, err = db.Exec(delete_scanmetadata, scanId)
-	checkError(err)
+	// Execute all deletions within transaction
+	for _, deletion := range deletions {
+		result, err := tx.Exec(deletion.query, scanId)
+		if err != nil {
+			// Transaction automatically rolled back by defer
+			return fmt.Errorf("failed to delete from %s: %w", deletion.table, err)
+		}
 
-	delete_photometadata := `delete from photometadata
-	where photos_media_item_id IN (select id from 
-		photosmediaitem where scan_id = $1)`
-	_, err = db.Exec(delete_photometadata, scanId)
-	checkError(err)
+		// Log number of rows deleted for debugging
+		rowsAffected, _ := result.RowsAffected()
+		slog.Debug("Deleted rows",
+			"table", deletion.table,
+			"rows", rowsAffected,
+			"scan_id", scanId)
+	}
 
-	delete_videometadata := `delete from videometadata
-	where photos_media_item_id IN (select id from 
-		photosmediaitem where scan_id = $1)`
-	_, err = db.Exec(delete_videometadata, scanId)
-	checkError(err)
+	// Commit transaction - all deletes succeed together
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
 
-	delete_photosmediaitem := `delete from photosmediaitem
-	where scan_id = $1`
-	_, err = db.Exec(delete_photosmediaitem, scanId)
-	checkError(err)
-
-	delete_scans := `delete from scans
-	where id = $1`
-	_, err = db.Exec(delete_scans, scanId)
-	checkError(err)
+	slog.Info("Successfully deleted scan", "scan_id", scanId)
+	return nil
 }
 
 func logCompleteScan(scanId int) {
