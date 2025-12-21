@@ -59,6 +59,7 @@ func Photos(photosScan GPhotosScan) int {
 func startPhotosScan(scanId int, photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMediaItem) {
 	lock.Lock()
 	defer lock.Unlock()
+	resetCounters()
 	ticker := time.NewTicker(5 * time.Second)
 	done := make(chan bool)
 	notificationChannel := notification.GetPublisher(photosScan.AlbumId)
@@ -130,8 +131,8 @@ func processMediaItem(photosScan GPhotosScan, mediaItem MediaItem, photosMediaIt
 	}
 
 	photosMediaItem <- pmi
-	counter_processed += 1
-	counter_pending -= 1
+	counter_processed.Add(1)
+	counter_pending.Add(-1)
 }
 
 func ListAlbums(refreshToken string) []Album {
@@ -199,7 +200,7 @@ func listMediaItemsForAlbum(photosScan GPhotosScan, photosMediaItem chan<- db.Ph
 		checkError(err)
 		nextPageToken = listMediaItemResponse.NextPageToken
 		wg.Add(len(listMediaItemResponse.MediaItems))
-		counter_pending += len(listMediaItemResponse.MediaItems)
+		counter_pending.Add(int64(len(listMediaItemResponse.MediaItems)))
 		for _, mediaItem := range listMediaItemResponse.MediaItems {
 			err := throttler.Wait(context.Background())
 			checkError(err, fmt.Sprintf("Error with limiter: %s", err))
@@ -240,7 +241,7 @@ func listMediaItems(photosScan GPhotosScan, photosMediaItem chan<- db.PhotosMedi
 		checkError(err)
 		nextPageToken = listMediaItemResponse.NextPageToken
 		wg.Add(len(listMediaItemResponse.MediaItems))
-		counter_pending += len(listMediaItemResponse.MediaItems)
+		counter_pending.Add(int64(len(listMediaItemResponse.MediaItems)))
 		for _, mediaItem := range listMediaItemResponse.MediaItems {
 			err := throttler.Wait(context.Background())
 			checkError(err, fmt.Sprintf("Error with limiter: %s", err))

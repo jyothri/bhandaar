@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jyothri/hdd/constants"
@@ -17,8 +18,8 @@ import (
 	"google.golang.org/api/option"
 )
 
-var counter_processed int
-var counter_pending int
+var counter_processed atomic.Int64
+var counter_pending atomic.Int64
 var start time.Time
 var gmailConfig *oauth2.Config
 
@@ -34,6 +35,12 @@ func init() {
 		Endpoint:     google.Endpoint,
 		Scopes:       []string{gmail.GmailReadonlyScope},
 	}
+}
+
+// resetCounters resets progress counters to zero for a new scan
+func resetCounters() {
+	counter_processed.Store(0)
+	counter_pending.Store(0)
 }
 
 func getGmailService(refreshToken string) *gmail.Service {
@@ -81,6 +88,7 @@ func startGmailScan(gmailService *gmail.Service, scanId int, gMailScan GMailScan
 	start = time.Now()
 	lock.Lock()
 	defer lock.Unlock()
+	resetCounters()
 	var wg sync.WaitGroup
 	ticker := time.NewTicker(5 * time.Second)
 	done := make(chan bool)
@@ -107,7 +115,7 @@ func startGmailScan(gmailService *gmail.Service, scanId int, gMailScan GMailScan
 			checkError(err, fmt.Sprintf("Error with limiter: %s", err))
 		}
 		wg.Add(len(messageList.Messages))
-		counter_pending += len(messageList.Messages)
+		counter_pending.Add(int64(len(messageList.Messages)))
 		parseMessageList(gmailService, messageList, messageMetaData, &wg, throttler)
 		if messageList.NextPageToken == "" {
 			hasNextPage = false
@@ -168,8 +176,8 @@ func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan
 		SizeEstimate: message.SizeEstimate,
 	}
 	messageMetaData <- md
-	counter_processed += 1
-	counter_pending -= 1
+	counter_processed.Add(1)
+	counter_pending.Add(-1)
 	wg.Done()
 }
 
@@ -179,8 +187,8 @@ func logProgress(scanId int, ClientKey string, done <-chan bool, ticker *time.Ti
 		select {
 		case <-done:
 			progress := notification.Progress{
-				ProcessedCount: counter_processed,
-				ActiveCount:    counter_pending,
+				ProcessedCount: int(counter_processed.Load()),
+				ActiveCount:    int(counter_pending.Load()),
 				ScanId:         scanId,
 				ClientKey:      ClientKey,
 				ElapsedInSec:   int(time.Since(start).Seconds()),
@@ -189,8 +197,8 @@ func logProgress(scanId int, ClientKey string, done <-chan bool, ticker *time.Ti
 			return
 		case <-ticker.C:
 			progress := notification.Progress{
-				ProcessedCount: counter_processed,
-				ActiveCount:    counter_pending,
+				ProcessedCount: int(counter_processed.Load()),
+				ActiveCount:    int(counter_pending.Load()),
 				ScanId:         scanId,
 				ClientKey:      ClientKey,
 				ElapsedInSec:   int(time.Since(start).Seconds()),
