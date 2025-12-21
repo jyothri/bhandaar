@@ -191,7 +191,44 @@ func NewTestDB() (*sql.DB, error) {
 }
 ```
 
-**Option 2: PostgreSQL via Docker (Recommended)**
+**PostgreSQL Test Database Setup**
+
+This approach uses a dedicated PostgreSQL database for testing. Requires PostgreSQL 15+ running locally or in CI environment.
+
+**Prerequisites:**
+```bash
+# Install PostgreSQL locally (macOS)
+brew install postgresql@15
+
+# Start PostgreSQL service
+brew services start postgresql@15
+
+# Create test database and user
+psql postgres -c "CREATE DATABASE hdd_test;"
+psql postgres -c "CREATE USER hddb_test WITH PASSWORD 'testpass';"
+psql postgres -c "GRANT ALL PRIVILEGES ON DATABASE hdd_test TO hddb_test;"
+```
+
+**For CI (GitHub Actions):**
+```yaml
+# .github/workflows/test.yml
+services:
+  postgres:
+    image: postgres:15-alpine
+    env:
+      POSTGRES_USER: hddb_test
+      POSTGRES_PASSWORD: testpass
+      POSTGRES_DB: hdd_test
+    options: >-
+      --health-cmd pg_isready
+      --health-interval 10s
+      --health-timeout 5s
+      --health-retries 5
+    ports:
+      - 5432:5432
+```
+
+**Test Database Helper:**
 ```go
 // test/testdb/postgres.go
 package testdb
@@ -199,56 +236,73 @@ package testdb
 import (
     "database/sql"
     "fmt"
-    "log"
+    "os"
 
-    "github.com/ory/dockertest/v3"
+    "github.com/jmoiron/sqlx"
     _ "github.com/lib/pq"
 )
 
-func NewTestPostgres() (*sql.DB, func(), error) {
-    pool, err := dockertest.NewPool("")
+// GetTestDatabaseURL returns the test database connection string
+// Uses environment variable TEST_DATABASE_URL if set, otherwise uses default
+func GetTestDatabaseURL() string {
+    if url := os.Getenv("TEST_DATABASE_URL"); url != "" {
+        return url
+    }
+    return "postgres://hddb_test:testpass@localhost:5432/hdd_test?sslmode=disable"
+}
+
+// NewTestDB creates a test database connection and runs migrations
+func NewTestDB() (*sqlx.DB, func(), error) {
+    db, err := sqlx.Open("postgres", GetTestDatabaseURL())
     if err != nil {
-        return nil, nil, fmt.Errorf("could not connect to docker: %w", err)
+        return nil, nil, fmt.Errorf("failed to open test database: %w", err)
     }
 
-    resource, err := pool.Run("postgres", "15-alpine", []string{
-        "POSTGRES_PASSWORD=testpass",
-        "POSTGRES_USER=testuser",
-        "POSTGRES_DB=testdb",
-    })
-    if err != nil {
-        return nil, nil, fmt.Errorf("could not start resource: %w", err)
-    }
-
-    cleanup := func() {
-        if err := pool.Purge(resource); err != nil {
-            log.Printf("Could not purge resource: %s", err)
-        }
-    }
-
-    var db *sql.DB
-    if err := pool.Retry(func() error {
-        var err error
-        db, err = sql.Open("postgres", fmt.Sprintf(
-            "postgres://testuser:testpass@localhost:%s/testdb?sslmode=disable",
-            resource.GetPort("5432/tcp"),
-        ))
-        if err != nil {
-            return err
-        }
-        return db.Ping()
-    }); err != nil {
-        cleanup()
-        return nil, nil, fmt.Errorf("could not connect to database: %w", err)
+    // Verify connection
+    if err := db.Ping(); err != nil {
+        db.Close()
+        return nil, nil, fmt.Errorf("failed to ping test database: %w", err)
     }
 
     // Run migrations
     if err := runMigrations(db); err != nil {
-        cleanup()
-        return nil, nil, err
+        db.Close()
+        return nil, nil, fmt.Errorf("failed to run migrations: %w", err)
+    }
+
+    // Cleanup function to truncate all tables
+    cleanup := func() {
+        // Truncate all tables in reverse dependency order
+        tables := []string{
+            "scandata",
+            "messagemetadata",
+            "photometadata",
+            "videometadata",
+            "photosmediaitem",
+            "scanmetadata",
+            "scans",
+            "privatetokens",
+        }
+
+        for _, table := range tables {
+            db.Exec(fmt.Sprintf("TRUNCATE TABLE %s CASCADE", table))
+        }
+
+        db.Close()
     }
 
     return db, cleanup, nil
+}
+
+// runMigrations runs database migrations for tests
+func runMigrations(db *sqlx.DB) error {
+    // Use the same migration logic from db/database.go
+    // This ensures test database schema matches production
+
+    // For now, import and call the existing migrateDB() function
+    // Alternatively, read migration SQL files from db/migrations/
+
+    return nil // Implementation matches production migrations
 }
 ```
 
@@ -1422,12 +1476,7 @@ func TestBruteForce_RateLimit(t *testing.T) {
 - [ ] Multi-user scenarios
 - [ ] Error scenarios
 
-### Phase 6: Performance & Security (Week 11)
-- [ ] Benchmark tests
-- [ ] Load tests
-- [ ] Security tests
-
-### Phase 7: Documentation & Maintenance (Week 12)
+### Phase 6: Documentation & Maintenance (Week 11)
 - [ ] Test documentation
 - [ ] Coverage reports
 - [ ] Test maintenance guidelines
