@@ -1,40 +1,79 @@
 package notification
 
+import "sync"
+
 const NOTIFICATION_ALL string = "all"
 
-var publishers map[string]chan Progress
-var subscribers map[string]chan Progress
+// Hub manages progress notifications with thread-safe map access
+type Hub struct {
+	publishers  map[string]chan Progress
+	subscribers map[string]chan Progress
+	mu          sync.RWMutex
+}
+
+var globalHub *Hub
 
 func init() {
-	publishers = make(map[string]chan Progress)
-	subscribers = make(map[string]chan Progress)
+	globalHub = &Hub{
+		publishers:  make(map[string]chan Progress),
+		subscribers: make(map[string]chan Progress),
+	}
 }
 
 func GetPublisher(clientKey string) chan<- Progress {
-	if publishers[clientKey] == nil {
-		publishers[clientKey] = make(chan Progress)
+	globalHub.mu.Lock()
+	defer globalHub.mu.Unlock()
+
+	if globalHub.publishers[clientKey] == nil {
+		globalHub.publishers[clientKey] = make(chan Progress)
 		go processNotifications(clientKey)
 	}
-	return publishers[clientKey]
+	return globalHub.publishers[clientKey]
 }
 
 func GetSubscriber(clientKey string) <-chan Progress {
-	if subscribers[clientKey] == nil {
-		subscribers[clientKey] = make(chan Progress)
+	globalHub.mu.Lock()
+	defer globalHub.mu.Unlock()
+
+	if globalHub.subscribers[clientKey] == nil {
+		globalHub.subscribers[clientKey] = make(chan Progress)
 	}
-	return subscribers[clientKey]
+	return globalHub.subscribers[clientKey]
 }
 
 func processNotifications(clientKey string) {
-	for progress := range publishers[clientKey] {
-		pushToSubscriber(subscribers[clientKey], progress)
-		pushToSubscriber(subscribers[NOTIFICATION_ALL], progress)
+	// Get publisher channel safely
+	globalHub.mu.RLock()
+	publisher := globalHub.publishers[clientKey]
+	globalHub.mu.RUnlock()
+
+	if publisher == nil {
+		return
 	}
-	if subscribers[clientKey] != nil {
-		close(subscribers[clientKey])
-		delete(subscribers, clientKey)
+
+	for progress := range publisher {
+		// Get subscribers safely for each notification
+		globalHub.mu.RLock()
+		subscriber := globalHub.subscribers[clientKey]
+		subscriberAll := globalHub.subscribers[NOTIFICATION_ALL]
+		globalHub.mu.RUnlock()
+
+		pushToSubscriber(subscriber, progress)
+		pushToSubscriber(subscriberAll, progress)
 	}
-	delete(publishers, clientKey)
+
+	// Clean up after publisher channel closes
+	globalHub.mu.Lock()
+	defer globalHub.mu.Unlock()
+
+	// Close and remove subscriber if it exists
+	if ch, exists := globalHub.subscribers[clientKey]; exists {
+		close(ch)
+		delete(globalHub.subscribers, clientKey)
+	}
+
+	// Remove publisher
+	delete(globalHub.publishers, clientKey)
 }
 
 func pushToSubscriber(subscriber chan<- Progress, progress Progress) {
@@ -52,4 +91,28 @@ type Progress struct {
 	ElapsedInSec   int     `json:"elapsed_in_sec"`
 	EtaInSec       int     `json:"eta_in_sec"`
 	ScanId         int     `json:"scan_id"`
+}
+
+// Helper methods for monitoring and management
+
+func (h *Hub) ClosePublisher(clientKey string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if ch, exists := h.publishers[clientKey]; exists {
+		close(ch)
+		delete(h.publishers, clientKey)
+	}
+}
+
+func (h *Hub) GetPublisherCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.publishers)
+}
+
+func (h *Hub) GetSubscriberCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.subscribers)
 }
