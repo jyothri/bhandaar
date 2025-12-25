@@ -113,6 +113,20 @@ npm run preview
 
 PostgreSQL database is required. Tables are auto-created by the backend on startup.
 
+#### Database Configuration via Environment Variables
+
+The backend supports the following database environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_HOST` | `hdd_db` | Database host (use `localhost` for local dev) |
+| `DB_PORT` | `5432` | Database port |
+| `DB_USER` | `hddb` | Database user |
+| `DB_PASSWORD` | `""` (empty) | Database password |
+| `DB_NAME` | `hdd_db` | Database name |
+| `DB_SSL_MODE` | `disable` | SSL mode: `disable`, `require`, `verify-ca`, `verify-full` |
+
+**Local Development with PostgreSQL:**
 ```bash
 # Run PostgreSQL in Docker
 docker run --name postgres -e POSTGRES_PASSWORD=postgres -d -p 5432:5432 postgres
@@ -120,7 +134,36 @@ docker run --name postgres -e POSTGRES_PASSWORD=postgres -d -p 5432:5432 postgre
 # Start existing container
 docker start postgres
 
-# Access PostgreSQL shell
+# Run backend with environment variables
+export DB_HOST=localhost
+export DB_USER=postgres
+export DB_PASSWORD=postgres
+export DB_NAME=postgres
+go run .
+```
+
+**Production Configuration:**
+```bash
+# Set environment variables for production
+export DB_HOST=your-db-host.com
+export DB_USER=your_db_user
+export DB_PASSWORD=strong_secure_password
+export DB_NAME=your_database_name
+export DB_SSL_MODE=require
+```
+
+**Using .env file (recommended for local development):**
+```bash
+# Copy the example file
+cd be/
+cp .env.example .env
+
+# Edit .env with your database configuration
+# Then run the backend (if using a tool like godotenv)
+```
+
+**Access PostgreSQL shell:**
+```bash
 docker exec -it postgres /bin/bash
 psql -U postgres
 ```
@@ -143,7 +186,7 @@ For Cloud Storage access, set `GOOGLE_APPLICATION_CREDENTIALS` to service accoun
 ## Important Notes
 
 - **No tests**: The codebase currently has no test files
-- **Database connection**: Default connection in `be/db/database.go` expects host `hdd_db`, port `5432`, user/password `hddb/hddb`, database `hdd_db`. Update constants if using different configuration (e.g., `localhost` for local development)
+- **Database connection**: Configured via environment variables (see Database Setup section). Defaults: host `hdd_db`, port `5432`, user `hddb`, password empty, database `hdd_db`. For local development, set `DB_HOST=localhost` and configure credentials to match your PostgreSQL instance.
 - **Backend API URL**: Hardcoded in `ui/src/api/index.ts` as `https://sm.jkurapati.com`
 - **Known issue**: Directory size calculation differs between local scans (recursive) and cloud scans (directory-level only) - see be/README.md "Kinks" section
 - **CORS**: Backend configured to allow requests from frontend origin

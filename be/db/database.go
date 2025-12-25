@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,24 +13,67 @@ import (
 	_ "github.com/lib/pq"
 )
 
-const (
-	host     = "hdd_db"
-	port     = 5432
-	user     = "hddb"
-	password = "hddb"
-	dbname   = "hdd_db"
-)
+// DBConfig holds database configuration parameters
+type DBConfig struct {
+	Host     string
+	Port     int
+	User     string
+	Password string
+	DBName   string
+	SSLMode  string
+}
 
 var db *sqlx.DB
 
+// getEnv retrieves an environment variable or returns a default value
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// getEnvInt retrieves an environment variable as an integer or returns a default value
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if i, err := strconv.Atoi(value); err == nil {
+			return i
+		}
+		slog.Warn("Invalid integer value for environment variable, using default",
+			"key", key, "value", value, "default", defaultValue)
+	}
+	return defaultValue
+}
+
+// getDBConfig loads database configuration from environment variables
+func getDBConfig() DBConfig {
+	return DBConfig{
+		Host:     getEnv("DB_HOST", "hdd_db"),
+		Port:     getEnvInt("DB_PORT", 5432),
+		User:     getEnv("DB_USER", "hddb"),
+		Password: getEnv("DB_PASSWORD", ""),
+		DBName:   getEnv("DB_NAME", "hdd_db"),
+		SSLMode:  getEnv("DB_SSL_MODE", "disable"),
+	}
+}
+
 // SetupDatabase initializes the database connection and runs migrations
 func SetupDatabase() error {
-	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
-		"password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname)
+	config := getDBConfig()
+
+	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		config.Host, config.Port, config.User, config.Password, config.DBName, config.SSLMode)
+
+	slog.Info("Connecting to database",
+		"host", config.Host,
+		"port", config.Port,
+		"user", config.User,
+		"dbname", config.DBName,
+		"sslmode", config.SSLMode,
+	)
 
 	var err error
-	db, err = sqlx.Open("postgres", psqlInfo)
+	db, err = sqlx.Open("postgres", connStr)
 	if err != nil {
 		return fmt.Errorf("failed to open database connection: %w", err)
 	}

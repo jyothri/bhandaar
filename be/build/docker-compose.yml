@@ -16,6 +16,13 @@ services:
       - OAUTH_CLIENT_ID=dummy-client-id
       - OAUTH_CLIENT_SECRET=dummy-client-secret
       - FRONTEND_URL=dummy-frontend-url
+      # Database configuration
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=postgres
+      - DB_SSL_MODE=disable
     volumes:
       - /Users/jyothri/test:/scan
     ports:
