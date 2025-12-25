@@ -24,6 +24,9 @@ func Server() {
 	cors := cors.New(cors.Options{
 		AllowedOrigins:   []string{constants.FrontendUrl},
 		AllowCredentials: true,
+		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		AllowedMethods:   []string{"GET", "POST", "DELETE", "OPTIONS"},
+		MaxAge:           300, // Cache preflight for 5 minutes
 	})
 	handler := cors.Handler(r)
 	srv := &http.Server{
