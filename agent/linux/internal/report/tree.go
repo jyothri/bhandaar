@@ -1,166 +1,131 @@
 package report
 
 import (
-	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
-	"github.com/jyothri/bhandaar/agent/linux/internal/compare"
+	"github.com/jyothri/bhandaar/agent/linux/internal/store"
 )
 
-// Per spec §7.1: folder status is the worst category found anywhere in its
-// subtree, using this precedence (worst first).
-const (
-	catError    = "error"
-	catDiverged = "diverged"
-	catMissing  = "missing"
-	catCommon   = "common"
-)
-
-var precedence = map[string]int{
-	catError:    3,
-	catDiverged: 2,
-	catMissing:  1,
-	catCommon:   0,
-}
-
-// TreeNode is one row of the recursive folder-rollup tree rendered in the
-// HTML report. A leaf (IsFile) is a single file; an internal node is a
-// folder whose Category/Counts are rolled up bottom-up from its children.
-// Relocated entries are intentionally never inserted into this tree — see
-// spec §7.1 ("Relocated files — kept out of the tree").
+// TreeNode is one row of the recursive folder view rendered in the HTML
+// report. Unlike the pre-§11 design, this is a pure read of already-
+// computed data (store.FolderStatus / store.FileRecord.ComparisonStatus)
+// — report performs no rollup computation of its own.
 type TreeNode struct {
 	Name     string
 	IsFile   bool
-	Category string // file: its own category. folder: rolled-up worst category of its subtree.
+	Category string // folder: its persisted FolderStatus.Status. file: its ComparisonStatus ("unscanned" if never compared).
 	Counts   map[string]int
 	Children []*TreeNode
 
-	// Leaf detail, populated according to Category.
-	Size      int64
-	SizeA     int64
-	HashA     string
-	SizeB     int64
-	HashB     string
-	PresentOn string
-	Drive     string
-	Message   string
-
-	childIndex map[string]*TreeNode // build-time only, for de-duplicating folder segments
+	// Leaf detail (IsFile only).
+	Size                    int64
+	ComparedAgainstDriveID  string
+	CounterpartRelativePath string // only meaningful when Category == relocated
 }
 
 // CountsText renders the per-category breakdown shown next to a non-common
-// folder's badge, e.g. "2 diverged, 1 missing, 47 common". Per spec, common
-// folders don't show a breakdown (there's nothing to break down).
+// folder's badge, e.g. "2 diverged, 1 missing, 47 common".
 func (n *TreeNode) CountsText() string {
-	if n.IsFile || n.Category == catCommon {
+	if n.IsFile || n.Category == store.ComparisonCommon || len(n.Counts) == 0 {
 		return ""
 	}
-	order := []string{catError, catDiverged, catMissing, catCommon}
+	order := []string{store.ComparisonDiverged, store.ComparisonRelocated, store.ComparisonMissing, store.ComparisonCommon}
 	var parts []string
 	for _, k := range order {
 		if v := n.Counts[k]; v > 0 {
-			parts = append(parts, fmt.Sprintf("%d %s", v, k))
+			parts = append(parts, strconv.Itoa(v)+" "+k)
 		}
 	}
 	return strings.Join(parts, ", ")
 }
 
-// BuildTree groups every Common/Diverged/Missing/ScanErrors entry from res
-// into a recursive folder tree keyed by relative-path segments, with each
-// folder's Category/Counts rolled up bottom-up per spec §7.1.
-func BuildTree(res compare.Result) *TreeNode {
-	// Named "." (the scan root) rather than left empty, since the root
-	// itself is rendered as the top-level rollup node — if everything
-	// under it matches, the whole report collapses to one "." / common
-	// line instead of listing every top-level folder individually.
-	root := newFolderNode(".")
-
-	for _, c := range res.Common {
-		insertLeaf(root, c.RelPath, &TreeNode{Category: catCommon, Size: c.Size})
-	}
-	for _, d := range res.Diverged {
-		insertLeaf(root, d.RelPath, &TreeNode{
-			Category: catDiverged,
-			SizeA:    d.SizeA, HashA: d.HashA,
-			SizeB: d.SizeB, HashB: d.HashB,
-		})
-	}
-	for _, m := range res.Missing {
-		insertLeaf(root, m.RelPath, &TreeNode{Category: catMissing, Size: m.Size, PresentOn: m.PresentOn})
-	}
-	for _, e := range res.ScanErrors {
-		insertLeaf(root, e.RelPath, &TreeNode{Category: catError, Drive: e.Drive, Message: e.Message})
-	}
-
-	rollup(root)
-	sortChildren(root)
-	return root
+// isMacMetadata reports whether name is a macOS-generated sidecar file
+// (AppleDouble `._name` or Finder's `.DS_Store`) rather than real content.
+func isMacMetadata(name string) bool {
+	return strings.HasPrefix(name, "._") || name == ".DS_Store"
 }
 
-func newFolderNode(name string) *TreeNode {
-	return &TreeNode{Name: name, childIndex: make(map[string]*TreeNode)}
+// buildTree reads the drive's whole folder/file structure starting at
+// drive_root ("") and returns it as a tree, purely via lookups —
+// dir_listings for structure, folder_status for folder rollups, and
+// files.comparison_status for leaves. When includeMacMetadata is false,
+// matching leaf entries are left out of Children (their contribution to
+// an ancestor's persisted Counts/Category is not recomputed — see
+// specs/drive-comparison-agent.md §11's note on this being leaf-level-only
+// filtering).
+func buildTree(st *store.Store, driveID string, includeMacMetadata bool) (*TreeNode, error) {
+	return buildNode(st, driveID, "", ".", includeMacMetadata)
 }
 
-// insertLeaf walks/creates the folder chain for relPath's directory
-// segments and attaches leaf as the final path component.
-func insertLeaf(root *TreeNode, relPath string, leaf *TreeNode) {
-	parts := strings.Split(relPath, "/")
-	cur := root
-	for _, part := range parts[:len(parts)-1] {
-		child, ok := cur.childIndex[part]
-		if !ok {
-			child = newFolderNode(part)
-			cur.childIndex[part] = child
-			cur.Children = append(cur.Children, child)
+func buildNode(st *store.Store, driveID, relPath, name string, includeMacMetadata bool) (*TreeNode, error) {
+	fs, err := st.GetFolderStatus(driveID, relPath)
+	if err != nil {
+		return nil, err
+	}
+	node := &TreeNode{Name: name}
+	if fs == nil {
+		node.Category = store.FolderUnscanned
+	} else {
+		node.Category = fs.Status
+		node.Counts = fs.Counts
+	}
+
+	children, err := st.ListChildren(driveID, relPath)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range children {
+		if !includeMacMetadata && isMacMetadata(c.Name) {
+			continue
 		}
-		cur = child
-	}
-	leaf.Name = parts[len(parts)-1]
-	leaf.IsFile = true
-	cur.childIndex[leaf.Name] = leaf
-	cur.Children = append(cur.Children, leaf)
-}
-
-// rollup computes each folder's Category (worst status in its subtree) and
-// Counts (category -> count across the whole subtree), bottom-up.
-func rollup(n *TreeNode) {
-	if n.IsFile {
-		return
-	}
-	counts := map[string]int{}
-	worst := catCommon
-	for _, c := range n.Children {
-		rollup(c)
-		if c.IsFile {
-			counts[c.Category]++
-		} else {
-			for k, v := range c.Counts {
-				counts[k] += v
+		childPath := c.Name
+		if relPath != "" {
+			childPath = relPath + "/" + c.Name
+		}
+		if c.IsDir {
+			childNode, err := buildNode(st, driveID, childPath, c.Name, includeMacMetadata)
+			if err != nil {
+				return nil, err
 			}
+			node.Children = append(node.Children, childNode)
+			continue
 		}
-		if precedence[c.Category] > precedence[worst] {
-			worst = c.Category
+		leaf, err := buildLeaf(st, driveID, childPath, c.Name)
+		if err != nil {
+			return nil, err
 		}
+		node.Children = append(node.Children, leaf)
 	}
-	n.Counts = counts
-	n.Category = worst
+	sortChildren(node.Children)
+	return node, nil
 }
 
-// sortChildren orders each folder's children deterministically: subfolders
-// before files, alphabetically within each group.
-func sortChildren(n *TreeNode) {
-	if n.IsFile {
-		return
+func buildLeaf(st *store.Store, driveID, relPath, name string) (*TreeNode, error) {
+	leaf := &TreeNode{Name: name, IsFile: true, Category: store.FolderUnscanned}
+	f, err := st.GetFile(driveID, relPath)
+	if err != nil {
+		return nil, err
 	}
-	sort.Slice(n.Children, func(i, j int) bool {
-		a, b := n.Children[i], n.Children[j]
+	if f == nil {
+		return leaf, nil
+	}
+	leaf.Size = f.Size
+	leaf.ComparedAgainstDriveID = f.ComparedAgainstDriveID
+	leaf.CounterpartRelativePath = f.CounterpartRelativePath
+	if f.ComparisonStatus != "" {
+		leaf.Category = f.ComparisonStatus
+	}
+	return leaf, nil
+}
+
+func sortChildren(children []*TreeNode) {
+	sort.Slice(children, func(i, j int) bool {
+		a, b := children[i], children[j]
 		if a.IsFile != b.IsFile {
-			return !a.IsFile
+			return !a.IsFile // folders before files
 		}
 		return a.Name < b.Name
 	})
-	for _, c := range n.Children {
-		sortChildren(c)
-	}
 }

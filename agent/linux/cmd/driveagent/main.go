@@ -1,8 +1,15 @@
-// Command driveagent compares two drives' content for divergence: files
-// that are common, diverged (same path, different content), relocated
-// (same content, different path), or missing from one drive.
+// Command driveagent tracks and compares two drives' content for
+// divergence: files that are common, diverged (same path, different
+// content), relocated (same content, different path), or missing from one
+// drive — plus, per folder, whether it's been fully scanned, partially
+// scanned, or not scanned at all.
 //
-// It is a standalone, report-only tool — it never writes to either drive.
+// It never writes to either drive. Three subcommands, each with a single
+// responsibility (see specs/drive-comparison-agent.md §11):
+//
+//	scan    walks and hashes one drive's files.
+//	compare computes and persists comparison status for scoped paths.
+//	report  renders already-computed status — no drive access, no compute.
 package main
 
 import (
@@ -37,6 +44,8 @@ func main() {
 		err = runScan(ctx, os.Args[2:])
 	case "compare":
 		err = runCompare(os.Args[2:])
+	case "report":
+		err = runReport(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -52,16 +61,18 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `driveagent — compare two drives for divergence (report-only, no writes)
+	fmt.Fprint(os.Stderr, `driveagent — track and compare two drives for divergence (no writes to either drive)
 
 Usage:
-  driveagent scan    --drive-id <id> --path <content-root> [--state-dir <dir>] [--workers N]
-  driveagent compare --drive-a <id> --drive-b <id> [--state-dir <dir>] [--report-out <dir>] [--format text,json,html]
+  driveagent scan    --drive-id <id> --path <folder> [--drive-root <dir>] [--backup-root <rel-path>] [--state-dir <dir>] [--workers N] [--replace-root]
+  driveagent compare --drive-a <id> --drive-b <id> [--drive-a-paths <rel,rel,...>] [--drive-b-paths <rel,rel,...>] [--state-dir <dir>]
+  driveagent report  --drives <id,id,...> [--type text,json,html] [--report-out <dir>] [--include-mac-metadata] [--state-dir <dir>]
 
 Examples:
-  driveagent scan    --drive-id seagate2 --path /mnt/seagate2/Jyo/Backup
-  driveagent scan    --drive-id seagate1 --path /media/jyothri/Seagate1/Jyo
-  driveagent compare --drive-a seagate2 --drive-b seagate1 --report-out ./report
+  driveagent scan    --drive-id seagate2 --drive-root /mnt/seagate2 --backup-root Jyo/Backup --path "/mnt/seagate2/Jyo/Backup/interview"
+  driveagent scan    --drive-id seagate1 --drive-root /media/jyothri/Seagate1 --backup-root Jyo --path "/media/jyothri/Seagate1/Jyo/interview"
+  driveagent compare --drive-a seagate2 --drive-b seagate1 --drive-a-paths interview --drive-b-paths interview
+  driveagent report  --drives seagate1,seagate2 --report-out ./report
 `)
 }
 
@@ -73,13 +84,28 @@ func defaultStateDir() string {
 	return filepath.Join(home, ".driveagent")
 }
 
+func splitList(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func runScan(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("scan", flag.ExitOnError)
 	driveID := fs.String("drive-id", "", "label for this drive (required)")
-	path := fs.String("path", "", "content root to scan (required; independent of the mount point)")
+	path := fs.String("path", "", "the specific folder to walk and hash this invocation (required)")
+	driveRoot := fs.String("drive-root", "", "stable anchor for this drive's relative paths, e.g. its mount point (defaults to --path)")
+	backupRoot := fs.String("backup-root", "", "where mirrored backup content starts, relative to --drive-root (only needed once per drive; omit to leave unset/unchanged)")
 	stateDir := fs.String("state-dir", defaultStateDir(), "directory holding the checkpoint database")
 	workers := fs.Int("workers", 2, "concurrent hashing workers (keep low for spinning USB drives)")
-	replaceRoot := fs.Bool("replace-root", false, "allow --drive-id to be repointed at a different --path than it was last scanned at, discarding that drive-id's old checkpoint data first")
+	replaceRoot := fs.Bool("replace-root", false, "allow --drive-id to be repointed at a different --drive-root than it was last scanned at, discarding that drive-id's old checkpoint data first")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -99,6 +125,8 @@ func runScan(ctx context.Context, args []string) error {
 	stats, err := scan.Run(ctx, st, scan.Options{
 		DriveID:     *driveID,
 		RootPath:    *path,
+		DriveRoot:   *driveRoot,
+		BackupRoot:  *backupRoot,
 		Workers:     *workers,
 		ReplaceRoot: *replaceRoot,
 		Progress: func(s scan.Stats) {
@@ -111,8 +139,11 @@ func runScan(ctx context.Context, args []string) error {
 		return err
 	}
 
-	fmt.Printf("done in %s: seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d\n",
-		stats.Elapsed.Round(time.Second), stats.FilesSeen, stats.FilesSkipped, stats.FilesHashed, stats.FilesErrored, stats.BytesHashed)
+	fmt.Printf("done in %s: seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d deleted=%d\n",
+		stats.Elapsed.Round(time.Second), stats.FilesSeen, stats.FilesSkipped, stats.FilesHashed, stats.FilesErrored, stats.BytesHashed, stats.FilesDeleted)
+	if stats.DeletionsSkipped {
+		fmt.Println("note: skipped deletion detection because this walk hit an unreadable file/directory — a clean rescan (no warnings above) is needed to detect files removed from disk.")
+	}
 
 	if interrupted, ok := err.(*scan.Interrupted); ok {
 		fmt.Printf("scan stopped early: %s\nre-run the same command to resume — already-hashed files will be skipped.\n", interrupted.Reason)
@@ -125,10 +156,9 @@ func runCompare(args []string) error {
 	fs := flag.NewFlagSet("compare", flag.ExitOnError)
 	driveA := fs.String("drive-a", "", "first drive ID (required; must have been scanned already)")
 	driveB := fs.String("drive-b", "", "second drive ID (required; must have been scanned already)")
+	pathsA := fs.String("drive-a-paths", "", "comma-separated backup-root-relative paths to (re)check on drive A (default: the whole drive)")
+	pathsB := fs.String("drive-b-paths", "", "comma-separated backup-root-relative paths to (re)check on drive B (default: the whole drive)")
 	stateDir := fs.String("state-dir", defaultStateDir(), "directory holding the checkpoint database")
-	reportOut := fs.String("report-out", "./report", "output directory for json/html reports")
-	format := fs.String("format", "text,json,html", "comma-separated: text,json,html")
-	includeMacMetadata := fs.Bool("include-mac-metadata", false, "include AppleDouble (._*) and .DS_Store files in the report (excluded by default; they remain in the checkpoint DB either way)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -143,32 +173,65 @@ func runCompare(args []string) error {
 	}
 	defer st.Close()
 
-	res, err := compare.Run(st, *driveA, *driveB, compare.Options{IncludeMacMetadata: *includeMacMetadata})
+	sum, err := compare.Run(st, compare.Options{
+		DriveA: *driveA, DriveB: *driveB,
+		PathsA: splitList(*pathsA), PathsB: splitList(*pathsB),
+	})
 	if err != nil {
 		return err
 	}
 
-	formats := strings.Split(*format, ",")
-	for _, f := range formats {
-		switch strings.TrimSpace(f) {
+	fmt.Printf("compared %s vs %s: common=%d diverged=%d missing=%d relocated=%d (folders updated: %d)\n",
+		sum.DriveA, sum.DriveB, sum.Common, sum.Diverged, sum.Missing, sum.Relocated, sum.FoldersUpdated)
+	fmt.Println("run 'driveagent report' to render the updated status.")
+	return nil
+}
+
+func runReport(args []string) error {
+	fs := flag.NewFlagSet("report", flag.ExitOnError)
+	drives := fs.String("drives", "", "comma-separated drive IDs to report on (required)")
+	reportType := fs.String("type", "text,json,html", "comma-separated: text,json,html")
+	reportOut := fs.String("report-out", "./report", "output directory for json/html reports")
+	includeMacMetadata := fs.Bool("include-mac-metadata", false, "include AppleDouble (._*) and .DS_Store files in the report (excluded by default; they remain in the checkpoint DB either way)")
+	stateDir := fs.String("state-dir", defaultStateDir(), "directory holding the checkpoint database")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	driveList := splitList(*drives)
+	if len(driveList) == 0 {
+		fs.Usage()
+		return fmt.Errorf("--drives is required")
+	}
+
+	st, err := store.Open(*stateDir)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	reports, err := report.Build(st, report.Options{Drives: driveList, IncludeMacMetadata: *includeMacMetadata})
+	if err != nil {
+		return err
+	}
+
+	for _, f := range splitList(*reportType) {
+		switch f {
 		case "text":
-			report.WriteConsole(os.Stdout, res)
+			report.WriteConsole(os.Stdout, reports)
 		case "json":
 			p := filepath.Join(*reportOut, "report.json")
-			if err := report.WriteJSON(res, p); err != nil {
+			if err := report.WriteJSON(reports, p); err != nil {
 				return fmt.Errorf("writing json report: %w", err)
 			}
 			fmt.Printf("wrote %s\n", p)
 		case "html":
 			p := filepath.Join(*reportOut, "report.html")
-			if err := report.WriteHTML(res, p); err != nil {
+			if err := report.WriteHTML(reports, p); err != nil {
 				return fmt.Errorf("writing html report: %w", err)
 			}
 			fmt.Printf("wrote %s\n", p)
-		case "":
-			// ignore stray empty entries from trailing commas
 		default:
-			return fmt.Errorf("unknown format %q", f)
+			return fmt.Errorf("unknown --type %q", f)
 		}
 	}
 	return nil

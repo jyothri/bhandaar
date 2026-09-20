@@ -1,203 +1,253 @@
-// Package compare classifies files from two already-scanned drives into
-// common / diverged / relocated / missing, per the checkpoint database.
+// Package compare computes and persists comparison status between two
+// drives: for a scoped set of paths, it classifies files as common,
+// diverged, or missing by exact (backup-root-aligned) path match; runs a
+// global relocated-detection pass over every currently-missing file on
+// both drives; and incrementally maintains a folder-level status rollup
+// by walking each touched file's ancestor chain up to drive_root. See
+// specs/drive-comparison-agent.md §11.5 for the full design.
 package compare
 
 import (
-	"path/filepath"
+	"context"
 	"sort"
 	"strings"
 
 	"github.com/jyothri/bhandaar/agent/linux/internal/store"
 )
 
-// CommonFile is identical content at the same relative path on both drives.
-type CommonFile struct {
-	RelPath string
-	Size    int64
-	Hash    string
-}
-
-// DivergedFile is the same relative path on both drives with different
-// content — a corruption/edit candidate for the user to review manually.
-type DivergedFile struct {
-	RelPath string
-	SizeA   int64
-	HashA   string
-	SizeB   int64
-	HashB   string
-}
-
-// RelocatedFile is identical content present on both drives but under
-// different relative paths.
-type RelocatedFile struct {
-	PathA string
-	PathB string
-	Size  int64
-	Hash  string
-}
-
-// MissingFile is present on exactly one drive, by both path and content.
-type MissingFile struct {
-	RelPath   string
-	Size      int64
-	Hash      string
-	PresentOn string // drive ID this file exists on
-}
-
-// ScanErrorEntry surfaces a file that failed to hash during scanning, so
-// it isn't silently absent from the report.
-type ScanErrorEntry struct {
-	Drive   string
-	RelPath string
-	Message string
-}
-
-// Result is the full classification of two drives' scanned file sets.
-type Result struct {
-	DriveA, DriveB string
-	Common         []CommonFile
-	Diverged       []DivergedFile
-	Relocated      []RelocatedFile
-	Missing        []MissingFile
-	ScanErrors     []ScanErrorEntry
-	// ExcludedCount is how many scanned files were left out of
-	// classification (e.g. macOS metadata files), for the report to
-	// note without cluttering the categories above.
-	ExcludedCount int
-}
-
-// Options controls what Run excludes from classification. Excluded files
-// remain untouched in the checkpoint DB — this only affects what's
-// compared/reported.
+// Options scopes a compare run. PathsA/PathsB are backup-root-relative
+// paths to (re)check; empty means "the whole drive." Matching itself
+// always uses complete knowledge of both drives (a file's status can only
+// be determined by looking at both sides), but PathsA/PathsB determine
+// which backup-relative paths are considered "in play" this run — applied
+// as the union of the two lists, since in practice they name the same
+// folders on both sides (the asymmetric case, checking driveA's "X"
+// against driveB's "Y", isn't supported by this simplification).
 type Options struct {
-	// IncludeMacMetadata, if false (the default), drops AppleDouble
-	// sidecar files (._*) and Finder's .DS_Store from classification —
-	// they're an artifact of copying from a Mac, not real content
-	// divergence, and otherwise dominate every report.
-	IncludeMacMetadata bool
+	DriveA, DriveB string
+	PathsA, PathsB []string
 }
 
-// Run loads the recorded scans for driveA and driveB from st and classifies
-// every file per the spec's a/b/c/d categories.
-func Run(st *store.Store, driveA, driveB string, opts Options) (Result, error) {
-	filesA, err := st.ListFiles(driveA, store.StatusHashed)
+// Summary reports what a compare run actually did, for the console.
+type Summary struct {
+	DriveA, DriveB                       string
+	Common, Diverged, Missing, Relocated int
+	FoldersUpdated                       int
+}
+
+// backupRelative strips backupRoot from a drive-root-relative path,
+// returning (path, true), or ("", false) if driveRootRel falls outside
+// backupRoot entirely (e.g. "buda/x.txt" when backupRoot is "Jyo") — such
+// files are outside the mirrored backup content and are never compared.
+func backupRelative(driveRootRel, backupRoot string) (string, bool) {
+	if backupRoot == "" {
+		return driveRootRel, true
+	}
+	if driveRootRel == backupRoot {
+		return "", true
+	}
+	prefix := backupRoot + "/"
+	if strings.HasPrefix(driveRootRel, prefix) {
+		return driveRootRel[len(prefix):], true
+	}
+	return "", false
+}
+
+// inScope reports whether backupRelPath is under one of paths (or paths is
+// empty, meaning "everything is in scope").
+func inScope(backupRelPath string, paths []string) bool {
+	if len(paths) == 0 {
+		return true
+	}
+	for _, p := range paths {
+		if backupRelPath == p || strings.HasPrefix(backupRelPath, p+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// Run computes comparison status for the scoped paths, runs the global
+// relocated pass, persists everything, and propagates folder_status up to
+// each drive's root for every file actually touched.
+func Run(st *store.Store, opts Options) (Summary, error) {
+	sum := Summary{DriveA: opts.DriveA, DriveB: opts.DriveB}
+
+	backupRootA, err := st.BackupRoot(opts.DriveA)
 	if err != nil {
-		return Result{}, err
+		return sum, err
 	}
-	filesB, err := st.ListFiles(driveB, store.StatusHashed)
+	backupRootB, err := st.BackupRoot(opts.DriveB)
 	if err != nil {
-		return Result{}, err
+		return sum, err
 	}
 
-	res := Result{DriveA: driveA, DriveB: driveB}
-	if !opts.IncludeMacMetadata {
-		var excludedA, excludedB int
-		filesA, excludedA = filterMacMetadata(filesA)
-		filesB, excludedB = filterMacMetadata(filesB)
-		res.ExcludedCount = excludedA + excludedB
+	filesA, err := st.ListFiles(opts.DriveA, store.StatusHashed)
+	if err != nil {
+		return sum, err
+	}
+	filesB, err := st.ListFiles(opts.DriveB, store.StatusHashed)
+	if err != nil {
+		return sum, err
 	}
 
-	mapA := make(map[string]store.FileRecord, len(filesA))
-	for _, f := range filesA {
-		mapA[f.RelPath] = f
-	}
-	mapB := make(map[string]store.FileRecord, len(filesB))
-	for _, f := range filesB {
-		mapB[f.RelPath] = f
-	}
+	mapA := indexByBackupPath(filesA, backupRootA)
+	mapB := indexByBackupPath(filesB, backupRootB)
 
-	var leftoverA, leftoverB []store.FileRecord
-	for relPath, a := range mapA {
-		b, ok := mapB[relPath]
-		if !ok {
-			leftoverA = append(leftoverA, a)
-			continue
+	inScopeUnion := unionKeys(mapA, mapB, opts.PathsA, opts.PathsB)
+
+	var updatesA, updatesB []store.ComparisonUpdate
+	touchedA := map[string]bool{}
+	touchedB := map[string]bool{}
+
+	for backupPath := range inScopeUnion {
+		a, okA := mapA[backupPath]
+		b, okB := mapB[backupPath]
+		switch {
+		case okA && okB:
+			status := store.ComparisonCommon
+			if a.ContentHash != b.ContentHash {
+				status = store.ComparisonDiverged
+			}
+			updatesA = append(updatesA, store.ComparisonUpdate{DriveID: opts.DriveA, RelPath: a.RelPath, ComparisonStatus: status, ComparedAgainstDriveID: opts.DriveB})
+			updatesB = append(updatesB, store.ComparisonUpdate{DriveID: opts.DriveB, RelPath: b.RelPath, ComparisonStatus: status, ComparedAgainstDriveID: opts.DriveA})
+			touchedA[a.RelPath] = true
+			touchedB[b.RelPath] = true
+			if status == store.ComparisonCommon {
+				sum.Common++
+			} else {
+				sum.Diverged++
+			}
+		case okA && !okB:
+			updatesA = append(updatesA, store.ComparisonUpdate{DriveID: opts.DriveA, RelPath: a.RelPath, ComparisonStatus: store.ComparisonMissing, ComparedAgainstDriveID: opts.DriveB})
+			touchedA[a.RelPath] = true
+			sum.Missing++
+		case okB && !okA:
+			updatesB = append(updatesB, store.ComparisonUpdate{DriveID: opts.DriveB, RelPath: b.RelPath, ComparisonStatus: store.ComparisonMissing, ComparedAgainstDriveID: opts.DriveA})
+			touchedB[b.RelPath] = true
+			sum.Missing++
 		}
-		if a.ContentHash == b.ContentHash {
-			res.Common = append(res.Common, CommonFile{RelPath: relPath, Size: a.Size, Hash: a.ContentHash})
-		} else {
-			res.Diverged = append(res.Diverged, DivergedFile{
-				RelPath: relPath,
-				SizeA:   a.Size, HashA: a.ContentHash,
-				SizeB: b.Size, HashB: b.ContentHash,
-			})
-		}
-	}
-	for relPath, b := range mapB {
-		if _, ok := mapA[relPath]; !ok {
-			leftoverB = append(leftoverB, b)
-		}
 	}
 
-	// Content-match the leftovers (present under a path unique to one
-	// drive) to find relocations, treating same-hash groups as multisets
-	// so duplicate content is paired up rather than cross-matched
-	// arbitrarily.
-	byHashA := groupByHash(leftoverA)
-	byHashB := groupByHash(leftoverB)
+	if err := st.UpdateComparisonStatuses(context.Background(), updatesA); err != nil {
+		return sum, err
+	}
+	if err := st.UpdateComparisonStatuses(context.Background(), updatesB); err != nil {
+		return sum, err
+	}
 
+	relocatedA, relocatedB, err := runGlobalRelocatedPass(st, opts.DriveA, opts.DriveB)
+	if err != nil {
+		return sum, err
+	}
+	for _, u := range relocatedA {
+		touchedA[u.RelPath] = true
+	}
+	for _, u := range relocatedB {
+		touchedB[u.RelPath] = true
+	}
+	sum.Relocated = len(relocatedA)
+	// A relocated match reclassifies a file that was counted as `missing`
+	// above (on the side that no longer has an exact-path match); undo
+	// that double count for a clean summary.
+	sum.Missing -= len(relocatedA) + len(relocatedB)
+
+	updated, err := propagate(st, opts.DriveA, keys(touchedA))
+	if err != nil {
+		return sum, err
+	}
+	sum.FoldersUpdated += updated
+	updated, err = propagate(st, opts.DriveB, keys(touchedB))
+	if err != nil {
+		return sum, err
+	}
+	sum.FoldersUpdated += updated
+
+	return sum, nil
+}
+
+func indexByBackupPath(files []store.FileRecord, backupRoot string) map[string]store.FileRecord {
+	m := make(map[string]store.FileRecord, len(files))
+	for _, f := range files {
+		if bp, ok := backupRelative(f.RelPath, backupRoot); ok {
+			m[bp] = f
+		}
+	}
+	return m
+}
+
+// unionKeys returns every backup-relative path that's in scope per
+// Options.PathsA/PathsB (§11.5's "union" simplification), drawn from
+// whichever of mapA/mapB actually has that key.
+func unionKeys(mapA, mapB map[string]store.FileRecord, pathsA, pathsB []string) map[string]bool {
+	out := map[string]bool{}
+	for k := range mapA {
+		if inScope(k, pathsA) {
+			out[k] = true
+		}
+	}
+	for k := range mapB {
+		if inScope(k, pathsB) {
+			out[k] = true
+		}
+	}
+	return out
+}
+
+func keys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// runGlobalRelocatedPass multiset-matches every currently-`missing` file
+// on both drives by content hash, regardless of what was scoped into this
+// run — see spec §11.5 on why this stays unscoped. (No backup_root
+// handling needed here: comparison_status is only ever set on files that
+// already passed backupRelative's in-scope check in Run, above.)
+func runGlobalRelocatedPass(st *store.Store, driveA, driveB string) ([]store.ComparisonUpdate, []store.ComparisonUpdate, error) {
+	missingA, err := st.ListFilesByComparisonStatus(driveA, store.ComparisonMissing)
+	if err != nil {
+		return nil, nil, err
+	}
+	missingB, err := st.ListFilesByComparisonStatus(driveB, store.ComparisonMissing)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	byHashA := groupByHash(missingA)
+	byHashB := groupByHash(missingB)
+
+	var updatesA, updatesB []store.ComparisonUpdate
 	for hash, recsA := range byHashA {
 		recsB := byHashB[hash]
-		n := min(len(recsA), len(recsB))
+		n := len(recsA)
+		if len(recsB) < n {
+			n = len(recsB)
+		}
 		for i := 0; i < n; i++ {
-			res.Relocated = append(res.Relocated, RelocatedFile{
-				PathA: recsA[i].RelPath,
-				PathB: recsB[i].RelPath,
-				Size:  recsA[i].Size,
-				Hash:  hash,
+			updatesA = append(updatesA, store.ComparisonUpdate{
+				DriveID: driveA, RelPath: recsA[i].RelPath,
+				ComparisonStatus: store.ComparisonRelocated, ComparedAgainstDriveID: driveB,
+				CounterpartRelativePath: recsB[i].RelPath,
+			})
+			updatesB = append(updatesB, store.ComparisonUpdate{
+				DriveID: driveB, RelPath: recsB[i].RelPath,
+				ComparisonStatus: store.ComparisonRelocated, ComparedAgainstDriveID: driveA,
+				CounterpartRelativePath: recsA[i].RelPath,
 			})
 		}
-		for _, rec := range recsA[n:] {
-			res.Missing = append(res.Missing, MissingFile{RelPath: rec.RelPath, Size: rec.Size, Hash: rec.ContentHash, PresentOn: driveA})
-		}
-	}
-	for hash, recsB := range byHashB {
-		recsA := byHashA[hash]
-		if len(recsA) >= len(recsB) {
-			continue // already fully paired (or over-paired) above
-		}
-		for _, rec := range recsB[len(recsA):] {
-			res.Missing = append(res.Missing, MissingFile{RelPath: rec.RelPath, Size: rec.Size, Hash: rec.ContentHash, PresentOn: driveB})
-		}
 	}
 
-	sortResult(&res)
-
-	for _, drive := range []string{driveA, driveB} {
-		errs, err := st.ListFiles(drive, store.StatusError)
-		if err != nil {
-			return Result{}, err
-		}
-		for _, e := range errs {
-			res.ScanErrors = append(res.ScanErrors, ScanErrorEntry{Drive: drive, RelPath: e.RelPath, Message: e.ErrorMessage})
-		}
+	if err := st.UpdateComparisonStatuses(context.Background(), updatesA); err != nil {
+		return nil, nil, err
 	}
-
-	return res, nil
-}
-
-// isMacMetadata reports whether relPath is a macOS-generated sidecar file
-// rather than real content: an AppleDouble resource-fork file (._name) or
-// a Finder folder-metadata file (.DS_Store).
-func isMacMetadata(relPath string) bool {
-	base := filepath.Base(relPath)
-	return strings.HasPrefix(base, "._") || base == ".DS_Store"
-}
-
-// filterMacMetadata drops macOS sidecar files from recs, returning the
-// filtered slice and how many were dropped. The underlying checkpoint DB
-// rows are untouched — this only affects what gets classified/reported.
-func filterMacMetadata(recs []store.FileRecord) ([]store.FileRecord, int) {
-	kept := recs[:0:0]
-	excluded := 0
-	for _, r := range recs {
-		if isMacMetadata(r.RelPath) {
-			excluded++
-			continue
-		}
-		kept = append(kept, r)
+	if err := st.UpdateComparisonStatuses(context.Background(), updatesB); err != nil {
+		return nil, nil, err
 	}
-	return kept, excluded
+	return updatesA, updatesB, nil
 }
 
 // groupByHash buckets records by content hash, each bucket sorted oldest
@@ -216,12 +266,4 @@ func groupByHash(recs []store.FileRecord) map[string][]store.FileRecord {
 		})
 	}
 	return out
-}
-
-func sortResult(res *Result) {
-	sort.Slice(res.Common, func(i, j int) bool { return res.Common[i].RelPath < res.Common[j].RelPath })
-	sort.Slice(res.Diverged, func(i, j int) bool { return res.Diverged[i].RelPath < res.Diverged[j].RelPath })
-	sort.Slice(res.Relocated, func(i, j int) bool { return res.Relocated[i].PathA < res.Relocated[j].PathA })
-	sort.Slice(res.Missing, func(i, j int) bool { return res.Missing[i].RelPath < res.Missing[j].RelPath })
-	sort.Slice(res.ScanErrors, func(i, j int) bool { return res.ScanErrors[i].RelPath < res.ScanErrors[j].RelPath })
 }
