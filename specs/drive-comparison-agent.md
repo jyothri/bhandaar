@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-_Last updated 2026-09-19._ Code lives at `agent/linux/` (module `github.com/jyothri/bhandaar/agent/linux`).
+_Last updated 2026-09-20._ Code lives at `agent/linux/` (module `github.com/jyothri/bhandaar/agent/linux`).
 
 | Section | Status | Notes |
 |---|---|---|
@@ -19,6 +19,7 @@ _Last updated 2026-09-19._ Code lives at `agent/linux/` (module `github.com/jyot
 | §8 CLI Design | ✅ Implemented | `scan`/`compare` subcommands match the sketch, plus one flag beyond it: `--include-mac-metadata` on `compare` (§6.1). |
 | §9 Out of Scope | ✅ Honored | No writes to either drive; symlinks/special files skipped+logged; no ACL/xattr/network-drive support. |
 | §10 Open Items | ⚠️ Partially addressed | The `drive_id`/scan-root scoping gap is now fixed (§4.1). Still open: guided repair mode, symlink comparison semantics beyond skip-and-log, scheduled periodic re-scans. |
+| §11 Consolidated Aggregate Report | 📋 Planned, not started | Three-command split: `scan` (unchanged, plus `dir_listings` population), `compare` (scoped comparison + always-global relocated pass, persists `files.comparison_status` and incrementally propagates a persisted `folder_status` rollup up to drive root), `report` (new command, pure DB lookups, zero computation, fully offline). Existing checkpoint data will be discarded and re-scanned under the new schema — confirmed acceptable, no code changes yet. |
 
 **Real-drive verification so far:**
 - `interview` folder (`/mnt/seagate2/Jyo/Backup/interview` vs `/media/jyothri/Seagate1/Jyo/interview`, 1.6GB, 103 vs 163 files): 103 common, 0 diverged, 0 relocated, 0 missing, 60 files excluded as macOS metadata. Re-running `scan` afterward skipped 100% of files (idempotent resume confirmed).
@@ -249,3 +250,169 @@ Note `--path` is the **content root** to scan, independent of where the drive ha
 - Symlink comparison semantics (currently: skip and log).
 - Scheduling periodic re-scans to catch drift over time.
 - ~~`drive_id` / scan-root scoping~~ — fixed, see §4.1.
+
+## 11. Consolidated Aggregate Report (Planned — Not Yet Implemented)
+
+**Status: plan only, for review.** Nothing in this section is built yet. **This supersedes two earlier drafts of §11.** The first computed everything live at `compare` time and folded the overview into `compare`'s own HTML output. The second moved to a three-command split (`scan`/`compare`/`report`) with `report` recomputing a fresh in-memory rollup from raw per-file status on every render ("lightweight," no persisted folder-level rollup). This third version keeps the three-command split but persists the folder-level rollup after all, maintained incrementally by `compare` via parent pointers — the "heavyweight" option originally rejected — once a concrete example (§11.5) showed the "lightweight" recompute gives the *wrong* answer for a case that comes up naturally (a folder whose children were scanned separately still reading `partial` after every child is actually `common`), and a bounded, targeted propagation strategy resolved the original objection to "heavyweight" (relocated detection can't be scoped) without reopening it. Confirmed with the user: existing checkpoint data (`interview`, `all photos from icloud - Jul 28 2019` trials) will be lost and re-scanned from scratch under the new schema — no migration is planned.
+
+### 11.1 Motivation
+
+Today, `compare` both computes classification *and* renders a report, in one invocation, scoped to whatever narrow subfolder each side happened to be scanned at (`interview`, `all photos from icloud - Jul 28 2019`, etc., each under its own suffixed `drive_id` to avoid the §4.1 conflict). There's no single place that shows, for a whole physical drive, which of its real top-level folders have been looked at, which haven't, and what the comparison found for the ones that have — and generating any report requires redoing the comparison computation from scratch every time.
+
+The revised design splits this into three single-purpose commands:
+
+- **`scan`** — walks and hashes one drive's files. Unchanged in spirit from today; stays completely unaware of any other drive or of pairing.
+- **`compare`** — given two drives and specific paths to check, computes comparison status for files under those paths and **persists it to the checkpoint DB**. Explicitly scoped and invoked, not automatic.
+- **`report`** — reads whatever comparison status is already persisted and renders it (HTML/JSON/etc.). Touches no drive, works fully offline, and can be re-run any number of times for free.
+
+### 11.2 New Concept: `drive_root` vs `backup_root`
+
+Unchanged from the prior draft, still needed for the same reason: `relative_path` needs an anchor stable across multiple incremental scans of the same drive (so `interview` today and `all photos from icloud...` tomorrow accumulate under one `drive_id` instead of conflicting per §4.1), but the two physical drives don't share a top-level layout (§1 — Seagate2's backup root is `Jyo/Backup`, Seagate1's is `Jyo`).
+
+- **`drive_root`** — stable anchor for a drive's own relative paths, in practice its mount point (e.g. `/media/jyothri/Seagate1`). All of a `drive_id`'s `relative_path` values become relative to this, e.g. `Jyo/interview/Docs/common.txt`. Set once per `drive_id`; changing it is a conflict guarded the same way §4.1 guards today's single scan root, via the same `--replace-root` escape hatch.
+- **`backup_root`** — a path relative to `drive_root` marking where the mirrored content actually starts (e.g. `Jyo/Backup` for Seagate2, `Jyo` for Seagate1). `compare` strips each drive's own `backup_root` prefix before aligning relative paths across drives for matching — implicit today (because `--path` already pointed straight at the backup root), made explicit so it can coexist with a broader `drive_root`.
+
+### 11.3 Schema Changes
+
+No `ALTER TABLE` migration path — per §11.8, existing checkpoint data is being discarded, so this ships as a clean `DROP TABLE` + `CREATE TABLE` of the full schema below, not a set of incremental alterations to the existing one.
+
+```sql
+DROP TABLE IF EXISTS drives;
+DROP TABLE IF EXISTS files;
+DROP TABLE IF EXISTS scan_runs;
+DROP TABLE IF EXISTS dir_listings;
+DROP TABLE IF EXISTS folder_status;
+
+CREATE TABLE drives (
+  drive_id               TEXT PRIMARY KEY,
+  drive_root             TEXT NOT NULL,   -- stable anchor for this drive's relative paths, e.g. the mount point (§11.2)
+  backup_root            TEXT,            -- relative to drive_root; NULL = no stripping (§11.2)
+  last_scan_started_at   TIMESTAMP,
+  last_scan_completed_at TIMESTAMP
+);
+
+CREATE TABLE files (
+  drive_id                  TEXT NOT NULL,
+  relative_path             TEXT NOT NULL,   -- relative to drives.drive_root
+  size                      INTEGER NOT NULL,
+  mtime_unix                INTEGER NOT NULL,
+  mode                      INTEGER NOT NULL,
+  quick_sig                 TEXT,
+  content_hash              TEXT,
+  hash_algo                 TEXT,
+  status                    TEXT NOT NULL,   -- 'hashed' | 'error' (scan-time status, §4)
+  error_message             TEXT,
+  scanned_at                TIMESTAMP NOT NULL,
+  comparison_status         TEXT,            -- NULL (never compared) | common | diverged | missing | relocated (§11.5)
+  compared_against_drive_id TEXT,            -- which drive_id this status is relative to
+  counterpart_relative_path TEXT,            -- only set for relocated (the matched path on the other drive)
+  compared_at               TIMESTAMP,       -- when comparison_status was last (re)computed
+  PRIMARY KEY (drive_id, relative_path)
+);
+CREATE INDEX idx_files_drive_hash ON files(drive_id, content_hash);
+CREATE INDEX idx_files_drive_comparison_status ON files(drive_id, comparison_status);
+
+CREATE TABLE scan_runs (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  drive_id     TEXT NOT NULL,
+  started_at   TIMESTAMP NOT NULL,
+  finished_at  TIMESTAMP,
+  files_seen   INTEGER,
+  bytes_hashed INTEGER,
+  interrupted  BOOLEAN
+);
+
+-- Every directory's known real children, at every depth ever touched by a scan — not
+-- just top-level. This is what lets the tool know a folder is FULLY accounted for
+-- (every real child has some status, even if that status is "unscanned") rather than
+-- just "some of its files happen to be in the checkpoint DB."
+CREATE TABLE dir_listings (
+  drive_id      TEXT NOT NULL,
+  relative_path TEXT NOT NULL,   -- the directory itself, relative to drive_root ('' for drive_root)
+  child_name    TEXT NOT NULL,   -- immediate child's name only, not a full path
+  is_dir        BOOLEAN NOT NULL,
+  first_seen_at TIMESTAMP NOT NULL,
+  last_seen_at  TIMESTAMP NOT NULL,
+  PRIMARY KEY (drive_id, relative_path, child_name)
+);
+
+-- Persisted, incrementally-maintained rollup — one row per folder (at every depth),
+-- with an explicit parent pointer so `compare` can walk upward without re-deriving paths.
+CREATE TABLE folder_status (
+  drive_id      TEXT NOT NULL,
+  relative_path TEXT NOT NULL,   -- '' for drive_root itself
+  parent_path   TEXT,            -- NULL only for drive_root; otherwise the immediate parent's relative_path
+  status        TEXT NOT NULL,   -- unscanned | partial | common | diverged | relocated | missing
+  counts_json   TEXT NOT NULL,   -- breakdown across the whole subtree, e.g. {"diverged":2,"missing":1,"common":47}
+  updated_at    TIMESTAMP NOT NULL,
+  PRIMARY KEY (drive_id, relative_path)
+);
+CREATE INDEX idx_folder_status_parent ON folder_status(drive_id, parent_path);
+```
+
+A folder with no `folder_status` row at all is implicitly `unscanned` (saves writing a row for every untouched folder) — `report` only needs to know the folder *exists* at all, via `dir_listings`, to display it as `unscanned`.
+
+### 11.4 `scan`: Unchanged, and Deliberately Pairing-Agnostic
+
+`scan` keeps doing exactly what it does today (walk, hash, checkpoint) plus populating `dir_listings`, in two parts:
+
+1. **For every directory actually walked** while hashing `--path`'s contents: `filepath.WalkDir` already reads each directory's full immediate-children list as a side effect of descending into it — recording those names into `dir_listings` is free, no extra I/O.
+2. **For every ancestor of `--path` up to (and including) `drive_root` that ISN'T itself walked** (because `--path` starts partway down, e.g. scanning `root/B` doesn't walk `root` itself): one extra cheap, non-recursive `os.ReadDir` at each such ancestor, recording just that one level's immediate children. This is what lets `report` later know that `root`'s real children are exactly `{A, B}` even though no single scan targeted `root` directly — closing the gap that caused the "lightweight" design (§ prior draft) to get a folder like this wrong.
+
+`scan` does **not** know about the other drive in the pair, does not compute any comparison status, and does not write anything to `files.comparison_status` or `folder_status`. That's entirely `compare`'s job, invoked separately and explicitly. (This intentionally drops an idea floated earlier in this discussion — `scan` auto-triggering a cross-drive report update — since the explicit three-command split makes that unnecessary and keeps `scan` simple.)
+
+### 11.5 `compare`: Scoped Comparison-Status Updates
+
+```
+driveagent compare --drive-a seagate2 --drive-a-paths interview,"all photos from icloud - Jul 28 2019" \
+                    --drive-b seagate1 --drive-b-paths interview,"all photos from icloud - Jul 28 2019"
+```
+
+- `--drive-a-paths` / `--drive-b-paths` (new): comma-separated lists of `backup_root`-relative paths to (re)check on each side. In the common case these are the same names on both sides (once `backup_root` has already normalized away the `Jyo/Backup` vs `Jyo` prefix). Omit both to recompute the whole drive (a full pass) — the natural choice for the first-ever `compare` on a pair, or for a periodic full reconciliation.
+- For files under the given paths: exact-path/content-hash matching exactly as §6 describes, writing `comparison_status` (`common`/`diverged`) directly onto each side's `files` row.
+- **Relocated detection always runs globally**, regardless of `--paths` scoping — but entirely against the checkpoint DB, never the physical drives (every file's `content_hash` was already computed by `scan` beforehand, so this step is a SQL query + in-memory hash match, no disk I/O). "Globally" means the candidate pool isn't limited to files under this invocation's `--paths`: it's a multiset match over every row on both drives whose `comparison_status` is currently `missing` — from this invocation's newly-unmatched leftovers *and* from any earlier `compare` run. This was a deliberate choice — that subset is normally small even at whole-drive scale, so there's no real cost to keeping it exact rather than scoping it, and scoping it would risk silently missing a relocation whose other end sits outside this invocation's paths. Files that come out of this pass unmatched get/keep `comparison_status = missing`; matched ones get `relocated` on both sides, with `counterpart_relative_path` pointing at each other.
+- Nothing outside the given paths is touched by the path-scoped matching step — its previously-computed `comparison_status` is left as-is unless the global relocated pass happens to touch it.
+- `compare` writes to the DB and prints a text summary; it does **not** render HTML/JSON reports anymore — that's `report`'s job (§11.6). The `--include-mac-metadata` filter (§6.1) moves from `compare` to `report`, since it's a presentation-time decision, not a ground-truth one — `compare` computes and stores status for every file it's given regardless.
+
+**Ancestor rollup propagation.** After the two steps above, `compare` has a concrete set of *touched files* — every file whose `comparison_status` was just written, whether from the path-scoped matching or the global relocated pass. For each touched file, its containing folder's rolled-up status is now potentially stale, and so is that folder's parent, and so on up to `drive_root`. `compare` fixes this by:
+
+1. Collecting the **deduplicated set of ancestor folder paths** across all touched files (each touched file contributes its immediate parent, that parent's parent, … up to `drive_root`) — so a folder with a thousand touched children underneath it gets recomputed once per `compare` run, not once per child.
+2. Processing that set **deepest-first**, so that by the time an ancestor is recomputed, all of its own children (files and subfolders) already reflect this run's updates.
+3. For each ancestor `F` in that order, **recomputing `F`'s status and counts from its direct children only** (not the whole subtree — each child folder already carries its own correct, up-to-date rollup from having been processed earlier in this same pass, or from an earlier `compare` run if untouched this time):
+   - Look up `F`'s real children via `dir_listings`.
+   - Each **file** child's status comes from `files.comparison_status` (missing/NULL → `unscanned`).
+   - Each **folder** child's status comes from its `folder_status` row (no row → `unscanned`).
+   - If every child is `unscanned` → `F` is `unscanned`.
+   - Else if any child is `unscanned` or `partial` → `F` is `partial`.
+   - Else → `F`'s status is the worst-of `diverged` / `relocated` / `missing` / `common` across all children (§7.1's precedence), and its `counts_json` is the sum of every child's own breakdown (a file child contributes 1 to its own category; a folder child contributes its whole `counts_json`).
+   - **Both `status` and `counts_json` are written unconditionally** — no early-stop when the status label is unchanged, so counts never go stale (this was a deliberate choice over a cheaper "stop if status matches" version, to keep the breakdown numbers always exactly right).
+4. Propagation always reaches `drive_root` — there's no early termination, since counts must stay accurate at every level regardless of whether any label changed along the way.
+
+Worked example, tying back to the discussion that produced this design: `root` has children `A` (already `common`) and `B` (`unscanned`, from `dir_listings`, no `folder_status` row yet) — `root`'s `folder_status.status` is `partial`. Scanning and then comparing `B` writes `common` for its files; `compare` recomputes `B`'s own `folder_status` to `common`, then walks up to `root`, recomputes it fresh from its children `{A: common, B: common}` → `common`, overwriting the stale `partial`. `report` reads `root`'s `folder_status` row directly — no recomputation, no staleness.
+
+### 11.6 `report`: Pure Rendering, No Drive Access
+
+```
+driveagent report --type html --drives seagate1,seagate2 --report-out ./report
+```
+
+Reads only from the checkpoint DB — `folder_status` (already-correct status + counts at every depth), `dir_listings` (real folder/file names that exist but have no `folder_status`/`files` row, i.e. truly `unscanned`), and `files` (per-file leaf detail — hash/size/counterpart — shown when drilling all the way down to an individual file) — and renders the requested format(s). **No computation happens here at all**, only lookups: no drive needs to be mounted, and this can be re-run any number of times for free, entirely offline.
+
+For the selected drive(s), the report includes:
+
+- **Overview** (new): a flat, top-level-only list of that drive's real top-level entries (from `dir_listings` for `relative_path = ''`), each tagged with its `folder_status.status` (or `unscanned` if it has no `folder_status` row at all).
+  - Clicking an entry drills into the existing §7.1-style recursive tree, rooted at that folder — now also a pure read of `folder_status` at each level down to individual files, rather than a fresh rollup computation.
+- The existing **Files** recursive tree (§7.1) and **Relocated** flat list, now backed by `folder_status`/`files.comparison_status` instead of being computed inline by `compare` as they are today.
+- With `--drives` naming more than one drive, the report includes an Overview per drive (e.g. tabs or a selector) — each drive's own native top-level names, since they genuinely differ.
+
+### 11.7 Design Decisions Carried Over / Confirmed
+
+- **Heavyweight persisted rollup, reconsidered and adopted.** An earlier draft chose "lightweight" (recompute fresh at report time, no persisted folder-level table) specifically to avoid the complexity of incremental maintenance given relocated-detection's global scope. A concrete example (§11.5's worked example) showed that approach gives the *wrong* answer for a case that comes up naturally — a folder whose children were scanned/compared separately still reading `partial` after every child actually resolves to `common`, because "lightweight" computed coverage from `scan_runs` history rather than from actual per-child status. The fix (§11.5's ancestor-propagation algorithm, keyed off *which files actually changed* rather than *which folders were in scope*) doesn't reopen the relocated-detection objection: relocated detection still always runs globally and unscoped (unchanged), it just now also feeds its results into the same "which files changed" set that drives propagation, so the two mechanisms compose cleanly.
+- **Counts always propagate, status has no early-stop.** Every ancestor up to `drive_root` gets both fields rewritten unconditionally on every `compare` run that touches anything underneath it — a cheaper version that stopped propagating once a level's status label stopped changing was considered and rejected specifically because it would let `counts_json` drift stale at higher levels while the label still looked right.
+- **`partial` is now genuinely content-based, not a coverage-history proxy.** It falls directly out of the recursive definition in §11.5 (any child `unscanned`/`partial`, but not all) rather than depending on whether one single scan invocation's target happened to match a folder exactly — the exact gap the worked example exposed is now closed by construction.
+- **No persisted drive pairing.** Every `compare` invocation names both drives and their paths explicitly; nothing is remembered between runs. This was considered and dropped once the three-command split made `scan` fully pairing-agnostic — there's no longer a command that would need to look up a remembered pair automatically.
+- **Relocated-in-rollup inconsistency, resolved (not just accepted).** An earlier draft flagged relocated files being counted in folder rollups for the Overview but excluded from folder rollups in the deep §7.1 tree as a deliberate but awkward inconsistency between the two views. Since both views now read the same `folder_status` rows, and `relocated` is one of the four tiers in §11.5's rollup precedence, the inconsistency is gone by construction — both views agree. The separate flat "Relocated" list (§7.1) is kept alongside this for showing the actual source↔destination path pairing, which genuinely has no single folder home, but a folder's badge now consistently reflects relocated content in both views.
+
+### 11.8 Compatibility
+
+No migration: `files.relative_path` changes meaning (drive-root-relative instead of scan-path-relative) and `comparison_status` is a new column, so existing checkpoint data (`seagate2`/`seagate1` from the `interview` trial, `seagate2-icloud`/`seagate1-icloud` from the icloud-photos trial) is incompatible and will simply be re-scanned from scratch once this ships. Confirmed acceptable by the user specifically to keep the schema simple.
