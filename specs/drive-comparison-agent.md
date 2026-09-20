@@ -1,5 +1,31 @@
 # Drive Comparison Agent — Spec
 
+## Implementation Status
+
+_Last updated 2026-09-19._ Code lives at `agent/linux/` (module `github.com/jyothri/bhandaar/agent/linux`).
+
+| Section | Status | Notes |
+|---|---|---|
+| §2 Language & Runtime | ✅ Implemented | Go 1.27.1, no CGO (`modernc.org/sqlite`, `lukechampine.com/blake3`). |
+| §3 Architecture | ✅ Implemented | Package layout matches: `cmd/driveagent`, `internal/{scan,store,compare,report}`. |
+| §4 Checkpoint / Resume | ✅ Implemented | SQLite WAL schema (`drives`/`files`/`scan_runs`), idempotent re-walk resume, per-file error handling, root-disappearance detection. Verified on real drives: re-running `scan` after a completed run skipped 100% of files (103/103 and 163/163) with zero re-hashing. |
+| §5 Hashing Strategy | ⚠️ Implemented, with a nuance | Every new/changed file gets a full streamed BLAKE3 hash during `scan`. The `(size, mtime)` check is used to skip re-hashing on repeat scans (resume) rather than as a separate cross-drive pre-filter applied during `compare` — `compare` only ever reads hashes already computed and stored by `scan`, it doesn't hash anything itself. |
+| §6 Comparison Algorithm | ✅ Implemented | Exact-path matching for common/diverged; multiset content-hash matching (oldest-mtime-first tie-break) for relocated/missing. |
+| §6.1 macOS Metadata Exclusion | ✅ Implemented | `--include-mac-metadata` flag on `compare` (default: excludes `._*`/`.DS_Store` from classification; rows remain in the checkpoint DB either way). |
+| §7 Report Output — console & JSON | ✅ Implemented | As specified. |
+| §7 Report Output — HTML (flat table) | ✅ Implemented | Sortable/filterable single table, human-readable sizes (KB/MB/GB). |
+| §7.1 HTML Folder Rollup View | ✅ Implemented | `internal/report/tree.go` builds the recursive tree (Relocated excluded, as specified) and `report.go` renders it as native `<details>/<summary>` elements — fully collapsed by default, no JS needed. The root itself is a rollup node too: a fully-matching scan collapses to a single `./ common` line rather than listing every top-level folder. Verified: a synthetic mixed fixture correctly rolled a folder with 1 diverged + 2 missing + 1 common file up to a `diverged` badge with breakdown `(1 diverged, 2 missing, 1 common)`, while a nested fully-common folder two levels deep rolled up to `common` at every level. |
+| §8 CLI Design | ✅ Implemented | `scan`/`compare` subcommands match the sketch, plus one flag beyond it: `--include-mac-metadata` on `compare` (§6.1). |
+| §9 Out of Scope | ✅ Honored | No writes to either drive; symlinks/special files skipped+logged; no ACL/xattr/network-drive support. |
+| §10 Open Items | ❌ Not started | Guided repair mode, symlink comparison semantics beyond skip-and-log, scheduled periodic re-scans, the `drive_id`/scan-root scoping gap noted below. |
+
+**Real-drive verification so far:**
+- `interview` folder (`/mnt/seagate2/Jyo/Backup/interview` vs `/media/jyothri/Seagate1/Jyo/interview`, 1.6GB, 103 vs 163 files): 103 common, 0 diverged, 0 relocated, 0 missing, 60 files excluded as macOS metadata. Re-running `scan` afterward skipped 100% of files (idempotent resume confirmed).
+- `all photos from icloud - Jul 28 2019` folder (136GB, 14,677 files per drive — the largest real folder tried so far): scanned both drives in the background (drive labels `seagate2-icloud`/`seagate1-icloud`, 57m25s and 41m55s respectively, 0 scan errors on either side), then compared: **14,677 common, 0 diverged, 0 relocated, 0 missing.** HTML report correctly collapsed to a single `./ common` line.
+- The full drives (`Jyo/Backup` vs `Jyo` roots in their entirety) have **not** been scanned yet — only these two subfolders.
+
+**Known limitation found during this testing (not yet fixed — tracked in §10):** `drive_id` is a free-form label with no stored linkage to *which* scan root produced its `files` rows beyond the single `scan_root` column on `drives` (which the latest `scan` overwrites). Scanning a *different* root under a `drive_id` already used for an earlier root does not clear or scope out the old rows — they remain in `files` under that same `drive_id` with their own (now orphaned) relative paths, silently polluting any later `compare` that reuses the label. Practical workaround used here: give each distinct scan root its own `drive_id` (e.g. `seagate2-icloud` rather than reusing `seagate2`, which already held the `interview` folder's rows).
+
 ## 1. Purpose
 
 Two external drives (`/dev/sdb1` mounted at `/mnt/seagate2`, `/dev/sdc1` mounted at `/media/jyothri/Seagate1`) are supposed to hold mirror copies of the same backup content but are suspected to have diverged over time. The actual backup content root is **not** the mount point itself on either drive — each drive has its own top-level layout above the common content:
@@ -134,15 +160,44 @@ Given the fully-scanned file sets `A` (drive A) and `B` (drive B), each row is `
 
 All matching happens in the compare phase directly against the checkpoint DB (SQL joins keyed on `relative_path` and `content_hash`), not by re-reading the drives.
 
+### 6.1 macOS Metadata Exclusion
+
+Copying files from/to a Mac leaves behind AppleDouble resource-fork sidecar files (`._<name>`) and Finder's per-folder `.DS_Store`, which are copy artifacts, not real content divergence — left unfiltered, they dominate the Missing category (confirmed in practice: 56 of 60 "missing" files in an initial real-drive trial were `._*`/`.DS_Store`).
+
+By default, the compare phase excludes files matching `._*` or `.DS_Store` (by basename) from classification entirely — they are not counted as Common, Diverged, Missing, or Relocated, and don't appear in any report. A `--include-mac-metadata` flag restores them into classification for the rare case they're wanted. In both cases, the checkpoint DB is unaffected — these files are still scanned and hashed normally by the scan phase; the exclusion is a compare-phase/report-time filter only.
+
 ## 7. Report Output
 
 Generated at the end of the compare phase, three forms (all from the same underlying result set):
 
 - **Console summary** — counts per category, top N diverged/missing examples, elapsed time.
-- **JSON report** — full machine-readable listing of every file in every category (for scripting/manual repair later).
-- **HTML report** — static, single-file, browsable table (sortable/filterable by category) for manual review — useful given this may run into the thousands of rows.
+- **JSON report** — full machine-readable listing of every file in every category (for scripting/manual repair later). This shape does **not** change with the folder rollup in §7.1 — it stays the flat per-category lists described here, so scripts/tooling built against it keep working.
+- **HTML report** — a folder-rollup tree view (§7.1) rather than one flat table, for manual review — useful given this may run into the thousands of rows. File sizes are shown in human-readable units (KB/MB/GB, binary/1024-based) rather than raw byte counts.
 
 No automated repair action is taken by this version; the report is the deliverable, and any copying/deletion to fix divergences is a manual, separate step the user performs after reviewing the report.
+
+### 7.1 HTML Report: Folder Rollup View
+
+Rather than one flat table of every file, the HTML report presents a **recursive folder tree** so the common case — an entire subtree matches — collapses to a single line instead of thousands of identical-looking rows.
+
+**Status rollup, computed bottom-up per folder:**
+
+- A folder's status is **Common** only if every file directly in it, and every subfolder's status, is Common.
+- Otherwise the folder's status is the **worst** status found anywhere in its subtree, using this precedence (worst first): **Scan error** > **Diverged** > **Missing** > **Common**. (Relocated files are excluded from tree placement — see below.)
+- Alongside the worst-status badge, each non-common folder shows a **breakdown of counts** by category across its whole subtree, e.g. `Diverged (2 diverged, 1 missing, 47 common)`, computed once at report-generation time (not lazily) so the number is accurate before any expansion.
+- Files excluded from classification (§6.1, macOS metadata) don't affect a folder's Common/non-Common status and aren't shown in the counts, consistent with their exclusion from the flat report today.
+
+**Interaction:**
+
+- The tree starts **fully collapsed** at the root, regardless of status — the user drills down manually, using the badges to decide where to look. (No auto-expansion of problem folders.)
+- Clicking a folder row expands exactly one level (its direct children — files and subfolders), showing each child's own rolled-up badge; clicking a child folder expands it in turn. Clicking a leaf file row (or a diverged/missing file reached this way) shows its detail (sizes/hashes/which drive), same detail already shown in the current flat table.
+- A folder that already contains only Common children can still be expanded manually to inspect the file listing, even though its badge gives no reason to.
+
+**Relocated files — kept out of the tree:**
+
+A relocated file has two different folder locations (one per drive) with no single natural "home" in a unified tree, so relocations are **not** folded into the tree structure or counted in any folder's rollup/badge. They remain a **separate flat "Relocated" list/section** in the HTML report, exactly as today, shown alongside the tree rather than inside it.
+
+**Tree construction:** built once in-memory from the same `compare.Result` used for the flat JSON/console output — grouping `Common`/`Diverged`/`Missing`/`ScanErrors` entries by their relative path's directory segments into a nested structure, computing each node's status/counts bottom-up, then serializing that tree into the HTML/JS the browser renders. No new data is read from the checkpoint DB for this — it's a presentation transform over the existing classification.
 
 ## 8. CLI Design (sketch)
 
@@ -170,3 +225,4 @@ Note `--path` is the **content root** to scan, independent of where the drive ha
 - Guided repair mode (interactive copy-to-fix), previously deferred per user's choice of report-only for v1.
 - Symlink comparison semantics (currently: skip and log).
 - Scheduling periodic re-scans to catch drift over time.
+- `drive_id` / scan-root scoping: reusing a `drive_id` label for a different scan root doesn't clear prior rows for the old root, silently accumulating orphaned entries that pollute later comparisons (found during real-drive testing — see Implementation Status). Needs either a `scan clear --drive-id` command, a compound key that scopes `files` rows to the scan root as well as the label, or at minimum a warning when `scan_root` changes for an existing `drive_id`.
