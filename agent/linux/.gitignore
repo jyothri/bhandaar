@@ -1,0 +1,8 @@
+# Compiled binary (anchored to the module root; must not match cmd/driveagent/)
+/driveagent
+
+# Local checkpoint DB / reports if generated inside this dir during testing
+*.db
+*.db-shm
+*.db-wal
+/report/
