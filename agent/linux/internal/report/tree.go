@@ -9,9 +9,9 @@ import (
 )
 
 // TreeNode is one row of the recursive folder view rendered in the HTML
-// report. Unlike the pre-§11 design, this is a pure read of already-
-// computed data (store.FolderStatus / store.FileRecord.ComparisonStatus)
-// — report performs no rollup computation of its own.
+// report — a pure read of already-computed data (store.FolderStatus /
+// store.FileRecord.ComparisonStatus); report performs no rollup
+// computation of its own.
 type TreeNode struct {
 	Name     string
 	IsFile   bool
@@ -52,9 +52,8 @@ func isMacMetadata(name string) bool {
 // dir_listings for structure, folder_status for folder rollups, and
 // files.comparison_status for leaves. When includeMacMetadata is false,
 // matching leaf entries are left out of Children (their contribution to
-// an ancestor's persisted Counts/Category is not recomputed — see
-// specs/drive-comparison-agent.md §11's note on this being leaf-level-only
-// filtering).
+// an ancestor's persisted Counts/Category is not recomputed — this is a
+// leaf-level-only filter, documented in specs/drive-comparison-agent.md).
 func buildTree(st *store.Store, driveID string, includeMacMetadata bool) (*TreeNode, error) {
 	return buildNode(st, driveID, "", ".", includeMacMetadata)
 }

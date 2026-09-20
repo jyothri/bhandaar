@@ -1,7 +1,7 @@
 // Package store implements the checkpoint database: scanned file metadata
 // and hashes (making scans resumable), plus persisted comparison status
 // and a folder-level rollup (making reports a pure, offline read). See
-// specs/drive-comparison-agent.md §11 for the full design.
+// specs/drive-comparison-agent.md for the full design.
 package store
 
 import (

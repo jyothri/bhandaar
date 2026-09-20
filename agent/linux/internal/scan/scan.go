@@ -5,8 +5,7 @@
 // never explicitly scanned can still be reported as "unscanned" rather
 // than being invisible, and — when the walk completes without any
 // unreadable entries — removes checkpoint rows for files/directory
-// entries that no longer exist on disk. See specs/drive-comparison-agent.md
-// §11.
+// entries that no longer exist on disk. See specs/drive-comparison-agent.md.
 package scan
 
 import (
@@ -38,7 +37,7 @@ type Options struct {
 	// for this drive_id — see RootConflict.
 	DriveRoot string
 	// BackupRoot, if non-empty, sets/updates this drive's backup_root
-	// (relative to DriveRoot) — see specs/drive-comparison-agent.md §11.2.
+	// (relative to DriveRoot) — see specs/drive-comparison-agent.md.
 	// Only takes effect when explicitly given; omitted on later scans, the
 	// previously-set value (if any) is left alone.
 	BackupRoot string
@@ -269,7 +268,7 @@ func Run(ctx context.Context, st *store.Store, opts Options) (Stats, error) {
 	// Cheap shallow listing of every ancestor between drive_root and
 	// scanPath's parent, so folders above scanPath (siblings of what got
 	// walked) are known to exist even though nothing under them was
-	// touched. See spec §11.4.
+	// touched. See specs/drive-comparison-agent.md.
 	listAncestors(driveRoot, relScanPath, ws)
 
 	clean := walkErr == nil && ctx.Err() == nil && !ws.sawSoftError

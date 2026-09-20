@@ -47,9 +47,9 @@ func propagate(st *store.Store, driveID string, touchedRelPaths []string) (int, 
 }
 
 // recomputeFolder rolls up one folder's status/counts from its direct
-// children only (§11.5) — each child folder already carries its own
-// correct, up-to-date rollup, either from earlier in this same propagate
-// pass (deepest-first) or from an earlier compare run if untouched now.
+// children only — each child folder already carries its own correct,
+// up-to-date rollup, either from earlier in this same propagate pass
+// (deepest-first) or from an earlier compare run if untouched now.
 func recomputeFolder(st *store.Store, driveID, folder string) error {
 	children, err := st.ListChildren(driveID, folder)
 	if err != nil {

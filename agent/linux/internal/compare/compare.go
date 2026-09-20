@@ -4,7 +4,7 @@
 // global relocated-detection pass over every currently-missing file on
 // both drives; and incrementally maintains a folder-level status rollup
 // by walking each touched file's ancestor chain up to drive_root. See
-// specs/drive-comparison-agent.md §11.5 for the full design.
+// specs/drive-comparison-agent.md for the full design.
 package compare
 
 import (
@@ -177,8 +177,9 @@ func indexByBackupPath(files []store.FileRecord, backupRoot string) map[string]s
 }
 
 // unionKeys returns every backup-relative path that's in scope per
-// Options.PathsA/PathsB (§11.5's "union" simplification), drawn from
-// whichever of mapA/mapB actually has that key.
+// Options.PathsA/PathsB (a deliberate "union of both sides" simplification
+// — see the Options doc comment), drawn from whichever of mapA/mapB
+// actually has that key.
 func unionKeys(mapA, mapB map[string]store.FileRecord, pathsA, pathsB []string) map[string]bool {
 	out := map[string]bool{}
 	for k := range mapA {
@@ -204,9 +205,10 @@ func keys(m map[string]bool) []string {
 
 // runGlobalRelocatedPass multiset-matches every currently-`missing` file
 // on both drives by content hash, regardless of what was scoped into this
-// run — see spec §11.5 on why this stays unscoped. (No backup_root
-// handling needed here: comparison_status is only ever set on files that
-// already passed backupRelative's in-scope check in Run, above.)
+// run — see specs/drive-comparison-agent.md on why this stays unscoped.
+// (No backup_root handling needed here: comparison_status is only ever
+// set on files that already passed backupRelative's in-scope check in
+// Run, above.)
 func runGlobalRelocatedPass(st *store.Store, driveA, driveB string) ([]store.ComparisonUpdate, []store.ComparisonUpdate, error) {
 	missingA, err := st.ListFilesByComparisonStatus(driveA, store.ComparisonMissing)
 	if err != nil {
