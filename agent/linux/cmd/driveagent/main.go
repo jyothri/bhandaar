@@ -79,6 +79,7 @@ func runScan(ctx context.Context, args []string) error {
 	path := fs.String("path", "", "content root to scan (required; independent of the mount point)")
 	stateDir := fs.String("state-dir", defaultStateDir(), "directory holding the checkpoint database")
 	workers := fs.Int("workers", 2, "concurrent hashing workers (keep low for spinning USB drives)")
+	replaceRoot := fs.Bool("replace-root", false, "allow --drive-id to be repointed at a different --path than it was last scanned at, discarding that drive-id's old checkpoint data first")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -96,14 +97,19 @@ func runScan(ctx context.Context, args []string) error {
 	fmt.Printf("scanning %q as drive %q (state: %s)\n", *path, *driveID, *stateDir)
 
 	stats, err := scan.Run(ctx, st, scan.Options{
-		DriveID:  *driveID,
-		RootPath: *path,
-		Workers:  *workers,
+		DriveID:     *driveID,
+		RootPath:    *path,
+		Workers:     *workers,
+		ReplaceRoot: *replaceRoot,
 		Progress: func(s scan.Stats) {
 			fmt.Printf("  ...seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d\n",
 				s.FilesSeen, s.FilesSkipped, s.FilesHashed, s.FilesErrored, s.BytesHashed)
 		},
 	})
+
+	if _, ok := err.(*scan.RootConflict); ok {
+		return err
+	}
 
 	fmt.Printf("done in %s: seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d\n",
 		stats.Elapsed.Round(time.Second), stats.FilesSeen, stats.FilesSkipped, stats.FilesHashed, stats.FilesErrored, stats.BytesHashed)

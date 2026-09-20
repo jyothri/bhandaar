@@ -17,14 +17,13 @@ _Last updated 2026-09-19._ Code lives at `agent/linux/` (module `github.com/jyot
 | §7.1 HTML Folder Rollup View | ✅ Implemented | `internal/report/tree.go` builds the recursive tree (Relocated excluded, as specified) and `report.go` renders it as native `<details>/<summary>` elements — fully collapsed by default, no JS needed. The root itself is a rollup node too: a fully-matching scan collapses to a single `./ common` line rather than listing every top-level folder. Verified: a synthetic mixed fixture correctly rolled a folder with 1 diverged + 2 missing + 1 common file up to a `diverged` badge with breakdown `(1 diverged, 2 missing, 1 common)`, while a nested fully-common folder two levels deep rolled up to `common` at every level. |
 | §8 CLI Design | ✅ Implemented | `scan`/`compare` subcommands match the sketch, plus one flag beyond it: `--include-mac-metadata` on `compare` (§6.1). |
 | §9 Out of Scope | ✅ Honored | No writes to either drive; symlinks/special files skipped+logged; no ACL/xattr/network-drive support. |
-| §10 Open Items | ❌ Not started | Guided repair mode, symlink comparison semantics beyond skip-and-log, scheduled periodic re-scans, the `drive_id`/scan-root scoping gap noted below. |
+| §10 Open Items | ⚠️ Partially addressed | The `drive_id`/scan-root scoping gap is now fixed (§4.1). Still open: guided repair mode, symlink comparison semantics beyond skip-and-log, scheduled periodic re-scans. |
 
 **Real-drive verification so far:**
 - `interview` folder (`/mnt/seagate2/Jyo/Backup/interview` vs `/media/jyothri/Seagate1/Jyo/interview`, 1.6GB, 103 vs 163 files): 103 common, 0 diverged, 0 relocated, 0 missing, 60 files excluded as macOS metadata. Re-running `scan` afterward skipped 100% of files (idempotent resume confirmed).
 - `all photos from icloud - Jul 28 2019` folder (136GB, 14,677 files per drive — the largest real folder tried so far): scanned both drives in the background (drive labels `seagate2-icloud`/`seagate1-icloud`, 57m25s and 41m55s respectively, 0 scan errors on either side), then compared: **14,677 common, 0 diverged, 0 relocated, 0 missing.** HTML report correctly collapsed to a single `./ common` line.
 - The full drives (`Jyo/Backup` vs `Jyo` roots in their entirety) have **not** been scanned yet — only these two subfolders.
-
-**Known limitation found during this testing (not yet fixed — tracked in §10):** `drive_id` is a free-form label with no stored linkage to *which* scan root produced its `files` rows beyond the single `scan_root` column on `drives` (which the latest `scan` overwrites). Scanning a *different* root under a `drive_id` already used for an earlier root does not clear or scope out the old rows — they remain in `files` under that same `drive_id` with their own (now orphaned) relative paths, silently polluting any later `compare` that reuses the label. Practical workaround used here: give each distinct scan root its own `drive_id` (e.g. `seagate2-icloud` rather than reusing `seagate2`, which already held the `interview` folder's rows).
+- Root-conflict fix (§4.1): verified a fresh `drive_id` scanned at root A, then rescanned at root B — refused by default with a clear message; with `--replace-root`, root A's checkpoint rows were deleted and root B's took their place; rescanning root B again afterward correctly resumed (skipped, no false conflict).
 
 ## 1. Purpose
 
@@ -137,6 +136,18 @@ This makes interruption-safety free: a kill -9, power loss, drive disconnect, or
 - If the drive disconnects entirely mid-scan (mount path disappears), the scan stops cleanly, marks the `scan_runs` row `interrupted=true`, and exits with a clear message telling the user to reconnect and re-run.
 - SQLite WAL mode + small transactions bound the damage from an unclean process kill to the current in-flight batch.
 
+### 4.1 `drive_id` / Scan-Root Scoping
+
+`files` rows are keyed by `(drive_id, relative_path)` only — not by scan root. Found during real-drive testing: scanning a *different* root under a `drive_id` that was already used for an earlier root left the old root's rows in place forever (their relative paths just don't correspond to anything under the new root), silently polluting any later `compare` that reused the label with stale, orphaned entries.
+
+Fixed as follows: `scan` now checks, before doing any work, whether `drive_id` already has a recorded `scan_root` that differs from the one just given (comparing resolved absolute paths, so trivial formatting differences like a trailing slash don't false-trigger).
+
+- If it differs and `--replace-root` was **not** passed: `scan` refuses immediately (before touching the checkpoint DB or doing any I/O) with an error naming both roots and explaining the two ways forward — pass `--replace-root`, or use a different `--drive-id`. Exit code is non-zero; no scan output is printed, since nothing happened.
+- If `--replace-root` **was** passed: all `files` and `scan_runs` rows for that `drive_id` are deleted first, then the scan proceeds against the new root as if it were a brand-new label. The `drives` row itself is updated in place to the new `scan_root`.
+- Rescanning the **same** root as before (the common, everyday case) is unaffected — no conflict is detected, and resume/skip behavior (§4) works exactly as before.
+
+This makes `drive_id` behave as intended — a stable label for "whatever is currently at this scan root" — without requiring the user to manually track which labels have been used for which roots (the workaround used earlier in this project, before this fix, was giving each distinct scan root its own suffixed label, e.g. `seagate2-icloud`).
+
 ## 5. Hashing Strategy
 
 Two-tier approach, chosen to avoid full-file reads for files that are obviously unchanged/distinct:
@@ -212,6 +223,7 @@ Note `--path` is the **content root** to scan, independent of where the drive ha
 
 - `scan` is safe to re-run any number of times (idempotent, resumable per §4).
 - `compare` only reads from the checkpoint DB — it's cheap to re-run repeatedly (e.g. after fixing a few files) without rescanning untouched files.
+- `scan` also accepts `--replace-root`, needed only when deliberately repointing a `drive_id` at a different root than it was previously scanned at (§4.1) — omitted here since it doesn't apply to the everyday case.
 
 ## 9. Explicitly Out of Scope (v1)
 
@@ -225,4 +237,4 @@ Note `--path` is the **content root** to scan, independent of where the drive ha
 - Guided repair mode (interactive copy-to-fix), previously deferred per user's choice of report-only for v1.
 - Symlink comparison semantics (currently: skip and log).
 - Scheduling periodic re-scans to catch drift over time.
-- `drive_id` / scan-root scoping: reusing a `drive_id` label for a different scan root doesn't clear prior rows for the old root, silently accumulating orphaned entries that pollute later comparisons (found during real-drive testing — see Implementation Status). Needs either a `scan clear --drive-id` command, a compound key that scopes `files` rows to the scan root as well as the label, or at minimum a warning when `scan_root` changes for an existing `drive_id`.
+- ~~`drive_id` / scan-root scoping~~ — fixed, see §4.1.

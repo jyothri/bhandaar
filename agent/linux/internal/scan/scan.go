@@ -28,6 +28,31 @@ type Options struct {
 	BatchSize int
 	// Progress, if set, is called periodically with running totals.
 	Progress func(Stats)
+	// ReplaceRoot, if true, allows DriveID to be repointed at a
+	// different RootPath than what's already checkpointed for it,
+	// discarding the old root's checkpointed files first. Without it,
+	// Run refuses with RootConflict — see that type's doc comment.
+	ReplaceRoot bool
+}
+
+// RootConflict is returned by Run when DriveID was already scanned under a
+// different RootPath and Options.ReplaceRoot wasn't set. Checkpoint rows
+// are keyed by (drive_id, relative_path) only, not by scan root, so
+// silently rescanning a different root under the same label would leave
+// the old root's rows in place forever, polluting later compares with
+// entries that no longer correspond to anything under the new root.
+type RootConflict struct {
+	DriveID string
+	OldRoot string
+	NewRoot string
+}
+
+func (e *RootConflict) Error() string {
+	return fmt.Sprintf(
+		"drive %q was previously scanned at root %q; refusing to rescan it at a different root %q.\n"+
+			"Either pass --replace-root to discard the old root's checkpoint data for %q and start fresh,\n"+
+			"or use a different --drive-id to keep both scans independent.",
+		e.DriveID, e.OldRoot, e.NewRoot, e.DriveID)
 }
 
 // Stats tracks running totals for a scan, reported via Options.Progress and
@@ -78,6 +103,19 @@ func Run(ctx context.Context, st *store.Store, opts Options) (Stats, error) {
 		return Stats{}, &Interrupted{Reason: fmt.Sprintf("scan root %q is not accessible: %v", root, err)}
 	} else if !info.IsDir() {
 		return Stats{}, fmt.Errorf("scan root %q is not a directory", root)
+	}
+
+	existingRoot, found, err := st.ExistingScanRoot(opts.DriveID)
+	if err != nil {
+		return Stats{}, fmt.Errorf("checking existing drive record: %w", err)
+	}
+	if found && existingRoot != root {
+		if !opts.ReplaceRoot {
+			return Stats{}, &RootConflict{DriveID: opts.DriveID, OldRoot: existingRoot, NewRoot: root}
+		}
+		if err := st.ClearDrive(opts.DriveID); err != nil {
+			return Stats{}, fmt.Errorf("clearing old checkpoint for drive %q: %w", opts.DriveID, err)
+		}
 	}
 
 	if err := st.UpsertDrive(opts.DriveID, root); err != nil {

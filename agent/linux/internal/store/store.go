@@ -260,13 +260,41 @@ func (s *Store) ListFiles(driveID, status string) ([]FileRecord, error) {
 
 // DriveScanRoot returns the recorded scan root for a drive label.
 func (s *Store) DriveScanRoot(driveID string) (string, error) {
-	row := s.db.QueryRow(`SELECT scan_root FROM drives WHERE drive_id = ?`, driveID)
-	var root string
-	if err := row.Scan(&root); err != nil {
-		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("no scan recorded for drive %q (run 'driveagent scan' first)", driveID)
-		}
+	root, found, err := s.ExistingScanRoot(driveID)
+	if err != nil {
 		return "", err
 	}
+	if !found {
+		return "", fmt.Errorf("no scan recorded for drive %q (run 'driveagent scan' first)", driveID)
+	}
 	return root, nil
+}
+
+// ExistingScanRoot returns the scan root previously recorded for driveID,
+// and whether one was found at all — a brand-new drive_id has none. Used
+// to detect a drive_id being repointed at a different root (see
+// scan.Options.ReplaceRoot).
+func (s *Store) ExistingScanRoot(driveID string) (root string, found bool, err error) {
+	row := s.db.QueryRow(`SELECT scan_root FROM drives WHERE drive_id = ?`, driveID)
+	if err := row.Scan(&root); err != nil {
+		if err == sql.ErrNoRows {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return root, true, nil
+}
+
+// ClearDrive deletes every checkpointed file and scan-run row for driveID
+// — used when repointing an existing drive_id at a different scan root,
+// so stale rows from the old root don't linger and pollute later compares.
+// The drives row itself is left for UpsertDrive to update in place.
+func (s *Store) ClearDrive(driveID string) error {
+	if _, err := s.db.Exec(`DELETE FROM files WHERE drive_id = ?`, driveID); err != nil {
+		return fmt.Errorf("clearing checkpointed files: %w", err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM scan_runs WHERE drive_id = ?`, driveID); err != nil {
+		return fmt.Errorf("clearing scan run history: %w", err)
+	}
+	return nil
 }
