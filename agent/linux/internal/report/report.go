@@ -158,6 +158,9 @@ var htmlTemplate = template.Must(template.New("report").Funcs(template.FuncMap{
   .badge.relocated { background: #fff3cf; color: #8a6d00; }
   .badge.unscanned { background: #eee; color: #555; }
   .badge.partial { background: #f0e6fd; color: #5a2ba1; }
+  .dirsize { font-size: 0.78em; margin-left: 0.4rem; }
+  .dirsize.partial { color: #999; }
+  .dirsize.full { color: #1a1a1a; }
   .detail { margin: 0.2rem 0 0.3rem 1.1rem; font-size: 0.85rem; color: #444; }
   table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin-top: 0.5rem; }
   th, td { border-bottom: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; }
@@ -205,7 +208,7 @@ var htmlTemplate = template.Must(template.New("report").Funcs(template.FuncMap{
 </details>
 {{else}}
 <details>
-  <summary>{{.Name}}/<span class="badge {{.Category}}">{{.Category}}{{with .CountsText}} ({{.}}){{end}}</span></summary>
+  <summary>{{.Name}}/<span class="badge {{.Category}}">{{.Category}}{{with .CountsText}} ({{.}}){{end}}</span><span class="dirsize {{if .SizePartial}}partial{{else}}full{{end}}">{{humanSize .Size}}</span></summary>
   <div class="children">
     {{range .Children}}{{template "node" .}}{{end}}
   </div>

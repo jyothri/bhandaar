@@ -19,8 +19,14 @@ type TreeNode struct {
 	Counts   map[string]int
 	Children []*TreeNode
 
+	// Size is the file's own size (IsFile) or, for a folder, the sum of
+	// every descendant file's recorded size. Descendants that have never
+	// been scanned contribute nothing (their size isn't known), so a
+	// folder's Size is a lower bound whenever SizePartial is true.
+	Size        int64
+	SizePartial bool // folder only: true if Category is unscanned/partial, meaning Size excludes not-yet-scanned descendants.
+
 	// Leaf detail (IsFile only).
-	Size                    int64
 	ComparedAgainstDriveID  string
 	CounterpartRelativePath string // only meaningful when Category == relocated
 }
@@ -98,6 +104,10 @@ func buildNode(st *store.Store, driveID, relPath, name string, includeMacMetadat
 		node.Children = append(node.Children, leaf)
 	}
 	sortChildren(node.Children)
+	node.SizePartial = node.Category == store.FolderUnscanned || node.Category == store.FolderPartial
+	for _, c := range node.Children {
+		node.Size += c.Size
+	}
 	return node, nil
 }
 
