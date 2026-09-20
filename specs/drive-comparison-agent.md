@@ -9,6 +9,7 @@ _Last updated 2026-09-19._ Code lives at `agent/linux/` (module `github.com/jyot
 | §2 Language & Runtime | ✅ Implemented | Go 1.27.1, no CGO (`modernc.org/sqlite`, `lukechampine.com/blake3`). |
 | §3 Architecture | ✅ Implemented | Package layout matches: `cmd/driveagent`, `internal/{scan,store,compare,report}`. |
 | §4 Checkpoint / Resume | ✅ Implemented | SQLite WAL schema (`drives`/`files`/`scan_runs`), idempotent re-walk resume, per-file error handling, root-disappearance detection. Verified on real drives: re-running `scan` after a completed run skipped 100% of files (103/103 and 163/163) with zero re-hashing. |
+| §4.2 Concurrent Scans | ✅ Implemented | `PRAGMA busy_timeout=5000` lets two `driveagent scan` processes safely share one `state.db`. Verified: two concurrent processes (1,500 files each, different `drive_id`s) both exited 0 with zero lock errors and all rows landed. |
 | §5 Hashing Strategy | ⚠️ Implemented, with a nuance | Every new/changed file gets a full streamed BLAKE3 hash during `scan`. The `(size, mtime)` check is used to skip re-hashing on repeat scans (resume) rather than as a separate cross-drive pre-filter applied during `compare` — `compare` only ever reads hashes already computed and stored by `scan`, it doesn't hash anything itself. |
 | §6 Comparison Algorithm | ✅ Implemented | Exact-path matching for common/diverged; multiset content-hash matching (oldest-mtime-first tie-break) for relocated/missing. |
 | §6.1 macOS Metadata Exclusion | ✅ Implemented | `--include-mac-metadata` flag on `compare` (default: excludes `._*`/`.DS_Store` from classification; rows remain in the checkpoint DB either way). |
@@ -147,6 +148,16 @@ Fixed as follows: `scan` now checks, before doing any work, whether `drive_id` a
 - Rescanning the **same** root as before (the common, everyday case) is unaffected — no conflict is detected, and resume/skip behavior (§4) works exactly as before.
 
 This makes `drive_id` behave as intended — a stable label for "whatever is currently at this scan root" — without requiring the user to manually track which labels have been used for which roots (the workaround used earlier in this project, before this fix, was giving each distinct scan root its own suffixed label, e.g. `seagate2-icloud`).
+
+### 4.2 Concurrent Scans Across Physical Drives
+
+Two separate `driveagent scan` processes — one per physical drive, run as independent background jobs — are supported and safe, sharing the same checkpoint DB (`state.db`) by default. This is a deliberate capability, not just an accident of the data model: distinct `drive_id`s never share rows, so there's no logical conflict, and two genuinely separate physical drives don't compete for disk I/O the way concurrent workers on the *same* spinning drive do (§5) — the main benefit is wall-clock speedup, roughly `max(time_A, time_B)` instead of `time_A + time_B` for a sequential run.
+
+The one real risk was at the SQLite layer: each process opens its own connection to the same `state.db` file, and without a busy-timeout, one process's write-batch commit landing at the same moment as the other's would fail immediately with "database is locked" rather than simply waiting. Fixed by setting `PRAGMA busy_timeout=5000` in `store.Open` — a writer now waits up to 5s for the other process's brief (sub-second) transaction to finish instead of erroring. `SetMaxOpenConns(1)` alone (already in place) only serializes writes *within* one process; it does nothing for two separate OS processes.
+
+Verified: two `driveagent scan` processes launched simultaneously against the same `state.db` (1,500 files each, different `drive_id`s) both completed with exit code 0, zero lock/busy errors, and all 3,000 rows landed correctly.
+
+**Remaining caveat (not addressed by this fix, and not really fixable in software):** if both drives share a USB hub or host controller, they compete for aggregate USB bandwidth regardless of the SQLite fix, and the expected speedup shrinks or disappears. Whether that applies depends on how the drives are physically connected.
 
 ## 5. Hashing Strategy
 

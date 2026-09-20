@@ -53,9 +53,14 @@ func Open(stateDir string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening checkpoint db: %w", err)
 	}
-	// A single writer connection avoids SQLITE_BUSY under WAL without
-	// needing a busy-timeout retry loop; the scan pipeline already
-	// serializes writes through one batcher.
+	// A single connection avoids SQLITE_BUSY between writers within this
+	// process (the scan pipeline already serializes writes through one
+	// batcher). It does NOT protect against a second, separate driveagent
+	// process (e.g. scanning a different drive concurrently) opening the
+	// same state.db at the same time — that's what busy_timeout below is
+	// for: instead of failing immediately with "database is locked", a
+	// writer waits up to that long for the other process's brief
+	// (sub-second) write transaction to finish.
 	db.SetMaxOpenConns(1)
 
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL;`); err != nil {
@@ -65,6 +70,10 @@ func Open(stateDir string) (*Store, error) {
 	if _, err := db.Exec(`PRAGMA synchronous=NORMAL;`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("setting synchronous mode: %w", err)
+	}
+	if _, err := db.Exec(`PRAGMA busy_timeout=5000;`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("setting busy timeout: %w", err)
 	}
 
 	s := &Store{db: db}
