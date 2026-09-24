@@ -13,9 +13,9 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 | | Count |
 |---|---|
-| Open | 38 |
+| Open | 37 |
 | Done | 8 |
-| Won't fix | 0 |
+| Won't fix | 1 |
 | *of which Deferred* | 1 (7.6) |
 
 ### Change log
@@ -30,7 +30,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 | 2026-09-24 | `841b50d` | Section 2: 2.2 confirmed fixed by `5d4f052`; 2.3 Dockerfile hardened (pinned images, `npm ci`, working `Dockerfile.dockerignore`); cache headers added to prod UI nginx config (outside repo); 2.4 applied to prod nginx (outside repo); new 2.5, 2.6 | 2.2, 2.3, 2.4 (done); 2.5, 2.6 (new, open) |
 | 2026-09-24 | `c427d8a` | CI builds on PRs but pushes only from `main` (`pushImage`); UI workflow sets `enableBuildKit` | 2.5 |
 | 2026-09-24 | `4555752` | Progress hub rewritten as a real broadcast with non-blocking sends; first backend tests (`hub_test.go`, race-clean); 2.4 confirmed in logs (streams now stay open 6–14 min); new 7.8–7.10 | 7.7 (done); 7.8, 7.9, 7.10 (new, open) |
-| 2026-09-24 | *(pending)* | Gmail scan waits for in-flight fetches before returning (no more crash on list failure); `start` passed into `logProgress` (fixes a data race and wrong Photos elapsed time); tests can import `constants`; regression test `gmail_test.go` | 7.8 |
+| 2026-09-24 | `f994bed` | Gmail scan waits for in-flight fetches before returning (no more crash on list failure); `start` passed into `logProgress` (fixes a data race and wrong Photos elapsed time); tests can import `constants`; regression test `gmail_test.go` | 7.8 |
+(Details of production database authentication are omitted from the public repo.)
 
 ---
 
@@ -114,7 +115,20 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 - [ ] **2.6 Production compose passes DB settings under names the backend doesn't read** — prod `<prod-repo>/storagemanager/docker-compose.yml`, `be/db/database.go:51-54`
   Since issue #9 (`5394a8c`), the backend reads `DB_HOST`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`, but the `be` service passes `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`. A current backend image would ignore those and use the defaults (`hddb`, empty password, `hdd_db`). It works only if the production values happen to match. This is unverified: I didn't read the production values.
-  *Fix:* in the prod compose, map `DB_USER=${<prod-env-var>}`, `DB_PASSWORD=${<prod-env-var>}`, `DB_NAME=${<prod-env-var>}` (host `hdd_db` matches the default). Do it before the next backend image pull.
+  *Investigated 2026-09-24 (read-only; no secrets printed). It's a code change on top of config that was always dead:*
+  - The `POSTGRES_*` entries on `be` date from the prod compose's first commit (`6b554d0`, 2025-03-09, in `<prod-repo>`). **No backend version ever read them.**
+  - Before #9, `database.go` hard-coded the connection settings; #9 moved them to `DB_*` environment variables.
+  - #9 (`5394a8c`, 2025-12-24) switched to `DB_*` with defaults `hddb` / **empty password** / `hdd_db`. It also changed the repo's own `be/build/docker-compose.yml` to `DB_*`, but the separate prod compose wasn't updated.
+  - (Details of production database authentication are omitted from the public repo.)
+  - **So the next backend image pull will fail to connect to the database.** That same pull is what delivers 7.7 and 7.8.
+  - (Details of production database authentication are omitted from the public repo.)
+
+  *Fix:* in prod `<prod-repo>/storagemanager/`:
+  1. Set `<prod-env-var>` in `.env` (and `.env.sops`) to the role's actual password, or rotate it with `ALTER ROLE hddb PASSWORD '…'` and use the new one.
+  2. In the `be` service, replace the `POSTGRES_*` entries with `DB_HOST=hdd_db`, `DB_USER=${<prod-env-var>}`, `DB_PASSWORD=${<prod-env-var>}`, `DB_NAME=${<prod-env-var>}`.
+  3. Only then pull the new backend image.
+
+  Optionally, make the backend fail fast with a clear error when `DB_PASSWORD` is empty outside local dev.
 
 ## 3. React / TanStack Query idioms
 
@@ -184,7 +198,7 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 ## Suggested order
 
-1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change): decides whether account linking is safe. Also **2.5** and **2.6** before the next image build or pull, since either can break production on its own. Production still needs the **7.7** and **7.8** fixes, which reach it with the next backend image (after **2.6**).
+1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change): decides whether account linking is safe. Also **2.5** and **2.6** before the next image build or pull, since either can break production on its own. Production still needs the **7.7** and **7.8** fixes, which reach it with the next backend image. **2.6 must be done first, or that image cannot connect to the database.**
 2. **1.2–1.4** OAuth URL encoding, the render-time redirect, and error handling (`fetchJson`). Fix **7.1**, **7.2** and **7.4** in the same pass, since they are on the same flow.
 3. **3.4** Query-key invalidation, plus the remaining items in section 1.
 4. **4.1** Results view (next feature).
@@ -264,9 +278,10 @@ Found on 2026-09-24 while setting up and testing the local environment. These ar
 
   *Verified:* `go test -race -count=10 ./...` passes (in `golang:1.25`). Live scan 9 on `dev` completed with correct progress events and no panics. *Not reproduced live:* the rate-limit crash itself, since that needs Gmail's quota exhausted; the fake-server test covers it. The pre-existing `gofmt` drift in `be/db/database.go` was left alone.
 
-- [ ] **7.9 Later scans silently skip messages that earlier scans already saved** — `be/db/database.go:151-164`
+- [-] **7.9 Later scans silently skip messages that earlier scans already saved** — `be/db/database.go:151-164` — **Won't fix (by design)**
   `SaveMessageMetadataToDb` skips any message whose `(username, message_id, thread_id)` already exists, *across all scans*. So scan 3 (295 processed) stored 207, which is 295 minus the 88 already saved by scans 1 and 2. Scan 4 re-ran scan 3's filter and stored 0, so `/api/gmaildata/4` returns nothing. This may be intentional deduplication, but per-scan results are incomplete and depend on scan order.
   *Decide:* either store one row per `(scan_id, message)`, so each scan's results are complete (dedupe in queries instead), or keep global dedupe and make the UI say "N new messages" instead of showing a per-scan listing.
+  **Decision (2026-09-24): keep global dedupe.** `messagemetadata` holds each message once per user, attributed to the scan that first saw it. A scan's `scan_id` rows are the messages *new* in that scan, not everything it matched. Anything showing per-scan results (e.g. the results view in 4.1) should label them "new messages" and use the scan's processed count for the total matched.
 
 - [ ] **7.10 Every new scan shows `Completed` while it's still running** — `be/db/database.go:103-107`, `:672-674`
   The migration adds `status VARCHAR(50) DEFAULT 'Completed'` (so existing rows count as completed), and `LogStartScan` never sets `status`. So a scan is `Completed` from the moment it's created, until it's marked `Failed`. Scan 6 never ran, because the server crashed first (7.8), but its row still says `Completed`, with no end time.
