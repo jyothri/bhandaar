@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { requestScan, getAccounts } from "../api";
+import { queryKeys } from "../api/queryKeys";
 import { config } from "../config";
 import { createOAuthState } from "../oauthState";
 import { ScanMetadata, ScanType } from "../types/scans";
@@ -72,7 +73,7 @@ function Request() {
   const queryFilter = buildGmailFilter(form);
 
   const { data: accounts } = useQuery({
-    queryKey: ["getAccounts"],
+    queryKey: queryKeys.accounts,
     queryFn: () => getAccounts(),
     staleTime: Infinity,
   });
@@ -80,7 +81,9 @@ function Request() {
   const { mutateAsync: requestScanMutation } = useMutation({
     mutationFn: requestScan,
     onSuccess: (resp) => {
-      queryClient.invalidateQueries({ queryKey: ["scans"] });
+      // The new scan belongs in the history, and its account may be new there.
+      queryClient.invalidateQueries({ queryKey: queryKeys.allScanRequests });
+      queryClient.invalidateQueries({ queryKey: queryKeys.scannedAccounts });
       setErrorMessage("");
       setInfoMessage("Request submitted successfully. ID: " + resp.scan_id);
     },
