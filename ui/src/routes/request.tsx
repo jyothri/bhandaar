@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -12,6 +12,36 @@ export const Route = createFileRoute("/request")({
   component: Request,
 });
 
+// Formats a YYYY-MM-DD date as Gmail's YYYY/MM/DD, shifted by `days`.
+function dateForApi(input: string, days = 0): string {
+  const [year, month, day] = input.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return date.toISOString().slice(0, 10).replace(/-/g, "/");
+}
+
+function buildGmailFilter(
+  inbox: boolean,
+  unread: boolean,
+  startDate: string,
+  endDate: string
+): string {
+  let filter = "";
+  if (inbox) {
+    filter += "label:inbox ";
+  }
+  if (unread) {
+    filter += "is:unread ";
+  }
+  if (startDate !== "") {
+    filter += `after:${dateForApi(startDate)} `;
+  }
+  if (endDate !== "") {
+    // Gmail's before: is exclusive; use the next day to include endDate.
+    filter += `before:${dateForApi(endDate, 1)} `;
+  }
+  return filter;
+}
+
 function Request() {
   const queryClient = useQueryClient();
 
@@ -22,9 +52,9 @@ function Request() {
   const [username, setUsername] = useState("");
   const [inbox, setInbox] = useState(false);
   const [unread, setUnread] = useState(false);
-  const [queryFilter, setQueryFilter] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const queryFilter = buildGmailFilter(inbox, unread, startDate, endDate);
 
   const { data: accounts } = useQuery({
     queryKey: ["getAccounts"],
@@ -78,35 +108,6 @@ function Request() {
     setScanClientKey(e.target.value);
     setUsername(e.target.selectedOptions[0].text);
   }
-
-  // Formats a YYYY-MM-DD date as Gmail's YYYY/MM/DD, shifted by `days`.
-  const dateForApi = (input: string, days = 0): string => {
-    const [year, month, day] = input.split("-").map(Number);
-    const date = new Date(Date.UTC(year, month - 1, day + days));
-    return date.toISOString().slice(0, 10).replace(/-/g, "/");
-  };
-
-  useEffect(() => {
-    updateQueryFilter();
-  }, [inbox, unread, startDate, endDate]);
-
-  const updateQueryFilter = () => {
-    let filter = "";
-    if (inbox) {
-      filter += "label:inbox ";
-    }
-    if (unread) {
-      filter += "is:unread ";
-    }
-    if (startDate !== "") {
-      filter += `after:${dateForApi(startDate)} `;
-    }
-    if (endDate !== "") {
-      // Gmail's before: is exclusive; use the next day to include endDate.
-      filter += `before:${dateForApi(endDate, 1)} `;
-    }
-    setQueryFilter(filter);
-  };
 
   function linkGoogleAccount() {
     console.log("Linking Google Account");
