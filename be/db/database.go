@@ -388,7 +388,7 @@ func GetScanRequestsFromDb(accountKey string) ([]ScanRequests, error) {
 	}
 	read_row := `select distinct COALESCE(sm.name, '') as name, sm.search_filter, s.id,
 			s.scan_type,
-			scan_start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles' as scan_start_time,
+			scan_start_time AT TIME ZONE 'UTC' as scan_start_time,
 			COALESCE(EXTRACT(EPOCH FROM (scan_end_time - scan_start_time)), -1) as scan_duration_in_sec
 			from scans s
 			join scanmetadata sm on sm.scan_id = s.id
@@ -409,8 +409,8 @@ func GetScansFromDb(pageNo int) ([]Scan, int, error) {
 	count_rows := `select count(*) from scans`
 	read_row :=
 		`select S.id, scan_type,
-		 created_on AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles' as created_on,
-		 scan_start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles' as scan_start_time,
+		 created_on AT TIME ZONE 'UTC' as created_on,
+		 scan_start_time AT TIME ZONE 'UTC' as scan_start_time,
 		 scan_end_time, CONCAT(search_path, search_filter) as metadata,
 		 date_trunc('millisecond', COALESCE(scan_end_time,current_timestamp)-scan_start_time) as duration
 	   from scans S LEFT JOIN scanmetadata SM
