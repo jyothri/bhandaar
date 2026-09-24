@@ -71,11 +71,5 @@ export const getScannedAccounts = (): Promise<string[]> =>
 /**
  * Function to get details for selected account.
  */
-export const getScanRequests = async (
-  accountKey: string
-): Promise<ScanRequest[]> => {
-  if (accountKey === "none") {
-    return [];
-  }
-  return fetchJson(`/api/scans/requests/${encodeURIComponent(accountKey)}`);
-};
+export const getScanRequests = (accountKey: string): Promise<ScanRequest[]> =>
+  fetchJson(`/api/scans/requests/${encodeURIComponent(accountKey)}`);

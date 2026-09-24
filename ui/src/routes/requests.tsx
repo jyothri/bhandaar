@@ -23,6 +23,7 @@ function Requests() {
   const { data: scanRequests } = useQuery({
     queryKey: ["getScanRequests", selectedAccount],
     queryFn: () => getScanRequests(selectedAccount),
+    enabled: selectedAccount !== "none",
     staleTime: Infinity,
   });
 
