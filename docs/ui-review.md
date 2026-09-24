@@ -13,8 +13,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 | | Count |
 |---|---|
-| Open | 37 |
-| Done | 5 |
+| Open | 36 |
+| Done | 6 |
 | Won't fix | 0 |
 | *of which Deferred* | 1 (7.6) |
 
@@ -27,7 +27,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 | 2026-09-24 | `3cc9a7e` | Backend URL and Google client ID moved to Vite env vars (`src/config.ts`, `ui/.env.development`, `ui/.env.production`); dev server now uses the local backend; optional `DEV_PUBLIC_HOST` in `vite.config.ts` for serving the dev env via `<dev-endpoint>` | 2.1 |
 | 2026-09-24 | `0b69c82` | Backend OAuth findings added as section 7; first end-to-end test via `<dev-endpoint>` (Google linking + scan 1) added 2.4, 7.5, 7.6; 1.9 corrected (`label:unread` works) | 7.1–7.6, 2.4 (new, open) |
 | 2026-09-24 | `74f7da8` | 7.6 deferred: the total message count isn't known until Gmail listing finishes | 7.6 |
-| 2026-09-24 | *(pending)* | Section 2: 2.2 confirmed fixed by `5d4f052`; 2.3 Dockerfile hardened (pinned images, `npm ci`, working `Dockerfile.dockerignore`); cache headers added to prod UI nginx config (outside repo); 2.4 applied to prod nginx (outside repo); new 2.5, 2.6 | 2.2, 2.3, 2.4 (done); 2.5, 2.6 (new, open) |
+| 2026-09-24 | `841b50d` | Section 2: 2.2 confirmed fixed by `5d4f052`; 2.3 Dockerfile hardened (pinned images, `npm ci`, working `Dockerfile.dockerignore`); cache headers added to prod UI nginx config (outside repo); 2.4 applied to prod nginx (outside repo); new 2.5, 2.6 | 2.2, 2.3, 2.4 (done); 2.5, 2.6 (new, open) |
+| 2026-09-24 | *(pending)* | CI builds on PRs but pushes only from `main` (`pushImage`); UI workflow sets `enableBuildKit` | 2.5 |
 
 ---
 
@@ -103,9 +104,11 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
   *Fix:* in both `/sse` locations, add `proxy_read_timeout 1h;`, `proxy_buffering off;` and `proxy_cache off;`. The `Upgrade`/`Connection` headers aren't needed for SSE. Optionally have the backend send a keep-alive comment every ~30s, so any proxy timeout stays harmless.
   *Done on the prod box on 2026-09-24; not in this repo:* added `proxy_read_timeout 1h; proxy_buffering off; proxy_cache off;` to the `/sse` locations of both `sm.jkurapati.com` and `<dev-endpoint>`. Ran `nginx -t`, then reloaded (no restart). Backup: `<prod-repo>a backup copy`. The change is left uncommitted in `<prod-repo>` with the owner's other edits. *To confirm:* with `/request` open for over a minute, the backend log should no longer show `Connection Duration: 1m0.0…s` disconnects. The keep-alive comment is not done.
 
-- [ ] **2.5 CI pushes `:latest` from pull requests** — `.github/workflows/ui-docker-image.yml`, `backend-docker-image.yml`
+- [x] **2.5 CI pushes `:latest` from pull requests** — `.github/workflows/ui-docker-image.yml`, `backend-docker-image.yml`
   Both workflows run on `pull_request` as well as `push` to `main`, and call `docker-build-push` with `addLatest: true` and pushing left on. So building any PR that touches `ui/` or `be/` overwrites `jyothri/bhandaar-ui:latest` / `jyothri/bhandaar:latest`, which production runs (`<prod-repo>/storagemanager/docker-compose.yml`). The next `docker compose pull` there would deploy unmerged code.
   *Fix:* set `pushImage: ${{ github.event_name == 'push' }}` (build-only on PRs), or split the build and push jobs. Consider pinning production to a version tag instead of `:latest`.
+  *Done (2026-09-24):* both workflows now pass `pushImage: ${{ github.event_name == 'push' }}`, and the only `push` trigger is `main`. So PRs still build, which catches broken Dockerfiles, but never push. In `docker-build-push@v6`, `skipPush` is `getInput("pushImage") === "false"`. With push skipped, it still logs in to Docker Hub when credentials are available (for private base images), and skips the login otherwise, e.g. for fork PRs without secrets. The UI workflow also sets `enableBuildKit: true`, because `ui/Dockerfile.dockerignore` (2.3) is only honoured by BuildKit. It worked before only because the runner's Docker already defaults to BuildKit. Both files pass `actionlint` 1.7.12.
+  *Not done:* pinning production to a version tag instead of `:latest`. *To confirm:* the next PR's run log should show the build step without a push.
 
 - [ ] **2.6 Production compose passes DB settings under names the backend doesn't read** — prod `<prod-repo>/storagemanager/docker-compose.yml`, `be/db/database.go:51-54`
   Since issue #9 (`5394a8c`), the backend reads `DB_HOST`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`, but the `be` service passes `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`. A current backend image would ignore those and use the defaults (`hddb`, empty password, `hdd_db`). It works only if the production values happen to match. This is unverified: I didn't read the production values.
