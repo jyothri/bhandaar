@@ -13,8 +13,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 | | Count |
 |---|---|
-| Open | 36 |
-| Done | 14 |
+| Open | 26 |
+| Done | 24 |
 | Won't fix | 1 |
 | *of which Deferred* | 1 (7.6) |
 
@@ -30,52 +30,64 @@ This work was first raised as one PR (#6). After review it was split into focuse
 | 2026-09-24 | #9 | `flag.Parse()` in `main` with lazily built OAuth configs; progress hub rewritten as a non-blocking broadcast (keeps newest on full buffer, separate all-scans set); Gmail scan waits for in-flight fetches, no start-time race, no pending leak; first backend tests | 7.7, 7.8, 7.11, 7.12, 7.13, 7.14 |
 | 2026-09-24 | production (outside this repo) | Reverse proxy for the dev endpoint; SSE proxy timeouts; UI cache headers; `be` service passes `DB_*` | 2.3 (cache headers), 2.4, 2.6 |
 | 2026-09-24 | this doc | Findings and decisions: 7.6 deferred, 7.9 won't fix (keep global dedupe), 2.6 investigation, PR #6 review follow-ups | 7.6, 7.9, 7.10 (open) |
+| 2026-09-24 | #12 | UI bugs and security: random OAuth `state` checked on the callback; OAuth URLs built with `URLSearchParams`; callback redirect moved to `beforeLoad`; shared `fetchJson`; SSE hook fixes; date and Gmail filter fixes; label targets | 1.1–1.10 |
 
 ---
 
 ## 1. Bugs and security
 
-- [ ] **1.1 OAuth `state` is a fixed placeholder and never checked** — `src/routes/request.tsx:129`
+- [x] **1.1 OAuth `state` is a fixed placeholder and never checked** — `src/routes/request.tsx:129`
   Sends `state = "YOUR_CUSTOM_STATE"`; `be/web/oauth.go` has no `state` handling. This leaves account linking open to CSRF.
-  *Fix:* generate `crypto.randomUUID()`, save it in `sessionStorage`, and compare it in `oauth/glink.tsx` before redirecting to the backend. Ideally the backend creates and checks it instead.
+  *Done in #12 (frontend only):* `src/oauthState.ts` creates a `crypto.randomUUID()` per link attempt and keeps it in `sessionStorage`. `/oauth/glink` forwards the code to the backend only if the returned `state` matches, and clears the stored value either way, so each one works once. Otherwise it shows "Account linking failed" with a link back. *Not done:* backend-issued state. It belongs with 7.3 (redirect allowlist).
 
-- [ ] **1.2 OAuth URLs are built without encoding** — `src/routes/oauth/glink.tsx:25`, `src/routes/request.tsx:132`
+- [x] **1.2 OAuth URLs are built without encoding** — `src/routes/oauth/glink.tsx:25`, `src/routes/request.tsx:132`
   `code`, `scope` and `redirect_uri` are pasted into the query string as-is. `scope` contains `:` and `/`, and a multi-scope list with spaces would break.
   *Fix:* build the URLs with `URLSearchParams`.
+  *Done in #12:* both the Google authorization URL and the backend `/api/glink` URL are built with `URLSearchParams`; the redirect URI uses `window.location.origin`.
 
-- [ ] **1.3 Redirect runs during render** — `src/routes/oauth/glink.tsx:26`
+- [x] **1.3 Redirect runs during render** — `src/routes/oauth/glink.tsx:26`
   `window.location.href = ...` in the render body runs twice under StrictMode, and again on any re-render, so the one-time auth code can be sent twice.
   *Fix:* redirect from the route's `beforeLoad` (`throw redirect({ href })`) or from a `useEffect`.
+  *Done in #12:* `beforeLoad` checks the state (1.1) and throws `redirect({ href })` to the backend. The router treats an absolute `href` as a full-page navigation. A callback without a `code` (e.g. access denied) isn't forwarded.
 
-- [ ] **1.4 Errors become `"[object Object]"`, and `response.ok` is never checked** — `src/api/index.ts:23`, `:60`
+- [x] **1.4 Errors become `"[object Object]"`, and `response.ok` is never checked** — `src/api/index.ts:23`, `:60`
   `throw new Error(content)` stringifies an object. A 500 with an HTML body fails later as a confusing JSON parse error.
   *Fix:* add one shared `fetchJson<T>()` helper that checks `ok` and throws `new Error(content.error ?? response.statusText)`.
+  *Done in #12:* all API calls use `fetchJson<T>()`. Most backend errors are plain text from `http.Error`, and a few are JSON `{ error: { message } }`, so the helper uses the text body or `error.message`. Anything else, such as a proxy's HTML error page, falls back to the HTTP status. The request page shows the message when a scan request fails.
 
-- [ ] **1.5 Account key isn't URL-encoded** — `src/api/index.ts:56`
+- [x] **1.5 Account key isn't URL-encoded** — `src/api/index.ts:56`
   *Fix:* wrap it in `encodeURIComponent(accountKey)`.
+  *Done in #12.*
 
-- [ ] **1.6 `ScanProgress` can render a stray "0"** — `src/components/ScanProgress.tsx:7`, `:21`
+- [x] **1.6 `ScanProgress` can render a stray "0"** — `src/components/ScanProgress.tsx:7`, `:21`
   `sseData.scan_id && (...)` renders `0` when the scan ID is 0, and it relies on `{} as Progress` being falsy.
   *Fix:* use `useState<Progress | null>(null)` and `if (!sseData) return null`.
+  *Done in #12.*
 
-- [ ] **1.7 Problems in the SSE hook** — `src/components/hooks/useSse.ts`
+- [x] **1.7 Problems in the SSE hook** — `src/components/hooks/useSse.ts`
   - `setData` is missing from the effect's dependencies (line 39). It works only because the effect never re-reads the caller's closure.
   - Errors are cleared with `setError("")` instead of `null`.
   - `onerror` reports an error even while the browser is reconnecting on its own. Check `eventSource.readyState === EventSource.CLOSED` first.
   - The callback is typed `any`. Make the hook generic: `useSse<T>(..., onData: (d: T) => void)`.
 
-- [ ] **1.8 Date round-trip does nothing and can shift the date** — `src/routes/request.tsx:76-83`
+  *Done in #12:* the callback is kept in a ref updated after each render, rather than listed as a dependency, so a new function from the caller doesn't reconnect the stream. Errors are cleared with `null` (also on open), `onerror` reports only when `readyState === EventSource.CLOSED`, and the hook is generic. `ScanProgress` passes its state setter directly.
+
+- [x] **1.8 Date round-trip does nothing and can shift the date** — `src/routes/request.tsx:76-83`
   Builds a local-time `Date` and then calls `toISOString()` (UTC). East of UTC this moves the date back one day.
   *Fix:* the `<input type="date">` value is already `YYYY-MM-DD`; store it as is.
+  *Done in #12.*
 
-- [ ] **1.9 Gmail filter syntax errors** — `src/routes/request.tsx:105-120`
+- [x] **1.9 Gmail filter syntax errors** — `src/routes/request.tsx:105-120`
   - ~~`label:unread` should be `is:unread`.~~ *Corrected 2026-09-24:* scan 1 used `label:inbox label:unread` and returned 40 unread inbox messages, so Gmail accepts `label:unread`. `is:unread` is the documented form, but switching is optional.
   - Gmail's `before:` is exclusive, so the chosen end date is left out. Add one day, or label the field to say so.
   - Stray double space after `after:` (line 114).
 
-- [ ] **1.10 Three labels point at the wrong input** — `src/routes/request.tsx:174`, `:187`, `:200`
+  *Done in #12:* `before:` uses the day after the chosen end date, so the end date is included. The day is added in UTC, so it doesn't depend on the browser's time zone. Unread now uses `is:unread`, and the double space is gone.
+
+- [x] **1.10 Three labels point at the wrong input** — `src/routes/request.tsx:174`, `:187`, `:200`
   The Inbox, Unread and Date range labels all use `htmlFor="filter"`, so clicking any of them focuses the query box.
   *Fix:* point them at `inbox`, `unread` and `datepicker-range-start`.
+  *Done in #12.*
 
 ## 2. Configuration and deployment
 
