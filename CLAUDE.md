@@ -185,7 +185,7 @@ For Cloud Storage access, set `GOOGLE_APPLICATION_CREDENTIALS` to service accoun
 
 ## Important Notes
 
-- **No tests**: The codebase currently has no test files
+- **Tests**: Very few: `be/notification/hub_test.go` and `be/collect/gmail_test.go` (fake Gmail API via `httptest`). Run `go test ./...` from `be/`; add `-race` where cgo/gcc is available, e.g. `docker run --rm -v "$PWD":/src -w /src golang:1.23.5 go test -race ./...` (match the `toolchain` in `be/go.mod`). `flag.Parse()` runs in `main`, so tests use flag defaults; read flag values lazily, never from another package's `init()`. CI runs `go test -race ./...` (backend workflow `test` job) before building the image.
 - **Database connection**: Configured via environment variables (see Database Setup section). Defaults: host `hdd_db`, port `5432`, user `hddb`, password empty, database `hdd_db`. For local development, set `DB_HOST=localhost` and configure credentials to match your PostgreSQL instance.
 - **Backend API URL**: Read from `VITE_BACKEND_URL` via `ui/src/config.ts` (with `VITE_GOOGLE_CLIENT_ID`). `ui/.env.development` points at `http://localhost:8090`, `ui/.env.production` at `https://sm.jkurapati.com`; put local overrides in the gitignored `ui/.env.development.local`
 - **Known issue**: Directory size calculation differs between local scans (recursive) and cloud scans (directory-level only) - see be/README.md "Kinks" section

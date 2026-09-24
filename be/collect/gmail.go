@@ -20,7 +20,6 @@ import (
 
 var counter_processed atomic.Int64
 var counter_pending atomic.Int64
-var start time.Time
 
 // Built on first use, after main has parsed the OAuth flags.
 var gmailConfig = sync.OnceValue(func() *oauth2.Config {
@@ -132,8 +131,6 @@ func GetIdentity(refreshToken string) (string, error) {
 }
 
 func startGmailScan(gmailService *gmail.Service, scanId int, gMailScan GMailScan, messageMetaData chan<- db.MessageMetadata) error {
-	queryString := gMailScan.Filter
-	start = time.Now()
 	lock.Lock()
 	defer lock.Unlock()
 	resetCounters()
@@ -141,9 +138,25 @@ func startGmailScan(gmailService *gmail.Service, scanId int, gMailScan GMailScan
 	ticker := time.NewTicker(5 * time.Second)
 	done := make(chan bool)
 	notificationChannel := notification.GetPublisher(gMailScan.ClientKey)
-	go logProgress(scanId, gMailScan.ClientKey, done, ticker, notificationChannel)
+	go logProgress(scanId, gMailScan.ClientKey, time.Now(), done, ticker, notificationChannel)
 	throttler := rate.NewLimiter(50, 5)
 
+	err := listMessages(gmailService, gMailScan.Filter, messageMetaData, &wg, throttler)
+	// Wait for in-flight message fetches even if listing failed: the caller
+	// closes messageMetaData as soon as this returns.
+	wg.Wait()
+	done <- true
+	ticker.Stop()
+	if err != nil {
+		return err
+	}
+	slog.Info(fmt.Sprintf("Finished Scan. ScanId: %v", scanId))
+	return nil
+}
+
+// listMessages pages through the messages matching queryString and starts a
+// fetch for each one. The fetches are tracked by wg; the caller must wait on it.
+func listMessages(gmailService *gmail.Service, queryString string, messageMetaData chan<- db.MessageMetadata, wg *sync.WaitGroup, throttler *rate.Limiter) error {
 	messageListCall := gmailService.Users.Messages.List("me").Q(queryString)
 	hasNextPage := true
 	for hasNextPage {
@@ -158,8 +171,6 @@ func startGmailScan(gmailService *gmail.Service, scanId int, gMailScan GMailScan
 			}
 			lastErr = err
 			if !isRetryError(err) || i == MaxRetryCount-1 {
-				done <- true
-				ticker.Stop()
 				return fmt.Errorf("failed to list messages for query '%s' after %d retries: %w",
 					queryString, MaxRetryCount, err)
 			}
@@ -167,28 +178,20 @@ func startGmailScan(gmailService *gmail.Service, scanId int, gMailScan GMailScan
 			time.Sleep(SleepTime)
 			err = throttler.Wait(context.Background())
 			if err != nil {
-				done <- true
-				ticker.Stop()
 				return fmt.Errorf("rate limiter error: %w", err)
 			}
 		}
 		if lastErr != nil {
-			done <- true
-			ticker.Stop()
 			return fmt.Errorf("failed to get message list: %w", lastErr)
 		}
 		wg.Add(len(messageList.Messages))
 		counter_pending.Add(int64(len(messageList.Messages)))
-		parseMessageList(gmailService, messageList, messageMetaData, &wg, throttler)
+		parseMessageList(gmailService, messageList, messageMetaData, wg, throttler)
 		if messageList.NextPageToken == "" {
 			hasNextPage = false
 		}
 		messageListCall = messageListCall.PageToken(messageList.NextPageToken)
 	}
-	wg.Wait()
-	done <- true
-	ticker.Stop()
-	slog.Info(fmt.Sprintf("Finished Scan. ScanId: %v", scanId))
 	return nil
 }
 
@@ -221,6 +224,8 @@ func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan
 			"message_id", id,
 			"retries_exhausted", retryCount == 0,
 			"error", err)
+		// No longer pending (a retry above keeps it pending instead).
+		counter_pending.Add(-1)
 		return
 	}
 	from := ""
@@ -253,7 +258,7 @@ func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan
 	// wg.Done() is handled by defer at function start
 }
 
-func logProgress(scanId int, ClientKey string, done <-chan bool, ticker *time.Ticker, notificationChannel chan<- notification.Progress) {
+func logProgress(scanId int, ClientKey string, start time.Time, done <-chan bool, ticker *time.Ticker, notificationChannel chan<- notification.Progress) {
 	defer close(notificationChannel)
 	for {
 		select {
