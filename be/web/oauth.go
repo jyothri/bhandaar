@@ -28,8 +28,7 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 	var redirectUri = r.FormValue("redirectUri")
 
 	if redirectUri == "" {
-		w.Write([]byte("redirectUri not found in request"))
-		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, "redirectUri not found in request", http.StatusBadRequest)
 		return
 	}
 
@@ -76,7 +75,7 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 	var t OAuthAccessResponse
 	if err := json.NewDecoder(res.Body).Decode(&t); err != nil {
 		slog.Warn(fmt.Sprintf("could not parse JSON response: %v", err))
-		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, "Invalid response from Google's token endpoint", http.StatusBadGateway)
 		return
 	}
 
