@@ -1,12 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-function useSse(
+function useSse<T>(
   url: string,
   messageKey: string,
   endMessageKey: string,
-  setData: (arg0: any) => void
+  onData: (data: T) => void
 ) {
   const [error, setError] = useState<string | null>(null);
+
+  // Keep the latest callback without reconnecting when its identity changes.
+  const onDataRef = useRef(onData);
+  useEffect(() => {
+    onDataRef.current = onData;
+  });
 
   useEffect(() => {
     const eventSource = new EventSource(url);
@@ -14,24 +20,28 @@ function useSse(
     // Handle incoming data
     eventSource.addEventListener(messageKey, (e) => {
       if (e.data) {
-        setData(JSON.parse(e.data));
-        setError("");
+        onDataRef.current(JSON.parse(e.data) as T);
+        setError(null);
       }
     });
 
     eventSource.addEventListener(endMessageKey, () => {
       console.log("Close Connection to server events");
       eventSource.close();
-      setError("");
+      setError(null);
     });
 
     eventSource.onopen = () => {
       console.log("Listening for server events.");
+      setError(null);
     };
 
-    // Handle errors
+    // Handle errors. While the browser is reconnecting on its own the state
+    // is CONNECTING; only a CLOSED source has given up.
     eventSource.onerror = () => {
-      setError("Connection lost to server events..");
+      if (eventSource.readyState === EventSource.CLOSED) {
+        setError("Connection lost to server events..");
+      }
     };
 
     // Cleanup when component unmounts

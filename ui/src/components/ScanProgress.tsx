@@ -6,15 +6,11 @@ import { Progress } from "../types/scans";
 export default function ScanProgress() {
   const [sseData, setSseData] = useState<Progress | null>(null);
 
-  const setData: (arg0: Progress) => void = (scansProgress: Progress) => {
-    setSseData(scansProgress);
-  };
-
-  const { error: sseError } = useSSE(
+  const { error: sseError } = useSSE<Progress>(
     backend_url + "/sse/scanprogress",
     "progress",
     "close",
-    setData
+    setSseData
   );
 
   if (!sseData) {
