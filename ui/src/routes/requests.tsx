@@ -2,11 +2,18 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getScannedAccounts, getScanRequests } from "../api";
 import { queryKeys } from "../api/queryKeys";
+import { formatDateTime, formatDuration } from "../format";
 import { useState } from "react";
 
 export const Route = createFileRoute("/requests")({
   component: Requests,
 });
+
+// The backend sends "-1" for a scan without an end time.
+function scanDuration(seconds: string): string {
+  const value = Number(seconds);
+  return value < 0 ? "Not finished" : formatDuration(value);
+}
 
 function Requests() {
   const [selectedAccount, setSelectedAccount] = useState("none");
@@ -88,7 +95,7 @@ function Requests() {
                   Scan start
                 </th>
                 <th scope="col" className="px-6 py-3">
-                  Processing Time (sec)
+                  Duration
                 </th>
               </tr>
             </thead>
@@ -102,9 +109,11 @@ function Requests() {
                   <td className="px-6 py-4">{scanRequest.scan_type}</td>
                   <td className="px-6 py-4">{scanRequest.scan_id}</td>
                   <td className="px-6 py-4">{scanRequest.search_filter}</td>
-                  <td className="px-6 py-4">{scanRequest.scan_start_time}</td>
                   <td className="px-6 py-4">
-                    {scanRequest.scan_duration_in_sec}
+                    {formatDateTime(scanRequest.scan_start_time)}
+                  </td>
+                  <td className="px-6 py-4">
+                    {scanDuration(scanRequest.scan_duration_in_sec)}
                   </td>
                 </tr>
               ))}

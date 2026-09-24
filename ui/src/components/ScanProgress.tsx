@@ -2,6 +2,7 @@ import { backend_url } from "../api";
 import useSSE from "../components/hooks/useSse";
 import { useState } from "react";
 import { Progress } from "../types/scans";
+import { formatDuration } from "../format";
 
 export default function ScanProgress() {
   const [sseData, setSseData] = useState<Progress | null>(null);
@@ -36,7 +37,7 @@ export default function ScanProgress() {
                 Scan Id
               </th>
               <th scope="col" className="px-6 py-3">
-                Elapsed time (sec)
+                Elapsed
               </th>
               <th scope="col" className="px-6 py-3">
                 Processed
@@ -45,7 +46,7 @@ export default function ScanProgress() {
                 Processing
               </th>
               <th scope="col" className="px-6 py-3">
-                ETA
+                Progress
               </th>
             </tr>
           </thead>
@@ -55,10 +56,14 @@ export default function ScanProgress() {
               className="odd:bg-white odd:dark:bg-gray-900 even:bg-gray-50 even:dark:bg-gray-800 border-b dark:border-gray-700 border-gray-200"
             >
               <td className="px-6 py-4">{sseData.scan_id}</td>
-              <td className="px-6 py-4">{sseData.elapsed_in_sec}</td>
+              <td className="px-6 py-4">
+                {formatDuration(sseData.elapsed_in_sec)}
+              </td>
               <td className="px-6 py-4">{sseData.processed_count}</td>
               <td className="px-6 py-4">{sseData.active_count}</td>
-              <td className="px-6 py-4">{sseData.eta_in_sec}</td>
+              <td className="px-6 py-4">
+                <ProgressBar progress={sseData} />
+              </td>
             </tr>
           </tbody>
         </table>
@@ -66,4 +71,23 @@ export default function ScanProgress() {
       </div>
     </div>
   );
+}
+
+// The backend doesn't send completion_pct yet (review item 7.6), so the bar
+// is indeterminate while messages are being fetched, and switches to a
+// percentage once one arrives. ETA is hidden for the same reason.
+function ProgressBar({ progress }: { progress: Progress }) {
+  if (progress.completion_pct > 0) {
+    return (
+      <progress
+        max={100}
+        value={progress.completion_pct}
+        aria-label={`${Math.round(progress.completion_pct)}% complete`}
+      />
+    );
+  }
+  if (progress.active_count > 0) {
+    return <progress aria-label="Scan in progress" />;
+  }
+  return <span>—</span>;
 }
