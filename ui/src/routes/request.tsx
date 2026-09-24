@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { requestScan, getAccounts } from "../api";
 import { config } from "../config";
+import { createOAuthState } from "../oauthState";
 import { ScanMetadata, ScanType } from "../types/scans";
 import ScanProgress from "../components/ScanProgress";
 
@@ -65,7 +66,11 @@ function Request() {
       await requestScanMutation(request);
     } catch (e) {
       console.log(e);
-      setErrorMessage("Failed to submit request");
+      setErrorMessage(
+        e instanceof Error
+          ? `Failed to submit request: ${e.message}`
+          : "Failed to submit request"
+      );
     }
   }
 
@@ -74,29 +79,11 @@ function Request() {
     setUsername(e.target.selectedOptions[0].text);
   }
 
-  const dateFromDatePicker = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.value === "") {
-      return "";
-    }
-    const [year, month, day] = e.target.value.split("-").map(Number);
-    const date = new Date(year, month - 1, day);
-    return date.toISOString().split("T")[0];
-  };
-
-  const dateForApi = (input: string): string => {
-    if (input === "") {
-      return "";
-    }
+  // Formats a YYYY-MM-DD date as Gmail's YYYY/MM/DD, shifted by `days`.
+  const dateForApi = (input: string, days = 0): string => {
     const [year, month, day] = input.split("-").map(Number);
-    return (
-      year +
-      "/" +
-      (month < 10 ? "0" : "") +
-      month +
-      "/" +
-      (day < 10 ? "0" : "") +
-      day
-    );
+    const date = new Date(Date.UTC(year, month - 1, day + days));
+    return date.toISOString().slice(0, 10).replace(/-/g, "/");
   };
 
   useEffect(() => {
@@ -109,13 +96,14 @@ function Request() {
       filter += "label:inbox ";
     }
     if (unread) {
-      filter += "label:unread ";
+      filter += "is:unread ";
     }
     if (startDate !== "") {
-      filter += `after:${dateForApi(startDate)}  `;
+      filter += `after:${dateForApi(startDate)} `;
     }
     if (endDate !== "") {
-      filter += `before:${dateForApi(endDate)} `;
+      // Gmail's before: is exclusive; use the next day to include endDate.
+      filter += `before:${dateForApi(endDate, 1)} `;
     }
     setQueryFilter(filter);
   };
@@ -124,13 +112,16 @@ function Request() {
     console.log("Linking Google Account");
     const spiUrl = "https://accounts.google.com/o/oauth2/v2/auth";
     const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
-    const scope = `${gmailScope}`;
-    const clientId = config.googleClientId;
-    const state = "YOUR_CUSTOM_STATE";
-    const redirectUri = `${window.location.protocol}//${window.location.host}/oauth/glink`;
-    const addtionalParams = "&access_type=offline&prompt=consent";
-    const url = `${spiUrl}?response_type=code&scope=${scope}&client_id=${clientId}&state=${state}&redirect_uri=${redirectUri}${addtionalParams}`;
-    window.location.href = url;
+    const params = new URLSearchParams({
+      response_type: "code",
+      scope: gmailScope,
+      client_id: config.googleClientId,
+      state: createOAuthState(),
+      redirect_uri: `${window.location.origin}/oauth/glink`,
+      access_type: "offline",
+      prompt: "consent",
+    });
+    window.location.href = `${spiUrl}?${params}`;
   }
 
   return (
@@ -171,7 +162,7 @@ function Request() {
         </div>
 
         <div className="justify-self-end pl-3 flex items-center">
-          <label htmlFor="filter">Inbox</label>
+          <label htmlFor="inbox">Inbox</label>
         </div>
         <div className="pl-3">
           <input
@@ -184,7 +175,7 @@ function Request() {
         </div>
 
         <div className="justify-self-end pl-3 flex items-center">
-          <label htmlFor="filter">Unread</label>
+          <label htmlFor="unread">Unread</label>
         </div>
         <div className="pl-3">
           <input
@@ -197,7 +188,7 @@ function Request() {
         </div>
 
         <div className="justify-self-end pl-3 flex items-center">
-          <label htmlFor="filter">Date range</label>
+          <label htmlFor="datepicker-range-start">Date range</label>
         </div>
         <div className="pl-3">
           <input
@@ -208,7 +199,7 @@ function Request() {
             placeholder="Select date start"
             value={startDate}
             onChange={(e) => {
-              setStartDate(dateFromDatePicker(e));
+              setStartDate(e.target.value);
             }}
           />
           <span className="mx-4 text-gray-500">to</span>
@@ -220,7 +211,7 @@ function Request() {
             placeholder="Select date end"
             value={endDate}
             onChange={(e) => {
-              setEndDate(dateFromDatePicker(e));
+              setEndDate(e.target.value);
             }}
           />
         </div>
