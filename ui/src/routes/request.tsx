@@ -79,15 +79,6 @@ function Request() {
     setUsername(e.target.selectedOptions[0].text);
   }
 
-  const dateFromDatePicker = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.value === "") {
-      return "";
-    }
-    const [year, month, day] = e.target.value.split("-").map(Number);
-    const date = new Date(year, month - 1, day);
-    return date.toISOString().split("T")[0];
-  };
-
   const dateForApi = (input: string): string => {
     if (input === "") {
       return "";
@@ -216,7 +207,7 @@ function Request() {
             placeholder="Select date start"
             value={startDate}
             onChange={(e) => {
-              setStartDate(dateFromDatePicker(e));
+              setStartDate(e.target.value);
             }}
           />
           <span className="mx-4 text-gray-500">to</span>
@@ -228,7 +219,7 @@ function Request() {
             placeholder="Select date end"
             value={endDate}
             onChange={(e) => {
-              setEndDate(dateFromDatePicker(e));
+              setEndDate(e.target.value);
             }}
           />
         </div>
