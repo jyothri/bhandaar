@@ -5,7 +5,7 @@
 - **Reviewed at:** `feature/driveagent-relocated-sidecar` (commit `7e93442`); `ui/` is identical on `main`
 - **Baseline (run after dev setup):** `tsc -b` passes · `npm run build` passes · `npm run lint` reports 5 errors, 2 warnings (all covered by items 1.7, 3.1, 3.5 and `prefer-const` in `src/api/index.ts`)
 
-Status legend: `[ ]` open · `[x]` done · `[-]` won't fix
+Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = open, parked for now (reason in the item)
 
 ## Status
 
@@ -16,6 +16,7 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix
 | Open | 38 |
 | Done | 2 |
 | Won't fix | 0 |
+| *of which Deferred* | 1 (7.6) |
 
 ### Change log
 
@@ -24,7 +25,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix
 | 2026-09-23 | `b3a81fc` | Review notes added | — |
 | 2026-09-23 | `5d4f052` | UI dependencies upgraded within current majors: 19 advisories (10 high) → 0; tailwind moved to devDependencies; renamed router devtools/plugin APIs; router plugin moved before `plugin-react-swc` (dev server refused to start otherwise); Node 22 pinned via `ui/.nvmrc` | 6.1 |
 | 2026-09-24 | `3cc9a7e` | Backend URL and Google client ID moved to Vite env vars (`src/config.ts`, `ui/.env.development`, `ui/.env.production`); dev server now uses the local backend; optional `DEV_PUBLIC_HOST` in `vite.config.ts` for serving the dev env via `<dev-endpoint>` | 2.1 |
-| 2026-09-24 | *(this doc update)* | Backend OAuth findings added as section 7; first end-to-end test via `<dev-endpoint>` (Google linking + scan 1) added 2.4, 7.5, 7.6; 1.9 corrected (`label:unread` works) | 7.1–7.6, 2.4 (new, open) |
+| 2026-09-24 | `0b69c82` | Backend OAuth findings added as section 7; first end-to-end test via `<dev-endpoint>` (Google linking + scan 1) added 2.4, 7.5, 7.6; 1.9 corrected (`label:unread` works) | 7.1–7.6, 2.4 (new, open) |
+| 2026-09-24 | *(uncommitted)* | 7.6 deferred: the total message count isn't known until Gmail listing finishes | 7.6 |
 
 ---
 
@@ -204,9 +206,15 @@ Found on 2026-09-24 while setting up and testing the local environment. These ar
   `MarkScanCompleted` and `MarkScanFailed` set `scan_end_time` and `status` but not `completed_at`. So scan 1 has `status = Completed` with a null `completed_at`, even though the log says "Scan marked as completed". `GetScan` (`:597`) reads the column back, so anything that relies on it sees no completion time.
   *Fix:* add `completed_at = current_timestamp` to both updates. If `completed_at` duplicates `scan_end_time`, drop one of the two columns.
 
-- [ ] **7.6 Progress events never carry `completion_pct` or `eta_in_sec`** — `be/collect/gmail.go:255-280`
+- [ ] **7.6 Progress events never carry `completion_pct` or `eta_in_sec`** — **Deferred** — `be/collect/gmail.go:255-280`
   `logProgress` fills in the counts and elapsed time but leaves `CompletionPct` and `EtaInSec` at zero. Even the final event after scan 1 finished reported 0%. The UI shows the ETA column (always 0), and 4.3 plans a progress bar that would need these values.
   *Fix:* compute them from processed / (processed + pending), or send an explicit `done` flag with the final event. Otherwise drop both fields and the UI's ETA column.
+  **Deferred (2026-09-24): non-trivial.** The total isn't known up front. `startGmailScan` (`:147-186`) lists messages page by page (`Messages.List(...).Q(filter)` + `NextPageToken`) while earlier pages are already being fetched, and `counter_pending` only grows as each page arrives (`:181`). The alternatives each have a catch:
+  - Gmail's `resultSizeEstimate` is too rough for filtered queries.
+  - Listing every page before fetching anything restructures the scan, costs extra quota and delays the first fetch.
+  - `Labels.Get` counts are exact, but only for a single folder with no filter.
+
+  *When revisited:* send a `listing_complete` flag. Before it's set, show "processed N, M queued". After it, processed + pending is the exact total, so a percentage (and an ETA from the processing rate) becomes meaningful. Until then, hide the always-0 ETA column in the UI (ties to 4.3).
 
 ---
 
