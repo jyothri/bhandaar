@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getScannedAccounts, getScanRequests } from "../api";
+import { queryKeys } from "../api/queryKeys";
 import { useState } from "react";
 
 export const Route = createFileRoute("/requests")({
@@ -15,14 +16,15 @@ function Requests() {
     isLoading,
     isError,
   } = useQuery({
-    queryKey: ["getScannedAccounts"],
+    queryKey: queryKeys.scannedAccounts,
     queryFn: () => getScannedAccounts(),
     staleTime: Infinity,
   });
 
   const { data: scanRequests } = useQuery({
-    queryKey: ["getScanRequests", selectedAccount],
+    queryKey: queryKeys.scanRequests(selectedAccount),
     queryFn: () => getScanRequests(selectedAccount),
+    enabled: selectedAccount !== "none",
     staleTime: Infinity,
   });
 

@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { requestScan, getAccounts } from "../api";
+import { queryKeys } from "../api/queryKeys";
 import { config } from "../config";
 import { createOAuthState } from "../oauthState";
 import { ScanMetadata, ScanType } from "../types/scans";
@@ -12,101 +13,124 @@ export const Route = createFileRoute("/request")({
   component: Request,
 });
 
+type RequestForm = {
+  clientKey: string;
+  username: string;
+  inbox: boolean;
+  unread: boolean;
+  startDate: string;
+  endDate: string;
+};
+
+const initialForm: RequestForm = {
+  clientKey: "none",
+  username: "",
+  inbox: false,
+  unread: false,
+  startDate: "",
+  endDate: "",
+};
+
+// Formats a YYYY-MM-DD date as Gmail's YYYY/MM/DD, shifted by `days`.
+function dateForApi(input: string, days = 0): string {
+  const [year, month, day] = input.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return date.toISOString().slice(0, 10).replace(/-/g, "/");
+}
+
+function buildGmailFilter({
+  inbox,
+  unread,
+  startDate,
+  endDate,
+}: RequestForm): string {
+  let filter = "";
+  if (inbox) {
+    filter += "label:inbox ";
+  }
+  if (unread) {
+    filter += "is:unread ";
+  }
+  if (startDate !== "") {
+    filter += `after:${dateForApi(startDate)} `;
+  }
+  if (endDate !== "") {
+    // Gmail's before: is exclusive; use the next day to include endDate.
+    filter += `before:${dateForApi(endDate, 1)} `;
+  }
+  return filter;
+}
+
 function Request() {
   const queryClient = useQueryClient();
 
-  const [errorMessage, setErrorMessage] = useState("");
-  const [infoMessage, setInfoMessage] = useState("");
+  // One message at a time, so a success and an error can't show together.
+  const [message, setMessage] = useState<{
+    kind: "error" | "info";
+    text: string;
+  } | null>(null);
 
-  const [scanClientKey, setScanClientKey] = useState("none");
-  const [username, setUsername] = useState("");
-  const [inbox, setInbox] = useState(false);
-  const [unread, setUnread] = useState(false);
-  const [queryFilter, setQueryFilter] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [form, setForm] = useState(initialForm);
+  const updateForm = (changes: Partial<RequestForm>) =>
+    setForm((current) => ({ ...current, ...changes }));
+  const queryFilter = buildGmailFilter(form);
 
   const { data: accounts } = useQuery({
-    queryKey: ["getAccounts"],
+    queryKey: queryKeys.accounts,
     queryFn: () => getAccounts(),
     staleTime: Infinity,
   });
 
-  const { mutateAsync: requestScanMutation } = useMutation({
+  const { mutate: requestScanMutation, isPending } = useMutation({
     mutationFn: requestScan,
     onSuccess: (resp) => {
-      queryClient.invalidateQueries({ queryKey: ["scans"] });
-      setErrorMessage("");
-      setInfoMessage("Request submitted successfully. ID: " + resp.scan_id);
+      // The new scan belongs in the history, and its account may be new there.
+      queryClient.invalidateQueries({ queryKey: queryKeys.allScanRequests });
+      queryClient.invalidateQueries({ queryKey: queryKeys.scannedAccounts });
+      setMessage({
+        kind: "info",
+        text: "Request submitted successfully. ID: " + resp.scan_id,
+      });
     },
-    onError: (error: any) => {
-      console.log("got error response for addRequest", error);
+    onError: (error) => {
+      setMessage({
+        kind: "error",
+        text: `Failed to submit request: ${error.message}`,
+      });
     },
   });
 
-  async function submitRequest() {
-    if (scanClientKey === "none") {
-      setErrorMessage("Please select an account.");
+  function submitRequest() {
+    if (form.clientKey === "none") {
+      setMessage({ kind: "error", text: "Please select an account." });
       return;
     }
     if (queryFilter === "") {
-      setErrorMessage("Cannot submit request without any filter.");
+      setMessage({
+        kind: "error",
+        text: "Cannot submit request without any filter.",
+      });
       return;
     }
     const request: ScanMetadata = {
       ScanType: ScanType.GMail,
       GMailScan: {
         Filter: queryFilter,
-        ClientKey: scanClientKey,
+        ClientKey: form.clientKey,
         RefreshToken: "",
-        Username: username,
+        Username: form.username,
       },
     };
-    try {
-      await requestScanMutation(request);
-    } catch (e) {
-      console.log(e);
-      setErrorMessage(
-        e instanceof Error
-          ? `Failed to submit request: ${e.message}`
-          : "Failed to submit request"
-      );
-    }
+    setMessage(null);
+    requestScanMutation(request);
   }
 
   function handleSelectAccount(e: React.ChangeEvent<HTMLSelectElement>) {
-    setScanClientKey(e.target.value);
-    setUsername(e.target.selectedOptions[0].text);
+    updateForm({
+      clientKey: e.target.value,
+      username: e.target.selectedOptions[0].text,
+    });
   }
-
-  // Formats a YYYY-MM-DD date as Gmail's YYYY/MM/DD, shifted by `days`.
-  const dateForApi = (input: string, days = 0): string => {
-    const [year, month, day] = input.split("-").map(Number);
-    const date = new Date(Date.UTC(year, month - 1, day + days));
-    return date.toISOString().slice(0, 10).replace(/-/g, "/");
-  };
-
-  useEffect(() => {
-    updateQueryFilter();
-  }, [inbox, unread, startDate, endDate]);
-
-  const updateQueryFilter = () => {
-    let filter = "";
-    if (inbox) {
-      filter += "label:inbox ";
-    }
-    if (unread) {
-      filter += "is:unread ";
-    }
-    if (startDate !== "") {
-      filter += `after:${dateForApi(startDate)} `;
-    }
-    if (endDate !== "") {
-      // Gmail's before: is exclusive; use the next day to include endDate.
-      filter += `before:${dateForApi(endDate, 1)} `;
-    }
-    setQueryFilter(filter);
-  };
 
   function linkGoogleAccount() {
     console.log("Linking Google Account");
@@ -148,7 +172,7 @@ function Request() {
         <div className="pl-3">
           <select
             id="scanClientKey"
-            value={scanClientKey}
+            value={form.clientKey}
             onChange={handleSelectAccount}
           >
             <option value="none">Select One</option>
@@ -169,8 +193,8 @@ function Request() {
             type="checkbox"
             id="inbox"
             name="inbox"
-            checked={inbox}
-            onChange={(e) => setInbox(e.target.checked)}
+            checked={form.inbox}
+            onChange={(e) => updateForm({ inbox: e.target.checked })}
           />
         </div>
 
@@ -182,8 +206,8 @@ function Request() {
             type="checkbox"
             id="unread"
             name="unread"
-            checked={unread}
-            onChange={(e) => setUnread(e.target.checked)}
+            checked={form.unread}
+            onChange={(e) => updateForm({ unread: e.target.checked })}
           />
         </div>
 
@@ -197,10 +221,8 @@ function Request() {
             type="date"
             className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5  dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
             placeholder="Select date start"
-            value={startDate}
-            onChange={(e) => {
-              setStartDate(e.target.value);
-            }}
+            value={form.startDate}
+            onChange={(e) => updateForm({ startDate: e.target.value })}
           />
           <span className="mx-4 text-gray-500">to</span>
           <input
@@ -209,10 +231,8 @@ function Request() {
             type="date"
             className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5  dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
             placeholder="Select date end"
-            value={endDate}
-            onChange={(e) => {
-              setEndDate(e.target.value);
-            }}
+            value={form.endDate}
+            onChange={(e) => updateForm({ endDate: e.target.value })}
           />
         </div>
         <div className="justify-self-end pl-3">
@@ -230,18 +250,20 @@ function Request() {
         </div>
         <div className="justify-self-center col-span-2 p-3">
           <input
-            className="items-center justify-center bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+            className="items-center justify-center bg-blue-500 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded"
             type="button"
-            value="Submit"
+            value={isPending ? "Submitting…" : "Submit"}
+            disabled={isPending}
             onClick={submitRequest}
           />
         </div>
       </div>
-      {errorMessage && (
-        <div className="text-red-500 h-1/5 text-lg">{errorMessage}</div>
-      )}
-      {infoMessage && (
-        <div className="text-blue-400 h-1/5 text-lg">{infoMessage}</div>
+      {message && (
+        <div
+          className={`${message.kind === "error" ? "text-red-500" : "text-blue-400"} h-1/5 text-lg`}
+        >
+          {message.text}
+        </div>
       )}
 
       <ScanProgress />
