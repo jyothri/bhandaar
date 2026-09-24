@@ -13,8 +13,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 | | Count |
 |---|---|
-| Open | 36 |
-| Done | 6 |
+| Open | 39 |
+| Done | 7 |
 | Won't fix | 0 |
 | *of which Deferred* | 1 (7.6) |
 
@@ -28,7 +28,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 | 2026-09-24 | `0b69c82` | Backend OAuth findings added as section 7; first end-to-end test via `<dev-endpoint>` (Google linking + scan 1) added 2.4, 7.5, 7.6; 1.9 corrected (`label:unread` works) | 7.1–7.6, 2.4 (new, open) |
 | 2026-09-24 | `74f7da8` | 7.6 deferred: the total message count isn't known until Gmail listing finishes | 7.6 |
 | 2026-09-24 | `841b50d` | Section 2: 2.2 confirmed fixed by `5d4f052`; 2.3 Dockerfile hardened (pinned images, `npm ci`, working `Dockerfile.dockerignore`); cache headers added to prod UI nginx config (outside repo); 2.4 applied to prod nginx (outside repo); new 2.5, 2.6 | 2.2, 2.3, 2.4 (done); 2.5, 2.6 (new, open) |
-| 2026-09-24 | *(pending)* | CI builds on PRs but pushes only from `main` (`pushImage`); UI workflow sets `enableBuildKit` | 2.5 |
+| 2026-09-24 | `c427d8a` | CI builds on PRs but pushes only from `main` (`pushImage`); UI workflow sets `enableBuildKit` | 2.5 |
+| 2026-09-24 | *(pending)* | Progress hub rewritten as a real broadcast with non-blocking sends; first backend tests (`hub_test.go`, race-clean); 2.4 confirmed in logs (streams now stay open 6–14 min); new 7.8–7.10 | 7.7 (done); 7.8, 7.9, 7.10 (new, open) |
 
 ---
 
@@ -102,7 +103,7 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 - [x] **2.4 nginx drops the progress stream every 60 seconds** — prod nginx `<prod-repo>/nginx/nginx/conf/nginx.conf`, `location /sse` in the `sm` and the dev endpoint blocks
   Seen 2026-09-24: progress-stream connections through the dev endpoint ended at exactly 1m0.01s and 1m3.0s. That's nginx's default `proxy_read_timeout` of 60s, which cuts the stream whenever no event arrives for a minute. The browser reconnects, but each drop makes the UI briefly show "Connection lost" (see 1.7). nginx may also buffer the stream and delay events.
   *Fix:* in both `/sse` locations, add `proxy_read_timeout 1h;`, `proxy_buffering off;` and `proxy_cache off;`. The `Upgrade`/`Connection` headers aren't needed for SSE. Optionally have the backend send a keep-alive comment every ~30s, so any proxy timeout stays harmless.
-  *Done on the prod box on 2026-09-24; not in this repo:* added `proxy_read_timeout 1h; proxy_buffering off; proxy_cache off;` to the `/sse` locations of both `sm.jkurapati.com` and `<dev-endpoint>`. Ran `nginx -t`, then reloaded (no restart). Backup: `<prod-repo>a backup copy`. The change is left uncommitted in `<prod-repo>` with the owner's other edits. *To confirm:* with `/request` open for over a minute, the backend log should no longer show `Connection Duration: 1m0.0…s` disconnects. The keep-alive comment is not done.
+  *Done on the prod box on 2026-09-24; not in this repo:* added `proxy_read_timeout 1h; proxy_buffering off; proxy_cache off;` to the `/sse` locations of both `sm.jkurapati.com` and `<dev-endpoint>`. Ran `nginx -t`, then reloaded (no restart). Backup: `<prod-repo>a backup copy`. The change is left uncommitted in `<prod-repo>` with the owner's other edits. *Confirmed 2026-09-24:* after the reload, dev backend logs show streams through the dev endpoint staying open for 6m57s, 13m51s and 3m20s, with no more drops at exactly 60s. The keep-alive comment is not done.
 
 - [x] **2.5 CI pushes `:latest` from pull requests** — `.github/workflows/ui-docker-image.yml`, `backend-docker-image.yml`
   Both workflows run on `pull_request` as well as `push` to `main`, and call `docker-build-push` with `addLatest: true` and pushing left on. So building any PR that touches `ui/` or `be/` overwrites `jyothri/bhandaar-ui:latest` / `jyothri/bhandaar:latest`, which production runs (`<prod-repo>/storagemanager/docker-compose.yml`). The next `docker compose pull` there would deploy unmerged code.
@@ -182,7 +183,7 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 ## Suggested order
 
-1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change): decides whether account linking is safe. Also **2.5** and **2.6** before the next image build or pull, since either can break production on its own.
+1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change): decides whether account linking is safe. Also **2.5** and **2.6** before the next image build or pull, since either can break production on its own. **7.8** (one rate-limited scan crashes the server) belongs here too; production also still needs the **7.7** fix, which reaches it with the next backend image.
 2. **1.2–1.4** OAuth URL encoding, the render-time redirect, and error handling (`fetchJson`). Fix **7.1**, **7.2** and **7.4** in the same pass, since they are on the same flow.
 3. **3.4** Query-key invalidation, plus the remaining items in section 1.
 4. **4.1** Results view (next feature).
@@ -205,7 +206,7 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 ## 7. Backend (`be/`)
 
-Found on 2026-09-24 while setting up and testing the local environment. These are outside the original `ui/` scope. Items 7.1–7.4 are in OAuth account linking (`be/web/oauth.go`) and sit on the same flow as items 1.1–1.3, so fix them together. Items 7.5–7.6 came from the first end-to-end scan (scan 1).
+Found on 2026-09-24 while setting up and testing the local environment. These are outside the original `ui/` scope. Items 7.1–7.4 are in OAuth account linking (`be/web/oauth.go`) and sit on the same flow as items 1.1–1.3, so fix them together. Items 7.5–7.6 came from the first end-to-end scan (scan 1), and 7.7–7.10 from debugging missing scan progress on the dev endpoint.
 
 - [ ] **7.1 Handler continues after the token request fails** — `be/web/oauth.go:68-73`
   When `httpClient.Do` returns an error, the handler logs it and writes a 500 but doesn't `return`. The next line calls `defer res.Body.Close()` on a nil `res`, so the handler panics, and the recovered panic surfaces as a broken response.
@@ -236,6 +237,31 @@ Found on 2026-09-24 while setting up and testing the local environment. These ar
   - `Labels.Get` counts are exact, but only for a single folder with no filter.
 
   *When revisited:* send a `listing_complete` flag. Before it's set, show "processed N, M queued". After it, processed + pending is the exact total, so a percentage (and an ETA from the processing rate) becomes meaningful. Until then, hide the always-0 ETA column in the UI (ties to 4.3).
+
+- [x] **7.7 Progress hub delivers each event to only one client, and can hang scans** — `be/notification/hub.go`, `be/web/sse.go`
+  Found 2026-09-24: the dev endpoint showed no scan progress while `sm` did. `GetSubscriber("all")` gave every `/sse/scanprogress` connection the *same* unbuffered channel, so the connections competed for events and each event reached exactly one of them. Dev had two long-lived connections (probably two tabs) and lost the race. StrictMode's extra dev-mode connection can do the same. Worse, `pushToSubscriber` was a blocking send into that shared channel, which is created by the first connection ever and never removed. So a scan running while no tab is connected blocks in `logProgress`; `startGmailScan` then blocks at `done <- true` while holding the global `lock`, and every later Gmail scan waits on that lock. Production's image has the same hub (unchanged since `ce4e286`). A read-only check on 2026-09-24 found no stuck scans there (3 Gmail scans, all finished in ≤5.3s), so the hang hadn't happened yet.
+  *Done (2026-09-24):*
+  - `Subscribe(key)` gives each connection its own buffered channel (16 updates) in a per-key set, plus an `unsubscribe` func. The SSE handler calls it on disconnect.
+  - `broadcast` does a non-blocking send to every subscriber and logs "Dropping progress update for slow subscriber" when a buffer is full. Publishing never blocks a scan.
+  - Channels are closed exactly once, by whoever removes them from the set, under the hub lock.
+  - `GetPublisher` makes a fresh channel per scan, which removes a race where a new scan could get the previous scan's already-closed channel.
+  - Removed the unused `ClosePublisher`.
+  - `sse.go`: after writing the `close` event on a closed channel, the handler now flushes and returns, instead of also sending an empty progress event and spinning on the closed channel.
+
+  *Tests:* `be/notification/hub_test.go` is the repo's first test file. It covers every subscriber receiving every update, a non-reading subscriber not blocking, no subscribers, publisher close closing only its own key's subscribers, idempotent unsubscribe, and concurrent subscribe/publish. It passes with `go test -race -count=10` (run in `golang:1.25`, since this box has no C compiler for cgo).
+  *Live check on `dev`:* two `curl` clients both received both events of scan 4. With zero clients connected, after one had connected and left (the old hang condition), scans 7 and 8 ran back to back and both completed.
+
+- [ ] **7.8 A failed message-list call crashes the whole server** — `be/collect/gmail.go:161-176`, `:98`, `:250`
+  Found 2026-09-24 while testing 7.7: three scans at once exceeded Gmail's per-user rate limit (`rateLimitExceeded`, "Units per minute per user"). Scan 5's `Messages.List` ran out of retries, and `startGmailScan` returned early without `wg.Wait()`. The caller's `defer close(messageMetaData)` then closed the channel while `getMessageInfo` goroutines from earlier pages were still running. The next `messageMetaData <- md` hit `panic: send on closed channel`, which killed the process and every other scan. This is independent of the hub change, and production has the same code.
+  *Fix:* on every early return, `wg.Wait()` before returning, or cancel in-flight fetches with a `context`. Also, don't run scans concurrently against the same Gmail quota: `lock` serialises `startGmailScan`, but the per-message fetches of a finished list call keep running.
+
+- [ ] **7.9 Later scans silently skip messages that earlier scans already saved** — `be/db/database.go:151-164`
+  `SaveMessageMetadataToDb` skips any message whose `(username, message_id, thread_id)` already exists, *across all scans*. So scan 3 (295 processed) stored 207, which is 295 minus the 88 already saved by scans 1 and 2. Scan 4 re-ran scan 3's filter and stored 0, so `/api/gmaildata/4` returns nothing. This may be intentional deduplication, but per-scan results are incomplete and depend on scan order.
+  *Decide:* either store one row per `(scan_id, message)`, so each scan's results are complete (dedupe in queries instead), or keep global dedupe and make the UI say "N new messages" instead of showing a per-scan listing.
+
+- [ ] **7.10 Every new scan shows `Completed` while it's still running** — `be/db/database.go:103-107`, `:672-674`
+  The migration adds `status VARCHAR(50) DEFAULT 'Completed'` (so existing rows count as completed), and `LogStartScan` never sets `status`. So a scan is `Completed` from the moment it's created, until it's marked `Failed`. Scan 6 never ran, because the server crashed first (7.8), but its row still says `Completed`, with no end time.
+  *Fix:* have `LogStartScan` insert `status = 'Running'` (or `'Pending'`). With 7.5 (`completed_at`), the status, end time and completion time then agree.
 
 ---
 

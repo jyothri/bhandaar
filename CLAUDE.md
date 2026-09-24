@@ -185,7 +185,7 @@ For Cloud Storage access, set `GOOGLE_APPLICATION_CREDENTIALS` to service accoun
 
 ## Important Notes
 
-- **No tests**: The codebase currently has no test files
+- **Tests**: Almost none. The only test file is `be/notification/hub_test.go` (run `go test ./notification` from `be/`; add `-race` where cgo/gcc is available, e.g. in a `golang` container)
 - **Database connection**: Configured via environment variables (see Database Setup section). Defaults: host `hdd_db`, port `5432`, user `hddb`, password empty, database `hdd_db`. For local development, set `DB_HOST=localhost` and configure credentials to match your PostgreSQL instance.
 - **Backend API URL**: Hardcoded in `ui/src/api/index.ts` as `https://sm.jkurapati.com`
 - **Known issue**: Directory size calculation differs between local scans (recursive) and cloud scans (directory-level only) - see be/README.md "Kinks" section
