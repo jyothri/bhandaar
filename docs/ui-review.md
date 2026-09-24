@@ -13,8 +13,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 | | Count |
 |---|---|
-| Open | 38 |
-| Done | 2 |
+| Open | 37 |
+| Done | 5 |
 | Won't fix | 0 |
 | *of which Deferred* | 1 (7.6) |
 
@@ -26,7 +26,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 | 2026-09-23 | `5d4f052` | UI dependencies upgraded within current majors: 19 advisories (10 high) → 0; tailwind moved to devDependencies; renamed router devtools/plugin APIs; router plugin moved before `plugin-react-swc` (dev server refused to start otherwise); Node 22 pinned via `ui/.nvmrc` | 6.1 |
 | 2026-09-24 | `3cc9a7e` | Backend URL and Google client ID moved to Vite env vars (`src/config.ts`, `ui/.env.development`, `ui/.env.production`); dev server now uses the local backend; optional `DEV_PUBLIC_HOST` in `vite.config.ts` for serving the dev env via `<dev-endpoint>` | 2.1 |
 | 2026-09-24 | `0b69c82` | Backend OAuth findings added as section 7; first end-to-end test via `<dev-endpoint>` (Google linking + scan 1) added 2.4, 7.5, 7.6; 1.9 corrected (`label:unread` works) | 7.1–7.6, 2.4 (new, open) |
-| 2026-09-24 | *(uncommitted)* | 7.6 deferred: the total message count isn't known until Gmail listing finishes | 7.6 |
+| 2026-09-24 | `74f7da8` | 7.6 deferred: the total message count isn't known until Gmail listing finishes | 7.6 |
+| 2026-09-24 | *(pending)* | Section 2: 2.2 confirmed fixed by `5d4f052`; 2.3 Dockerfile hardened (pinned images, `npm ci`, working `Dockerfile.dockerignore`); cache headers added to prod UI nginx config (outside repo); 2.4 applied to prod nginx (outside repo); new 2.5, 2.6 | 2.2, 2.3, 2.4 (done); 2.5, 2.6 (new, open) |
 
 ---
 
@@ -81,17 +82,34 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
   *Fix:* use `import.meta.env.VITE_BACKEND_URL` and `VITE_GOOGLE_CLIENT_ID`, and add a `.env.example`.
   *Done in `3cc9a7e`:* both values come from `src/config.ts`, which throws a clear error at startup if either is missing; they are typed in `src/vite-env.d.ts`. Instead of a `.env.example`, the per-mode files are committed: `ui/.env.development` (`http://localhost:8090`) and `ui/.env.production` (production URL, so the Docker build is unchanged). Neither value is secret. Local overrides go in `.env.development.local`, which is gitignored.
 
-- [ ] **2.2 Router devtools are mounted in every build** — `src/routes/__root.tsx:20`
+- [x] **2.2 Router devtools are mounted in every build** — `src/routes/__root.tsx:20`
   *Fix:* gate them behind `import.meta.env.DEV`, or lazy-load them.
+  *Done, no code change needed:* fixed by the dependency upgrade in `5d4f052`. `@tanstack/react-router-devtools` 1.167 exports a component that returns `null` unless `NODE_ENV === "development"`, and the production build drops the real implementation. Verified on 2026-09-24: none of the devtools code (e.g. the "Open TanStack Router Devtools" string from `router-devtools-core`) is in `dist/`, and the dev server still loads it.
 
-- [ ] **2.3 Dockerfile hardening** — `Dockerfile`
+- [x] **2.3 Dockerfile hardening** — `Dockerfile`
   - Pin the base image (e.g. `node:22-alpine` instead of `node:latest`).
   - Use `npm ci` instead of `npm install`.
-  - Add an nginx SPA fallback (`try_files $uri /index.html`). Without it, a browser landing directly on `/oauth/glink` or `/requests` gets a 404, and the Google OAuth redirect lands on `/oauth/glink`. **High priority.**
+  - Add an nginx SPA fallback (`try_files $uri /index.html`). Without it, a browser landing directly on `/oauth/glink` or `/requests` gets a 404, and the Google OAuth redirect lands on `/oauth/glink`. ~~**High priority.**~~ *Correction 2026-09-24:* production isn't affected today. Its `ui` container mounts `<prod-repo>/storagemanager/nginx/conf/nginx.conf` on <prod-host>, which already has `try_files $uri /index.html`. The image itself lacked the config, though.
 
-- [ ] **2.4 nginx drops the progress stream every 60 seconds** — prod nginx `<prod-repo>/nginx/nginx/conf/nginx.conf`, `location /sse` in the `sm` and the dev endpoint blocks
+  *Done:*
+  - The builder is `node:22-alpine` (matches `.nvmrc`) and uses `npm ci`. The runtime is `nginx:stable-alpine`.
+  - `ui/.dockerignore` was never used, because the build context is the repo root. It is replaced by `ui/Dockerfile.dockerignore`, which BuildKit reads for `ui/Dockerfile`. It keeps a local `ui/node_modules`, `dist` and `.env*.local` out of the image.
+  - Verified with a local build: the image builds, only `https://sm.jkurapati.com` is baked in, and it's 93 MB.
+  - **The serving config deliberately stays out of this repo.** Production's `ui` container mounts its own `nginx.conf` from the `<prod-repo>` repo over `/etc/nginx/conf.d/`, and nothing else runs this image. So a copy here would never be used, and it would drift. The image ships nginx's stock config, so a plain `docker run` returns 404 for client-side routes; mount a config if you run it standalone. A baked-in `ui/nginx.conf` was tried and removed on 2026-09-24.
+  - **Cache headers were added to production's config instead** (2026-09-24, prod `<prod-repo>/storagemanager/nginx/conf/nginx.conf`, uncommitted there, backup `a backup copy` next to `nginx/`). Hashed `/assets/*` files get `Cache-Control: public, max-age=31536000, immutable`, and a missing asset returns a real 404 instead of `index.html`. Everything else, including `index.html` and the SPA fallback, gets `no-cache`, so a new deploy is picked up. After reloading the container, `/`, `/requests` and `/oauth/glink` still return `index.html` (200).
+
+- [x] **2.4 nginx drops the progress stream every 60 seconds** — prod nginx `<prod-repo>/nginx/nginx/conf/nginx.conf`, `location /sse` in the `sm` and the dev endpoint blocks
   Seen 2026-09-24: progress-stream connections through the dev endpoint ended at exactly 1m0.01s and 1m3.0s. That's nginx's default `proxy_read_timeout` of 60s, which cuts the stream whenever no event arrives for a minute. The browser reconnects, but each drop makes the UI briefly show "Connection lost" (see 1.7). nginx may also buffer the stream and delay events.
   *Fix:* in both `/sse` locations, add `proxy_read_timeout 1h;`, `proxy_buffering off;` and `proxy_cache off;`. The `Upgrade`/`Connection` headers aren't needed for SSE. Optionally have the backend send a keep-alive comment every ~30s, so any proxy timeout stays harmless.
+  *Done on the prod box on 2026-09-24; not in this repo:* added `proxy_read_timeout 1h; proxy_buffering off; proxy_cache off;` to the `/sse` locations of both `sm.jkurapati.com` and `<dev-endpoint>`. Ran `nginx -t`, then reloaded (no restart). Backup: `<prod-repo>a backup copy`. The change is left uncommitted in `<prod-repo>` with the owner's other edits. *To confirm:* with `/request` open for over a minute, the backend log should no longer show `Connection Duration: 1m0.0…s` disconnects. The keep-alive comment is not done.
+
+- [ ] **2.5 CI pushes `:latest` from pull requests** — `.github/workflows/ui-docker-image.yml`, `backend-docker-image.yml`
+  Both workflows run on `pull_request` as well as `push` to `main`, and call `docker-build-push` with `addLatest: true` and pushing left on. So building any PR that touches `ui/` or `be/` overwrites `jyothri/bhandaar-ui:latest` / `jyothri/bhandaar:latest`, which production runs (`<prod-repo>/storagemanager/docker-compose.yml`). The next `docker compose pull` there would deploy unmerged code.
+  *Fix:* set `pushImage: ${{ github.event_name == 'push' }}` (build-only on PRs), or split the build and push jobs. Consider pinning production to a version tag instead of `:latest`.
+
+- [ ] **2.6 Production compose passes DB settings under names the backend doesn't read** — prod `<prod-repo>/storagemanager/docker-compose.yml`, `be/db/database.go:51-54`
+  Since issue #9 (`5394a8c`), the backend reads `DB_HOST`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`, but the `be` service passes `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`. A current backend image would ignore those and use the defaults (`hddb`, empty password, `hdd_db`). It works only if the production values happen to match. This is unverified: I didn't read the production values.
+  *Fix:* in the prod compose, map `DB_USER=${<prod-env-var>}`, `DB_PASSWORD=${<prod-env-var>}`, `DB_NAME=${<prod-env-var>}` (host `hdd_db` matches the default). Do it before the next backend image pull.
 
 ## 3. React / TanStack Query idioms
 
@@ -161,7 +179,7 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 ## Suggested order
 
-1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change) and **2.3** SPA fallback in nginx: these decide whether account linking is safe and works at all.
+1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change): decides whether account linking is safe. Also **2.5** and **2.6** before the next image build or pull, since either can break production on its own.
 2. **1.2–1.4** OAuth URL encoding, the render-time redirect, and error handling (`fetchJson`). Fix **7.1**, **7.2** and **7.4** in the same pass, since they are on the same flow.
 3. **3.4** Query-key invalidation, plus the remaining items in section 1.
 4. **4.1** Results view (next feature).
