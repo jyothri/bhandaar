@@ -9,8 +9,12 @@ export function createOAuthState(): string {
   return state;
 }
 
-/** True if `state` is the value this tab sent to Google. */
-export function isExpectedOAuthState(state: string): boolean {
+/**
+ * True if `state` is the value this tab sent to Google. The stored value is
+ * cleared either way, so each one can be used only once.
+ */
+export function consumeOAuthState(state: string): boolean {
   const expected = sessionStorage.getItem(OAUTH_STATE_KEY);
+  sessionStorage.removeItem(OAUTH_STATE_KEY);
   return expected !== null && state === expected;
 }
