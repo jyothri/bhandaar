@@ -5,15 +5,31 @@ import { queryKeys } from "../api/queryKeys";
 import { formatDateTime, formatDuration } from "../format";
 import { Table, Td, Tr } from "../components/Table";
 import { useState } from "react";
+import { ScanRequest } from "../types/scans";
 
 export const Route = createFileRoute("/requests")({
   component: Requests,
 });
 
+// Stop polling for a scan that has been open this long; it's stuck.
+const MAX_POLL_AGE_MS = 6 * 60 * 60 * 1000;
+
 // The backend sends "-1" for a scan without an end time.
-function scanDuration(seconds: string): string {
-  const value = Number(seconds);
-  return value < 0 ? "Not finished" : formatDuration(value);
+function scanDuration(scan: ScanRequest): string {
+  const seconds = Number(scan.scan_duration_in_sec);
+  if (scan.status === "Failed") {
+    return seconds < 0 ? "Failed" : `Failed after ${formatDuration(seconds)}`;
+  }
+  return seconds < 0 ? "Not finished" : formatDuration(seconds);
+}
+
+// A scan that may still finish: no end time, not failed, and recent.
+function mayStillFinish(scan: ScanRequest): boolean {
+  return (
+    Number(scan.scan_duration_in_sec) < 0 &&
+    scan.status !== "Failed" &&
+    Date.now() - Date.parse(scan.scan_start_time) < MAX_POLL_AGE_MS
+  );
 }
 
 function Requests() {
@@ -39,12 +55,10 @@ function Requests() {
     enabled: selectedAccount !== "none",
     // A running scan's duration changes when it finishes, so don't keep
     // this list forever: refetch on mount and focus, and poll while any
-    // scan is unfinished.
+    // scan may still finish.
     refetchOnWindowFocus: true,
     refetchInterval: (query) =>
-      query.state.data?.some((scan) => Number(scan.scan_duration_in_sec) < 0)
-        ? 10_000
-        : false,
+      query.state.data?.some(mayStillFinish) ? 10_000 : false,
   });
 
   function handleSelectAccount(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -56,7 +70,10 @@ function Requests() {
       <h2 className="p-2 justify-self-center heading font-bold text-xl">
         Request history
       </h2>
-      <div id="container" className="border-8 border-gray-200 dark:border-gray-700 gap-2">
+      <div
+        id="container"
+        className="border-8 border-gray-200 dark:border-gray-700 gap-2"
+      >
         <div className="grid grid-cols-2 ">
           {isLoading && (
             <div className="flex justify-center items-center sm:rounded-lg dark:text-gray-300">
@@ -115,7 +132,7 @@ function Requests() {
                 <Td>{scanRequest.scan_id}</Td>
                 <Td>{scanRequest.search_filter}</Td>
                 <Td>{formatDateTime(scanRequest.scan_start_time)}</Td>
-                <Td>{scanDuration(scanRequest.scan_duration_in_sec)}</Td>
+                <Td>{scanDuration(scanRequest)}</Td>
               </Tr>
             ))}
           </Table>

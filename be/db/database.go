@@ -416,11 +416,12 @@ func GetScanRequestsFromDb(accountKey string) ([]ScanRequests, error) {
 	read_row := `select distinct COALESCE(sm.name, '') as name, sm.search_filter, s.id,
 			s.scan_type,
 			scan_start_time,
-			COALESCE(EXTRACT(EPOCH FROM (scan_end_time - scan_start_time)), -1) as scan_duration_in_sec
+			COALESCE(EXTRACT(EPOCH FROM (scan_end_time - scan_start_time)), -1) as scan_duration_in_sec,
+			COALESCE(s.status, 'Completed') as status
 			from scans s
 			join scanmetadata sm on sm.scan_id = s.id
 			where sm.name = $1
-			group by sm.name, sm.search_filter, s.id, s.scan_start_time, s.scan_type
+			group by sm.name, sm.search_filter, s.id, s.scan_start_time, s.scan_type, s.status
 			order by s.id desc`
 	scanRequests := []ScanRequests{}
 	err := db.Select(&scanRequests, read_row, accountKey)
@@ -879,6 +880,7 @@ type ScanRequests struct {
 	SearchFilter      string    `db:"search_filter" json:"search_filter"`
 	ScanStartTime     time.Time `db:"scan_start_time" json:"scan_start_time"`
 	ScanDurationInSec string    `db:"scan_duration_in_sec" json:"scan_duration_in_sec"`
+	Status            string    `db:"status" json:"status"`
 }
 
 type ScanData struct {
