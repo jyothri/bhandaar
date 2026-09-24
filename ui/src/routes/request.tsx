@@ -79,20 +79,11 @@ function Request() {
     setUsername(e.target.selectedOptions[0].text);
   }
 
-  const dateForApi = (input: string): string => {
-    if (input === "") {
-      return "";
-    }
+  // Formats a YYYY-MM-DD date as Gmail's YYYY/MM/DD, shifted by `days`.
+  const dateForApi = (input: string, days = 0): string => {
     const [year, month, day] = input.split("-").map(Number);
-    return (
-      year +
-      "/" +
-      (month < 10 ? "0" : "") +
-      month +
-      "/" +
-      (day < 10 ? "0" : "") +
-      day
-    );
+    const date = new Date(Date.UTC(year, month - 1, day + days));
+    return date.toISOString().slice(0, 10).replace(/-/g, "/");
   };
 
   useEffect(() => {
@@ -105,13 +96,14 @@ function Request() {
       filter += "label:inbox ";
     }
     if (unread) {
-      filter += "label:unread ";
+      filter += "is:unread ";
     }
     if (startDate !== "") {
-      filter += `after:${dateForApi(startDate)}  `;
+      filter += `after:${dateForApi(startDate)} `;
     }
     if (endDate !== "") {
-      filter += `before:${dateForApi(endDate)} `;
+      // Gmail's before: is exclusive; use the next day to include endDate.
+      filter += `before:${dateForApi(endDate, 1)} `;
     }
     setQueryFilter(filter);
   };
