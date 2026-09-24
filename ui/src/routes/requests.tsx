@@ -36,7 +36,14 @@ function Requests() {
     queryKey: queryKeys.scanRequests(selectedAccount),
     queryFn: () => getScanRequests(selectedAccount),
     enabled: selectedAccount !== "none",
-    staleTime: Infinity,
+    // A running scan's duration changes when it finishes, so don't keep
+    // this list forever: refetch on mount and focus, and poll while any
+    // scan is unfinished.
+    refetchOnWindowFocus: true,
+    refetchInterval: (query) =>
+      query.state.data?.some((scan) => Number(scan.scan_duration_in_sec) < 0)
+        ? 10_000
+        : false,
   });
 
   function handleSelectAccount(e: React.ChangeEvent<HTMLSelectElement>) {
