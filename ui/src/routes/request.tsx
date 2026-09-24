@@ -64,8 +64,11 @@ function buildGmailFilter({
 function Request() {
   const queryClient = useQueryClient();
 
-  const [errorMessage, setErrorMessage] = useState("");
-  const [infoMessage, setInfoMessage] = useState("");
+  // One message at a time, so a success and an error can't show together.
+  const [message, setMessage] = useState<{
+    kind: "error" | "info";
+    text: string;
+  } | null>(null);
 
   const [form, setForm] = useState(initialForm);
   const updateForm = (changes: Partial<RequestForm>) =>
@@ -84,21 +87,29 @@ function Request() {
       // The new scan belongs in the history, and its account may be new there.
       queryClient.invalidateQueries({ queryKey: queryKeys.allScanRequests });
       queryClient.invalidateQueries({ queryKey: queryKeys.scannedAccounts });
-      setErrorMessage("");
-      setInfoMessage("Request submitted successfully. ID: " + resp.scan_id);
+      setMessage({
+        kind: "info",
+        text: "Request submitted successfully. ID: " + resp.scan_id,
+      });
     },
     onError: (error) => {
-      setErrorMessage(`Failed to submit request: ${error.message}`);
+      setMessage({
+        kind: "error",
+        text: `Failed to submit request: ${error.message}`,
+      });
     },
   });
 
   function submitRequest() {
     if (form.clientKey === "none") {
-      setErrorMessage("Please select an account.");
+      setMessage({ kind: "error", text: "Please select an account." });
       return;
     }
     if (queryFilter === "") {
-      setErrorMessage("Cannot submit request without any filter.");
+      setMessage({
+        kind: "error",
+        text: "Cannot submit request without any filter.",
+      });
       return;
     }
     const request: ScanMetadata = {
@@ -110,6 +121,7 @@ function Request() {
         Username: form.username,
       },
     };
+    setMessage(null);
     requestScanMutation(request);
   }
 
@@ -246,11 +258,12 @@ function Request() {
           />
         </div>
       </div>
-      {errorMessage && (
-        <div className="text-red-500 h-1/5 text-lg">{errorMessage}</div>
-      )}
-      {infoMessage && (
-        <div className="text-blue-400 h-1/5 text-lg">{infoMessage}</div>
+      {message && (
+        <div
+          className={`${message.kind === "error" ? "text-red-500" : "text-blue-400"} h-1/5 text-lg`}
+        >
+          {message.text}
+        </div>
       )}
 
       <ScanProgress />
