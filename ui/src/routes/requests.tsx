@@ -56,7 +56,7 @@ function Requests() {
       <h2 className="p-2 justify-self-center heading font-bold text-xl">
         Request history
       </h2>
-      <div id="container" className="border-8 border-gray-200 gap-2">
+      <div id="container" className="border-8 border-gray-200 dark:border-gray-700 gap-2">
         <div className="grid grid-cols-2 ">
           {isLoading && (
             <div className="flex justify-center items-center sm:rounded-lg dark:text-gray-300">

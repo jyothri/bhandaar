@@ -30,7 +30,7 @@ export default function ScanProgress() {
       <h4 className="p-2 justify-self-center font-bold text-lg">
         Scan Progress
       </h4>
-      <div id="container" className="border-2 border-gray-200 gap-2">
+      <div id="container" className="border-2 border-gray-200 dark:border-gray-700 gap-2">
         <Table
           className="w-5/8"
           headers={[

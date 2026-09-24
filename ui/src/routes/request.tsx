@@ -164,7 +164,7 @@ function Request() {
       </h2>
       <div
         id="container"
-        className="grid grid-cols-2 border-8 border-gray-200 gap-2"
+        className="grid grid-cols-2 border-8 border-gray-200 dark:border-gray-700 gap-2"
       >
         <div className="justify-self-center col-span-2">
           <button
