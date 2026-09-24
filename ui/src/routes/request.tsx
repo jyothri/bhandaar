@@ -12,6 +12,24 @@ export const Route = createFileRoute("/request")({
   component: Request,
 });
 
+type RequestForm = {
+  clientKey: string;
+  username: string;
+  inbox: boolean;
+  unread: boolean;
+  startDate: string;
+  endDate: string;
+};
+
+const initialForm: RequestForm = {
+  clientKey: "none",
+  username: "",
+  inbox: false,
+  unread: false,
+  startDate: "",
+  endDate: "",
+};
+
 // Formats a YYYY-MM-DD date as Gmail's YYYY/MM/DD, shifted by `days`.
 function dateForApi(input: string, days = 0): string {
   const [year, month, day] = input.split("-").map(Number);
@@ -19,12 +37,12 @@ function dateForApi(input: string, days = 0): string {
   return date.toISOString().slice(0, 10).replace(/-/g, "/");
 }
 
-function buildGmailFilter(
-  inbox: boolean,
-  unread: boolean,
-  startDate: string,
-  endDate: string
-): string {
+function buildGmailFilter({
+  inbox,
+  unread,
+  startDate,
+  endDate,
+}: RequestForm): string {
   let filter = "";
   if (inbox) {
     filter += "label:inbox ";
@@ -48,13 +66,10 @@ function Request() {
   const [errorMessage, setErrorMessage] = useState("");
   const [infoMessage, setInfoMessage] = useState("");
 
-  const [scanClientKey, setScanClientKey] = useState("none");
-  const [username, setUsername] = useState("");
-  const [inbox, setInbox] = useState(false);
-  const [unread, setUnread] = useState(false);
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const queryFilter = buildGmailFilter(inbox, unread, startDate, endDate);
+  const [form, setForm] = useState(initialForm);
+  const updateForm = (changes: Partial<RequestForm>) =>
+    setForm((current) => ({ ...current, ...changes }));
+  const queryFilter = buildGmailFilter(form);
 
   const { data: accounts } = useQuery({
     queryKey: ["getAccounts"],
@@ -75,7 +90,7 @@ function Request() {
   });
 
   async function submitRequest() {
-    if (scanClientKey === "none") {
+    if (form.clientKey === "none") {
       setErrorMessage("Please select an account.");
       return;
     }
@@ -87,9 +102,9 @@ function Request() {
       ScanType: ScanType.GMail,
       GMailScan: {
         Filter: queryFilter,
-        ClientKey: scanClientKey,
+        ClientKey: form.clientKey,
         RefreshToken: "",
-        Username: username,
+        Username: form.username,
       },
     };
     try {
@@ -105,8 +120,10 @@ function Request() {
   }
 
   function handleSelectAccount(e: React.ChangeEvent<HTMLSelectElement>) {
-    setScanClientKey(e.target.value);
-    setUsername(e.target.selectedOptions[0].text);
+    updateForm({
+      clientKey: e.target.value,
+      username: e.target.selectedOptions[0].text,
+    });
   }
 
   function linkGoogleAccount() {
@@ -149,7 +166,7 @@ function Request() {
         <div className="pl-3">
           <select
             id="scanClientKey"
-            value={scanClientKey}
+            value={form.clientKey}
             onChange={handleSelectAccount}
           >
             <option value="none">Select One</option>
@@ -170,8 +187,8 @@ function Request() {
             type="checkbox"
             id="inbox"
             name="inbox"
-            checked={inbox}
-            onChange={(e) => setInbox(e.target.checked)}
+            checked={form.inbox}
+            onChange={(e) => updateForm({ inbox: e.target.checked })}
           />
         </div>
 
@@ -183,8 +200,8 @@ function Request() {
             type="checkbox"
             id="unread"
             name="unread"
-            checked={unread}
-            onChange={(e) => setUnread(e.target.checked)}
+            checked={form.unread}
+            onChange={(e) => updateForm({ unread: e.target.checked })}
           />
         </div>
 
@@ -198,10 +215,8 @@ function Request() {
             type="date"
             className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5  dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
             placeholder="Select date start"
-            value={startDate}
-            onChange={(e) => {
-              setStartDate(e.target.value);
-            }}
+            value={form.startDate}
+            onChange={(e) => updateForm({ startDate: e.target.value })}
           />
           <span className="mx-4 text-gray-500">to</span>
           <input
@@ -210,10 +225,8 @@ function Request() {
             type="date"
             className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5  dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
             placeholder="Select date end"
-            value={endDate}
-            onChange={(e) => {
-              setEndDate(e.target.value);
-            }}
+            value={form.endDate}
+            onChange={(e) => updateForm({ endDate: e.target.value })}
           />
         </div>
         <div className="justify-self-end pl-3">
