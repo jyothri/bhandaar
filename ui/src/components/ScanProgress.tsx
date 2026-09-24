@@ -13,8 +13,14 @@ export default function ScanProgress() {
     setSseData
   );
 
+  // Shown even before the first update, so a stream that fails right away
+  // isn't silent.
+  const errorLine = sseError && (
+    <div className="text-red-500">Scan progress unavailable: {sseError}</div>
+  );
+
   if (!sseData) {
-    return null;
+    return errorLine || null;
   }
 
   return (
@@ -56,7 +62,7 @@ export default function ScanProgress() {
             </tr>
           </tbody>
         </table>
-        {sseError && <div>sseError: {sseError}</div>}
+        {errorLine}
       </div>
     </div>
   );
