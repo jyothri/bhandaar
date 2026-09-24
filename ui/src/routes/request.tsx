@@ -125,13 +125,16 @@ function Request() {
     console.log("Linking Google Account");
     const spiUrl = "https://accounts.google.com/o/oauth2/v2/auth";
     const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
-    const scope = `${gmailScope}`;
-    const clientId = config.googleClientId;
-    const state = createOAuthState();
-    const redirectUri = `${window.location.protocol}//${window.location.host}/oauth/glink`;
-    const addtionalParams = "&access_type=offline&prompt=consent";
-    const url = `${spiUrl}?response_type=code&scope=${scope}&client_id=${clientId}&state=${state}&redirect_uri=${redirectUri}${addtionalParams}`;
-    window.location.href = url;
+    const params = new URLSearchParams({
+      response_type: "code",
+      scope: gmailScope,
+      client_id: config.googleClientId,
+      state: createOAuthState(),
+      redirect_uri: `${window.location.origin}/oauth/glink`,
+      access_type: "offline",
+      prompt: "consent",
+    });
+    window.location.href = `${spiUrl}?${params}`;
   }
 
   return (

@@ -33,9 +33,13 @@ function RouteComponent() {
       </div>
     );
   }
-  const redirectUri = `${window.location.protocol}//${window.location.host}/oauth/glink`;
-  const url = `${backend_url}/api/glink?code=${code}&redirectUri=${redirectUri}&state=${state}&scope=${scope}`;
-  window.location.href = url;
+  const params = new URLSearchParams({
+    code,
+    redirectUri: `${window.location.origin}/oauth/glink`,
+    state,
+    scope,
+  });
+  window.location.href = `${backend_url}/api/glink?${params}`;
   return (
     <div>
       <p>Processing...</p>
