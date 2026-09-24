@@ -1,0 +1,8 @@
+# Used by BuildKit for ui/Dockerfile. The build context is the repo root,
+# so paths are relative to it (a plain ui/.dockerignore would be ignored).
+**
+!ui/
+ui/node_modules
+ui/dist
+ui/.env*.local
+ui/npm-debug.log
