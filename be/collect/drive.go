@@ -56,7 +56,7 @@ func CloudDrive(driveScan GDriveScan) (int, error) {
 	// Get Drive service
 	driveService, err := getDriveService(driveScan.RefreshToken)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get drive service for scan %d: %w", scanId, err)
+		return failStart(scanId, fmt.Errorf("failed to get drive service for scan %d: %w", scanId, err))
 	}
 
 	// Save metadata in background

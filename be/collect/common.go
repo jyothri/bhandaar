@@ -6,10 +6,18 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/jyothri/hdd/db"
 	"google.golang.org/api/googleapi"
 )
 
 var lock sync.RWMutex
+
+// failStart marks a scan that was logged but couldn't start as failed, so
+// it doesn't stay open forever, and returns err for the caller.
+func failStart(scanId int, err error) (int, error) {
+	db.MarkScanFailed(scanId, err.Error())
+	return 0, err
+}
 
 func isRetryError(err error) bool {
 	// Try Google API error
