@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { requestScan, getAccounts } from "../api";
 import { config } from "../config";
+import { createOAuthState } from "../oauthState";
 import { ScanMetadata, ScanType } from "../types/scans";
 import ScanProgress from "../components/ScanProgress";
 
@@ -126,7 +127,7 @@ function Request() {
     const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
     const scope = `${gmailScope}`;
     const clientId = config.googleClientId;
-    const state = "YOUR_CUSTOM_STATE";
+    const state = createOAuthState();
     const redirectUri = `${window.location.protocol}//${window.location.host}/oauth/glink`;
     const addtionalParams = "&access_type=offline&prompt=consent";
     const url = `${spiUrl}?response_type=code&scope=${scope}&client_id=${clientId}&state=${state}&redirect_uri=${redirectUri}${addtionalParams}`;

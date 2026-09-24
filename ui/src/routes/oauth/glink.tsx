@@ -1,5 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { backend_url } from "../../api";
+import { isExpectedOAuthState } from "../../oauthState";
 
 type oauthCode = {
   code: string;
@@ -21,6 +22,17 @@ export const Route = createFileRoute("/oauth/glink")({
 
 function RouteComponent() {
   const { code, state, scope } = Route.useSearch();
+  if (!isExpectedOAuthState(state)) {
+    return (
+      <div>
+        <p>
+          Account linking failed: the response from Google doesn't match this
+          browser session.
+        </p>
+        <Link to="/request">Try again</Link>
+      </div>
+    );
+  }
   const redirectUri = `${window.location.protocol}//${window.location.host}/oauth/glink`;
   const url = `${backend_url}/api/glink?code=${code}&redirectUri=${redirectUri}&state=${state}&scope=${scope}`;
   window.location.href = url;
