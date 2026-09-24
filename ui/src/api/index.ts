@@ -1,7 +1,8 @@
+import { config } from "../config";
 import { Account } from "../types/accounts";
 import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 
-export const backend_url = "https://sm.jkurapati.com";
+export const backend_url = config.backendUrl;
 
 /**
  * Function to submit scan request.

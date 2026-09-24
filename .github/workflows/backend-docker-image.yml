@@ -4,14 +4,30 @@ on:
   push:
     branches: ["main"]
     paths:
-      - "**.go"
+      - "be/**"
+      - ".github/workflows/backend-docker-image.yml"
   pull_request:
     branches: ["main"]
     paths:
-      - "**.go"
+      - "be/**"
+      - ".github/workflows/backend-docker-image.yml"
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: be/go.mod
+          cache-dependency-path: be/go.sum
+      - name: Test (with race detector)
+        run: go test -race ./...
+        working-directory: be
+
   backend:
+    # Don't build or push an image whose tests fail.
+    needs: test
     runs-on: ubuntu-latest
 
     steps:
@@ -21,10 +37,13 @@ jobs:
         run: echo "REPO=${GITHUB_REPOSITORY,,}" >>${GITHUB_ENV}
 
       - uses: mr-smithers-excellent/docker-build-push@v6
-        name: Build & push Docker image to Dockerhub
+        name: Build Docker image (push to Docker Hub only on main)
         with:
           image: ${{ env.REPO }}
           addLatest: true
+          # PRs build only; pushing :latest from a PR would ship unmerged code
+          # to production, which runs :latest.
+          pushImage: ${{ github.event_name == 'push' }}
           registry: docker.io
           dockerfile: ./be/build/Dockerfile
           username: ${{ secrets.DOCKER_USERNAME }}

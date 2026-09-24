@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { requestScan, getAccounts } from "../api";
+import { config } from "../config";
 import { ScanMetadata, ScanType } from "../types/scans";
 import ScanProgress from "../components/ScanProgress";
 
@@ -124,8 +125,7 @@ function Request() {
     const spiUrl = "https://accounts.google.com/o/oauth2/v2/auth";
     const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
     const scope = `${gmailScope}`;
-    const clientId =
-      "112106509963-uluv01bacctqgd7mr003u7r1lpq3899n.apps.googleusercontent.com";
+    const clientId = config.googleClientId;
     const state = "YOUR_CUSTOM_STATE";
     const redirectUri = `${window.location.protocol}//${window.location.host}/oauth/glink`;
     const addtionalParams = "&access_type=offline&prompt=consent";
