@@ -1,19 +1,25 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
-	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/jyothri/hdd/collect"
 	"github.com/jyothri/hdd/constants"
 	"github.com/jyothri/hdd/db"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 )
+
+// tokenEndpoint is where authorization codes are exchanged; tests point it
+// at a fake server.
+var tokenEndpoint = google.Endpoint
 
 func oauth(r *mux.Router) {
 	// OAuth routes with smaller body limit (16 KB)
@@ -23,17 +29,12 @@ func oauth(r *mux.Router) {
 }
 
 func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
-	const googleTokenUrl = "https://oauth2.googleapis.com/token"
-	const grantType = "authorization_code"
 	var redirectUri = r.FormValue("redirectUri")
 
 	if redirectUri == "" {
 		http.Error(w, "redirectUri not found in request", http.StatusBadRequest)
 		return
 	}
-
-	var clientId = constants.OauthClientId
-	var clientSecret = constants.OauthClientSecret
 
 	// Retrieve authZ code from query params.
 	err := r.ParseForm()
@@ -47,47 +48,45 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := r.FormValue("code")
-
-	// Exchange authZ for refresh token.
-	reqURL := fmt.Sprintf("%s?client_id=%s&client_secret=%s&code=%s&grant_type=%s&redirect_uri=%s", googleTokenUrl, clientId, clientSecret, code, grantType, redirectUri)
-	req, err := http.NewRequest(http.MethodPost, reqURL, nil)
-	if err != nil {
-		slog.Error("Failed to create HTTP request", "error", err)
-		http.Error(w, "Failed to create OAuth request", http.StatusBadRequest)
-		return
-	}
-	// We set this header since we want the response
-	// as JSON
-	req.Header.Set("accept", "application/json")
-
-	// We will be using `httpClient` to make external HTTP requests later in our code
-	httpClient := http.Client{}
-
-	// Send out the HTTP request
-	res, err := httpClient.Do(req)
-	if err != nil {
-		slog.Warn(fmt.Sprintf("could not send HTTP request: %v", err))
-		w.WriteHeader(http.StatusInternalServerError)
-	}
-	defer res.Body.Close()
-
-	// Parse the request body into the `OAuthAccessResponse` struct
-	var t OAuthAccessResponse
-	if err := json.NewDecoder(res.Body).Decode(&t); err != nil {
-		slog.Warn(fmt.Sprintf("could not parse JSON response: %v", err))
-		http.Error(w, "Invalid response from Google's token endpoint", http.StatusBadGateway)
+	if code == "" {
+		http.Error(w, "code not found in request", http.StatusBadRequest)
 		return
 	}
 
-	if t.AccessToken == "" || t.RefreshToken == "" {
-		slog.Warn(fmt.Sprintf("Access or Refresh token could not be obtained. JSON resp: %v raw resp:%v.\n", t, res.Body))
+	// Exchange the authorization code for tokens. oauth2 sends the fields
+	// form-encoded in the POST body, keeping the client secret out of URLs
+	// and logs, and returns an error for any non-2xx response.
+	config := &oauth2.Config{
+		ClientID:     constants.OauthClientId,
+		ClientSecret: constants.OauthClientSecret,
+		Endpoint:     tokenEndpoint,
+		RedirectURL:  redirectUri,
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	token, err := config.Exchange(ctx, code)
+	if err != nil {
+		slog.Warn("OAuth token exchange failed", "error", err)
+		http.Error(w, "Failed to exchange the authorization code with Google", http.StatusBadGateway)
+		return
+	}
+
+	if token.AccessToken == "" || token.RefreshToken == "" {
+		slog.Warn("Access or refresh token missing from token response",
+			"has_access_token", token.AccessToken != "",
+			"has_refresh_token", token.RefreshToken != "")
 		http.Error(w, "Access or Refresh token could not be obtained", http.StatusBadRequest)
 		return
+	}
+	scope, _ := token.Extra("scope").(string)
+	var expiresIn int16
+	if !token.Expiry.IsZero() {
+		expiresIn = int16(time.Until(token.Expiry).Seconds())
 	}
 
 	client_key := generateRandomString(12)
 
-	email, err := collect.GetIdentity(t.RefreshToken)
+	email, err := collect.GetIdentity(token.RefreshToken)
 	if err != nil {
 		slog.Error("Failed to get user identity",
 			"error", err)
@@ -97,7 +96,7 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 
 	display_name := getDisplayName(email, client_key)
 
-	err = db.SaveOAuthToken(t.AccessToken, t.RefreshToken, display_name, client_key, t.Scope, t.ExpiresIn, t.TokenType)
+	err = db.SaveOAuthToken(token.AccessToken, token.RefreshToken, display_name, client_key, scope, expiresIn, token.TokenType)
 	if err != nil {
 		slog.Error("Failed to save OAuth token",
 			"client_key", client_key,
@@ -118,14 +117,6 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 	returnUrl := u.Scheme + "://" + u.Host + "/request"
 	w.Header().Set("Location", returnUrl)
 	w.WriteHeader(http.StatusFound)
-}
-
-type OAuthAccessResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	Scope        string `json:"scope"`
-	TokenType    string `json:"token_type"`
-	ExpiresIn    int16  `json:"expires_in"`
 }
 
 func getDisplayName(email string, client_key string) string {
