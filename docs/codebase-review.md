@@ -33,7 +33,7 @@ This work was first raised as one PR (#6). After review it was split into focuse
 | 2026-09-24 | production deploy | Backend and UI images built from `main` after #7–#9 deployed; `DB_*` connection and schema migration confirmed; rollback images kept until 2027-09-24 | 2.2, 2.6, 7.7, 7.8, 7.11–7.14 live |
 | 2026-09-24 | #12 | UI bugs and security: random OAuth `state` checked on the callback; OAuth URLs built with `URLSearchParams`; callback redirect moved to `beforeLoad`; shared `fetchJson`; SSE hook fixes; date and Gmail filter fixes; label targets | 1.1–1.10 |
 | 2026-09-24 | #13 | React / TanStack Query idioms: Gmail filter computed during render; request form in one state object; `enabled` instead of the `"none"` sentinel; query keys in one place, with invalidation of the real ones; mutation errors handled once and Submit disabled while pending; one message at a time; `Header` inside the router. `npm run lint` is clean | 3.1–3.6, 3.8 |
-| 2026-09-24 | #14 | Durations, start times and an indeterminate progress bar; backend returns scan times as UTC instants; empty, loading and error states in history; th cells and typo; shared `Table` / `Input`; dark mode for body and form; favicon and package name; no `console.log`; `typecheck` script and a CI `check` job. Review follow-ups: cancelled consent message, `replace` on the callback redirect, stream errors before the first update, history refetch until scans finish, reversed dates rejected, no trailing space in the filter | 4.3–4.6, 5.2, 5.3; 1.11–1.14, 3.9, 5.5 |
+| 2026-09-24 | #14 | Durations, start times and an indeterminate progress bar; backend returns scan times as UTC instants; empty, loading and error states in history; th cells and typo; shared `Table` / `Input`; dark mode for body and form; favicon and package name; no `console.log`; `typecheck` script and a CI `check` job. Review follow-ups: cancelled consent message, `replace` on the callback redirect, stream errors before the first update, history refetch until scans finish, reversed dates rejected, no trailing space in the filter. PR review: `scans` time columns migrated to `timestamptz`; scans that can't start, or are left open by a restart, marked Failed; history shows status and polls only for recent open scans | 4.3–4.6, 5.2, 5.3; 1.11–1.14, 3.9, 5.5 |
 
 ---
 
@@ -204,7 +204,11 @@ Raised in review after #13; all done in #14:
 
 - [x] **3.9 Request history never picks up a finished scan** — `src/routes/requests.tsx`
   Raised in review after #13. `scanRequests` kept `staleTime: Infinity`, so after the one fetch triggered by submitting, a running scan stayed "not finished" until a full reload.
-  *Done in #14:* default `staleTime` (refetch on mount), `refetchOnWindowFocus: true` for this query (it's off globally in `App.tsx`), and a 10-second `refetchInterval` while any listed scan has no end time. A scan that never gets an end time (e.g. scan 6, see 7.10) keeps the page polling while it's open.
+  *Done in #14:* default `staleTime` (refetch on mount), `refetchOnWindowFocus: true` for this query (it's off globally in `App.tsx`), and a 10-second `refetchInterval` while any listed scan has no end time. *PR #14 review:* scans that never get an end time kept the page polling. Fixed in the same PR:
+  - The backend marks a scan Failed when `Gmail()`, `CloudDrive()` or `Photos()` returns early after `LogStartScan`.
+  - At startup, it marks scans that are still open Failed ("Interrupted: the server stopped before the scan finished"), leaving their end time null.
+  - The history API includes `status`, and the Duration column reads "Failed" or "Failed after m:ss".
+  - Polling runs only while a scan has no end time, isn't Failed, and started less than 6 hours ago.
 
 ## 4. UI / UX
 
@@ -222,6 +226,7 @@ Raised in review after #13; all done in #14:
   - Elapsed time and history durations are m:ss (h:mm:ss from an hour up), via `src/format.ts`. A scan with no end time reads "Not finished" instead of `-1`.
   - The always-0 ETA column became a Progress column: an indeterminate `<progress>` while messages are being fetched, and a percentage once `completion_pct` is non-zero (7.6).
   - **Found along the way:** the history API sent Pacific wall-clock time labelled as UTC. `GetScanRequestsFromDb` and `GetScansFromDb` converted with `AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles'`, so a scan started at 16:52 UTC came back as `09:52Z`, and `GetScansFromDb` mixed that with an unconverted `scan_end_time`. Both now use `AT TIME ZONE 'UTC'` alone and return the real instant, which the UI formats in the viewer's time zone. Verified against the local database: scan 10 (16:52 UTC) shows as 9:52 AM in a Pacific-time browser.
+  - *PR #14 review:* reading the columns `AT TIME ZONE 'UTC'` still assumed the database session's zone was UTC, because they were `TIMESTAMP` filled with `current_timestamp`. A startup migration now converts `created_on`, `scan_start_time`, `scan_end_time` and `completed_at` to `timestamptz` (`USING col AT TIME ZONE 'UTC'`), and the queries read them as they are. It only converts columns that are still `timestamp`, so it runs once. Verified on a copy of the local database: with the database's zone set to `America/New_York`, scan 10 comes back as `12:52-04:00`, the same instant. **Before deploying,** run `SHOW timezone` on the production database: the migration reads existing values as UTC, which is only right if that zone is UTC. Other tables' `TIMESTAMP` columns (e.g. `messagemetadata.date`) are unchanged.
 
 - [x] **4.4 Missing empty and error states** — `src/routes/requests.tsx`
   Show "No scans for this account" when the list is empty, and surface errors from the scan-requests query.
@@ -350,6 +355,7 @@ Found on 2026-09-24 while setting up and testing the local environment. These ar
   **Decision (2026-09-24): keep global dedupe.** `messagemetadata` holds each message once per user, attributed to the scan that first saw it. A scan's `scan_id` rows are the messages *new* in that scan, not everything it matched. Anything showing per-scan results (e.g. the results view in 4.1) should label them "new messages" and use the scan's processed count for the total matched.
 
 - [ ] **7.10 Every new scan shows `Completed` while it's still running** — `be/db/database.go:103-107`, `:672-674`
+  *Partly addressed in #14:* scans that fail to start, and scans left open by a crash or restart (like scan 6), are now marked `Failed`. A running scan still reads `Completed` until it ends.
   The migration adds `status VARCHAR(50) DEFAULT 'Completed'` (so existing rows count as completed), and `LogStartScan` never sets `status`. So a scan is `Completed` from the moment it's created, until it's marked `Failed`. Scan 6 never ran, because the server crashed first (7.8), but its row still says `Completed`, with no end time.
   *Fix:* have `LogStartScan` insert `status = 'Running'` (or `'Pending'`). With 7.5 (`completed_at`), the status, end time and completion time then agree.
 
