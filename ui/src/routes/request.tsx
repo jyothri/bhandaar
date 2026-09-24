@@ -66,7 +66,11 @@ function Request() {
       await requestScanMutation(request);
     } catch (e) {
       console.log(e);
-      setErrorMessage("Failed to submit request");
+      setErrorMessage(
+        e instanceof Error
+          ? `Failed to submit request: ${e.message}`
+          : "Failed to submit request"
+      );
     }
   }
 

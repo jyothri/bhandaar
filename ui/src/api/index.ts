@@ -5,12 +5,49 @@ import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 export const backend_url = config.backendUrl;
 
 /**
+ * Fetches a backend path and parses the JSON response. Throws an Error with
+ * the backend's message if the response isn't 2xx.
+ */
+async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(backend_url + path, init);
+  if (!response.ok) {
+    throw new Error(await errorMessage(response));
+  }
+  return response.json();
+}
+
+/**
+ * The backend replies with plain text (http.Error) or JSON of the form
+ * { error: { message } }. Anything else, e.g. a proxy's HTML error page,
+ * falls back to the HTTP status.
+ */
+async function errorMessage(response: Response): Promise<string> {
+  const status = `${response.status} ${response.statusText}`.trim();
+  const contentType = response.headers.get("Content-Type") ?? "";
+  const text = (await response.text()).trim();
+  if (contentType.includes("application/json")) {
+    try {
+      const { error } = JSON.parse(text);
+      const message = typeof error === "string" ? error : error?.message;
+      if (message) {
+        return message;
+      }
+    } catch {
+      // Fall through to the status.
+    }
+  } else if (contentType.includes("text/plain") && text) {
+    return text;
+  }
+  return status;
+}
+
+/**
  * Function to submit scan request.
  */
-export const requestScan = async (
+export const requestScan = (
   scanData: ScanMetadata
-): Promise<RequestScanResponse> => {
-  const response = await fetch(backend_url + "/api/scans", {
+): Promise<RequestScanResponse> =>
+  fetchJson("/api/scans", {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -18,31 +55,18 @@ export const requestScan = async (
     },
     body: JSON.stringify(scanData),
   });
-  const content = await response.json();
-  console.log("response from posting content", content);
-  if (content.error != null) {
-    throw new Error(content);
-  }
-  return content;
-};
 
 /**
  * Function to get list of accounts.
  */
-export const getAccounts = async (): Promise<Account[]> => {
-  let response = await fetch(backend_url + "/api/accounts");
-  let data: Account[] = await response.json();
-  return data;
-};
+export const getAccounts = (): Promise<Account[]> =>
+  fetchJson("/api/accounts");
 
 /**
  * Function to get accounts for which requests were submitted.
  */
-export const getScannedAccounts = async (): Promise<string[]> => {
-  const response = await fetch(backend_url + "/api/scans/accounts");
-  let data: string[] = await response.json();
-  return data;
-};
+export const getScannedAccounts = (): Promise<string[]> =>
+  fetchJson("/api/scans/accounts");
 
 /**
  * Function to get details for selected account.
@@ -53,12 +77,5 @@ export const getScanRequests = async (
   if (accountKey === "none") {
     return [];
   }
-  const response = await fetch(
-    backend_url + "/api/scans/requests/" + accountKey
-  );
-  const content = await response.json();
-  if (content.error != null) {
-    throw new Error(content);
-  }
-  return content;
+  return fetchJson("/api/scans/requests/" + accountKey);
 };
