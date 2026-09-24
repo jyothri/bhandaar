@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 // DBConfig holds database configuration parameters
@@ -388,7 +388,7 @@ func GetScanRequestsFromDb(accountKey string) ([]ScanRequests, error) {
 	}
 	read_row := `select distinct COALESCE(sm.name, '') as name, sm.search_filter, s.id,
 			s.scan_type,
-			scan_start_time AT TIME ZONE 'UTC' as scan_start_time,
+			scan_start_time,
 			COALESCE(EXTRACT(EPOCH FROM (scan_end_time - scan_start_time)), -1) as scan_duration_in_sec
 			from scans s
 			join scanmetadata sm on sm.scan_id = s.id
@@ -409,8 +409,8 @@ func GetScansFromDb(pageNo int) ([]Scan, int, error) {
 	count_rows := `select count(*) from scans`
 	read_row :=
 		`select S.id, scan_type,
-		 created_on AT TIME ZONE 'UTC' as created_on,
-		 scan_start_time AT TIME ZONE 'UTC' as scan_start_time,
+		 created_on,
+		 scan_start_time,
 		 scan_end_time, CONCAT(search_path, search_filter) as metadata,
 		 date_trunc('millisecond', COALESCE(scan_end_time,current_timestamp)-scan_start_time) as duration
 	   from scans S LEFT JOIN scanmetadata SM
@@ -615,11 +615,15 @@ func migrateDB() error {
 		return fmt.Errorf("failed to check for version table: %w", err)
 	}
 	if count == 0 {
-		return migrateDBv0()
+		if err := migrateDBv0(); err != nil {
+			return err
+		}
+	} else if err := migrateAddStatusColumn(); err != nil {
+		// Add migration for status column if needed
+		return err
 	}
 
-	// Add migration for status column if needed
-	return migrateAddStatusColumn()
+	return migrateScanTimesToTimestamptz()
 }
 
 func migrateDBv0() error {
@@ -672,7 +676,7 @@ func migrateAddStatusColumn() error {
 		alter_table := `ALTER TABLE scans
 			ADD COLUMN status VARCHAR(50) DEFAULT 'Completed',
 			ADD COLUMN error_msg TEXT,
-			ADD COLUMN completed_at TIMESTAMP`
+			ADD COLUMN completed_at TIMESTAMPTZ`
 
 		_, err = db.Exec(alter_table)
 		if err != nil {
@@ -684,12 +688,42 @@ func migrateAddStatusColumn() error {
 	return nil
 }
 
+// migrateScanTimesToTimestamptz converts the scans table's time columns from
+// timestamp to timestamptz. They are filled with current_timestamp, so as
+// timestamp they held wall-clock time in the database session's time zone,
+// and reading them as instants depended on that zone. The conversion reads
+// the existing values as UTC, the default of the Postgres image this app
+// runs with. As timestamptz they are instants, whatever the server's zone.
+func migrateScanTimesToTimestamptz() error {
+	var columns []string
+	find_columns := `SELECT column_name FROM information_schema.columns
+		WHERE table_name = 'scans' AND data_type = 'timestamp without time zone'
+		ORDER BY ordinal_position`
+	if err := db.Select(&columns, find_columns); err != nil {
+		return fmt.Errorf("failed to find timestamp columns in scans table: %w", err)
+	}
+	if len(columns) == 0 {
+		return nil
+	}
+
+	alters := make([]string, len(columns))
+	for i, column := range columns {
+		quoted := pq.QuoteIdentifier(column)
+		alters[i] = fmt.Sprintf("ALTER COLUMN %s TYPE timestamptz USING %s AT TIME ZONE 'UTC'", quoted, quoted)
+	}
+	if _, err := db.Exec("ALTER TABLE scans " + strings.Join(alters, ", ")); err != nil {
+		return fmt.Errorf("failed to convert scans time columns to timestamptz: %w", err)
+	}
+	slog.Info("Converted scans time columns to timestamptz", "columns", columns)
+	return nil
+}
+
 const create_scans_table string = `CREATE TABLE IF NOT EXISTS scans (
 		  id serial PRIMARY KEY,
 		  scan_type VARCHAR (50) NOT NULL,
-		  created_on TIMESTAMP NOT NULL,
-		  scan_start_time TIMESTAMP NOT NULL,
-		  scan_end_time TIMESTAMP
+		  created_on TIMESTAMPTZ NOT NULL,
+		  scan_start_time TIMESTAMPTZ NOT NULL,
+		  scan_end_time TIMESTAMPTZ
 		)`
 
 const create_scandata_table string = `CREATE TABLE IF NOT EXISTS scandata (
