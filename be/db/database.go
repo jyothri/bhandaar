@@ -89,6 +89,33 @@ func SetupDatabase() error {
 		return fmt.Errorf("failed to run database migrations: %w", err)
 	}
 
+	if err := markInterruptedScans(); err != nil {
+		return fmt.Errorf("failed to mark interrupted scans: %w", err)
+	}
+
+	return nil
+}
+
+// markInterruptedScans marks scans that are still open at startup as failed.
+// Scans run inside this process, so a scan without an end time when the
+// server starts was cut off by a crash or restart and will never finish.
+// Its end time stays null, since when it stopped isn't known.
+func markInterruptedScans() error {
+	update_rows := `update scans
+		set status = 'Failed',
+			error_msg = 'Interrupted: the server stopped before the scan finished'
+		where scan_end_time is null and status is distinct from 'Failed'`
+	res, err := db.Exec(update_rows)
+	if err != nil {
+		return err
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		slog.Warn("Marked interrupted scans as failed", "count", count)
+	}
 	return nil
 }
 
