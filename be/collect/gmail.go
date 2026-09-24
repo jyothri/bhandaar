@@ -269,6 +269,7 @@ func logProgress(scanId int, ClientKey string, start time.Time, done <-chan bool
 				ScanId:         scanId,
 				ClientKey:      ClientKey,
 				ElapsedInSec:   int(time.Since(start).Seconds()),
+				Status:         notification.StatusRunning,
 			}
 			notificationChannel <- progress
 			return
@@ -279,6 +280,7 @@ func logProgress(scanId int, ClientKey string, start time.Time, done <-chan bool
 				ScanId:         scanId,
 				ClientKey:      ClientKey,
 				ElapsedInSec:   int(time.Since(start).Seconds()),
+				Status:         notification.StatusRunning,
 			}
 			notificationChannel <- progress
 		}

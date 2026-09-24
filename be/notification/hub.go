@@ -152,6 +152,13 @@ func send(ch chan Progress, progress Progress) {
 	}
 }
 
+// Scan statuses, matching the scans.status column.
+const (
+	StatusRunning   = "Running"
+	StatusCompleted = "Completed"
+	StatusFailed    = "Failed"
+)
+
 type Progress struct {
 	ClientKey      string  `json:"client_key"`
 	ProcessedCount int     `json:"processed_count"`
@@ -160,6 +167,18 @@ type Progress struct {
 	ElapsedInSec   int     `json:"elapsed_in_sec"`
 	EtaInSec       int     `json:"eta_in_sec"`
 	ScanId         int     `json:"scan_id"`
+	// Status is Running while the scan runs. Each scan ends with one event
+	// whose Status is Completed or Failed; only those carry Error, and they
+	// carry no counts (the last Running event has them).
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+// PublishScanEnd sends a scan's final event, with status Completed or
+// Failed, to every all-scans subscriber. It never blocks, and needs no
+// publisher channel, so it works for scans that published no progress.
+func PublishScanEnd(scanId int, status string, errMsg string) {
+	broadcast("", Progress{ScanId: scanId, Status: status, Error: errMsg})
 }
 
 // Helper methods for monitoring and management

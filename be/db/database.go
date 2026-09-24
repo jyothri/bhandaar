@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/jyothri/hdd/notification"
 	"github.com/lib/pq"
 )
 
@@ -593,6 +594,7 @@ func MarkScanCompleted(scanId int) error {
 			"actual", count)
 	}
 	slog.Info("Scan marked as completed", "scan_id", scanId)
+	notification.PublishScanEnd(scanId, notification.StatusCompleted, "")
 	return nil
 }
 
@@ -616,6 +618,7 @@ func MarkScanFailed(scanId int, errMsg string) error {
 			"actual", count)
 	}
 	slog.Error("Scan marked as failed", "scan_id", scanId, "error", errMsg)
+	notification.PublishScanEnd(scanId, notification.StatusFailed, errMsg)
 	return nil
 }
 
