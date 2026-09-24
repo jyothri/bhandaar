@@ -26,21 +26,21 @@ export default function ScanProgress() {
         <table className="w-5/8 mt-3 text-sm text-left rtl:text-right text-gray-500 dark:text-gray-400 justify-self-center">
           <thead>
             <tr className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
-              <td scope="col" className="px-6 py-3">
+              <th scope="col" className="px-6 py-3">
                 Scan Id
-              </td>
-              <td scope="col" className="px-6 py-3">
-                Elapsted time (sec)
-              </td>
-              <td scope="col" className="px-6 py-3">
+              </th>
+              <th scope="col" className="px-6 py-3">
+                Elapsed time (sec)
+              </th>
+              <th scope="col" className="px-6 py-3">
                 Processed
-              </td>
-              <td scope="col" className="px-6 py-3">
+              </th>
+              <th scope="col" className="px-6 py-3">
                 Processing
-              </td>
-              <td scope="col" className="px-6 py-3">
+              </th>
+              <th scope="col" className="px-6 py-3">
                 ETA
-              </td>
+              </th>
             </tr>
           </thead>
           <tbody className="">
