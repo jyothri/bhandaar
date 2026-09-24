@@ -22,7 +22,8 @@ func sse(r *mux.Router) {
 
 func scanProgressHandler(w http.ResponseWriter, r *http.Request) {
 	setHeaders(w)
-	subscriber := notification.GetSubscriber(notification.NOTIFICATION_ALL)
+	subscriber, unsubscribe := notification.SubscribeAll()
+	defer unsubscribe()
 	rc := http.NewResponseController(w)
 	clientGone := r.Context().Done()
 	slog.Info("[scan events] Client Connected.")
@@ -33,14 +34,16 @@ func scanProgressHandler(w http.ResponseWriter, r *http.Request) {
 			slog.Info(fmt.Sprintf("[scan events] Client disconnected.Connection Duration: %s", time.Since(start)))
 			return
 		case progress, more := <-subscriber:
-			slog.Info(fmt.Sprintf("[scan events] Got progress notification: %v", progress))
 			timestamp := strconv.FormatInt(time.Now().UTC().UnixMilli(), 10)
 			if !more {
 				if _, err := fmt.Fprintf(w, "event:close\nretry: 10000\nid:%s\ndata:close at %s \n\n", timestamp, time.Now().Format(time.RFC850)); err != nil {
 					slog.Warn(fmt.Sprintf("[scan events] Unable to write. err: %s", err.Error()))
 					return
 				}
+				rc.Flush()
+				return
 			}
+			slog.Info(fmt.Sprintf("[scan events] Got progress notification: %v", progress))
 			serializedBody, err := json.Marshal(progress)
 			if err != nil {
 				slog.Warn(fmt.Sprintf("[scan events] Unable to Serialize. err: %s", err.Error()))
