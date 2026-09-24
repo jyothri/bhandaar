@@ -78,7 +78,7 @@ function Request() {
     staleTime: Infinity,
   });
 
-  const { mutateAsync: requestScanMutation } = useMutation({
+  const { mutate: requestScanMutation, isPending } = useMutation({
     mutationFn: requestScan,
     onSuccess: (resp) => {
       // The new scan belongs in the history, and its account may be new there.
@@ -87,12 +87,12 @@ function Request() {
       setErrorMessage("");
       setInfoMessage("Request submitted successfully. ID: " + resp.scan_id);
     },
-    onError: (error: any) => {
-      console.log("got error response for addRequest", error);
+    onError: (error) => {
+      setErrorMessage(`Failed to submit request: ${error.message}`);
     },
   });
 
-  async function submitRequest() {
+  function submitRequest() {
     if (form.clientKey === "none") {
       setErrorMessage("Please select an account.");
       return;
@@ -110,16 +110,7 @@ function Request() {
         Username: form.username,
       },
     };
-    try {
-      await requestScanMutation(request);
-    } catch (e) {
-      console.log(e);
-      setErrorMessage(
-        e instanceof Error
-          ? `Failed to submit request: ${e.message}`
-          : "Failed to submit request"
-      );
-    }
+    requestScanMutation(request);
   }
 
   function handleSelectAccount(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -247,9 +238,10 @@ function Request() {
         </div>
         <div className="justify-self-center col-span-2 p-3">
           <input
-            className="items-center justify-center bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+            className="items-center justify-center bg-blue-500 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded"
             type="button"
-            value="Submit"
+            value={isPending ? "Submitting…" : "Submit"}
+            disabled={isPending}
             onClick={submitRequest}
           />
         </div>
