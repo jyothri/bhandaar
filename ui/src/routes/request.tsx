@@ -142,7 +142,6 @@ function Request() {
   }
 
   function linkGoogleAccount() {
-    console.log("Linking Google Account");
     const spiUrl = "https://accounts.google.com/o/oauth2/v2/auth";
     const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
     const params = new URLSearchParams({
