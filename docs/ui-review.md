@@ -13,8 +13,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 | | Count |
 |---|---|
-| Open | 39 |
-| Done | 7 |
+| Open | 38 |
+| Done | 8 |
 | Won't fix | 0 |
 | *of which Deferred* | 1 (7.6) |
 
@@ -29,7 +29,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 | 2026-09-24 | `74f7da8` | 7.6 deferred: the total message count isn't known until Gmail listing finishes | 7.6 |
 | 2026-09-24 | `841b50d` | Section 2: 2.2 confirmed fixed by `5d4f052`; 2.3 Dockerfile hardened (pinned images, `npm ci`, working `Dockerfile.dockerignore`); cache headers added to prod UI nginx config (outside repo); 2.4 applied to prod nginx (outside repo); new 2.5, 2.6 | 2.2, 2.3, 2.4 (done); 2.5, 2.6 (new, open) |
 | 2026-09-24 | `c427d8a` | CI builds on PRs but pushes only from `main` (`pushImage`); UI workflow sets `enableBuildKit` | 2.5 |
-| 2026-09-24 | *(pending)* | Progress hub rewritten as a real broadcast with non-blocking sends; first backend tests (`hub_test.go`, race-clean); 2.4 confirmed in logs (streams now stay open 6–14 min); new 7.8–7.10 | 7.7 (done); 7.8, 7.9, 7.10 (new, open) |
+| 2026-09-24 | `4555752` | Progress hub rewritten as a real broadcast with non-blocking sends; first backend tests (`hub_test.go`, race-clean); 2.4 confirmed in logs (streams now stay open 6–14 min); new 7.8–7.10 | 7.7 (done); 7.8, 7.9, 7.10 (new, open) |
+| 2026-09-24 | *(pending)* | Gmail scan waits for in-flight fetches before returning (no more crash on list failure); `start` passed into `logProgress` (fixes a data race and wrong Photos elapsed time); tests can import `constants`; regression test `gmail_test.go` | 7.8 |
 
 ---
 
@@ -183,7 +184,7 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 ## Suggested order
 
-1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change): decides whether account linking is safe. Also **2.5** and **2.6** before the next image build or pull, since either can break production on its own. **7.8** (one rate-limited scan crashes the server) belongs here too; production also still needs the **7.7** fix, which reaches it with the next backend image.
+1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change): decides whether account linking is safe. Also **2.5** and **2.6** before the next image build or pull, since either can break production on its own. Production still needs the **7.7** and **7.8** fixes, which reach it with the next backend image (after **2.6**).
 2. **1.2–1.4** OAuth URL encoding, the render-time redirect, and error handling (`fetchJson`). Fix **7.1**, **7.2** and **7.4** in the same pass, since they are on the same flow.
 3. **3.4** Query-key invalidation, plus the remaining items in section 1.
 4. **4.1** Results view (next feature).
@@ -251,9 +252,17 @@ Found on 2026-09-24 while setting up and testing the local environment. These ar
   *Tests:* `be/notification/hub_test.go` is the repo's first test file. It covers every subscriber receiving every update, a non-reading subscriber not blocking, no subscribers, publisher close closing only its own key's subscribers, idempotent unsubscribe, and concurrent subscribe/publish. It passes with `go test -race -count=10` (run in `golang:1.25`, since this box has no C compiler for cgo).
   *Live check on `dev`:* two `curl` clients both received both events of scan 4. With zero clients connected, after one had connected and left (the old hang condition), scans 7 and 8 ran back to back and both completed.
 
-- [ ] **7.8 A failed message-list call crashes the whole server** — `be/collect/gmail.go:161-176`, `:98`, `:250`
+- [x] **7.8 A failed message-list call crashes the whole server** — `be/collect/gmail.go:161-176`, `:98`, `:250`
   Found 2026-09-24 while testing 7.7: three scans at once exceeded Gmail's per-user rate limit (`rateLimitExceeded`, "Units per minute per user"). Scan 5's `Messages.List` ran out of retries, and `startGmailScan` returned early without `wg.Wait()`. The caller's `defer close(messageMetaData)` then closed the channel while `getMessageInfo` goroutines from earlier pages were still running. The next `messageMetaData <- md` hit `panic: send on closed channel`, which killed the process and every other scan. This is independent of the hub change, and production has the same code.
   *Fix:* on every early return, `wg.Wait()` before returning, or cancel in-flight fetches with a `context`. Also, don't run scans concurrently against the same Gmail quota: `lock` serialises `startGmailScan`, but the per-message fetches of a finished list call keep running.
+  *Done (2026-09-24):* the paging loop moved into `listMessages()`, and `startGmailScan` now always runs `wg.Wait()`, then `done <- true` and `ticker.Stop()`, before returning, success or failure. This mirrors what `startPhotosScan` already did. Drive fetches synchronously and wasn't affected. Retries in `getMessageInfo` `wg.Add(1)` before their deferred `Done`, so the wait covers them. Context cancellation wasn't added: in-flight fetches finish within their retry budget (3 × 1s).
+  *Regression test:* `be/collect/gmail_test.go` points a real `gmail.Service` at an `httptest` fake. Page 1 lists 5 messages with slow fetches, and page 2 fails with a non-retryable 400. Against the old code it fails with `startGmailScan returned with 0 of 5 fetches done`, then `panic: send on closed channel`, the production crash. With the fix it passes.
+  *Found and fixed along the way:*
+  - **Data race on the package-level `start`:** a scan's `start = time.Now()` raced with the previous scan's `logProgress` reading it for its final event. The race detector flagged it in the new test. `start` is now a parameter of `logProgress`.
+  - **Photos progress showed the wrong elapsed time:** `startPhotosScan` never set `start`, so it reported time since the last *Gmail* scan. Fixed by the same change.
+  - **No test could import `constants`:** `constants`' `init()` called `flag.Parse()` before the test binary registers `-test.*` flags. It now skips parsing when `testing.Testing()`. Parsing stays in `init()`, because the collectors' `init()` read the parsed OAuth values; the real binary still honours `-frontend_url` etc. (verified via the CORS header).
+
+  *Verified:* `go test -race -count=10 ./...` passes (in `golang:1.25`). Live scan 9 on `dev` completed with correct progress events and no panics. *Not reproduced live:* the rate-limit crash itself, since that needs Gmail's quota exhausted; the fake-server test covers it. The pre-existing `gofmt` drift in `be/db/database.go` was left alone.
 
 - [ ] **7.9 Later scans silently skip messages that earlier scans already saved** — `be/db/database.go:151-164`
   `SaveMessageMetadataToDb` skips any message whose `(username, message_id, thread_id)` already exists, *across all scans*. So scan 3 (295 processed) stored 207, which is 295 minus the 88 already saved by scans 1 and 2. Scan 4 re-ran scan 3's filter and stored 0, so `/api/gmaildata/4` returns nothing. This may be intentional deduplication, but per-scan results are incomplete and depend on scan order.

@@ -105,7 +105,7 @@ func startPhotosScan(scanId int, photosScan GPhotosScan, photosMediaItem chan<- 
 	ticker := time.NewTicker(5 * time.Second)
 	done := make(chan bool)
 	notificationChannel := notification.GetPublisher(photosScan.AlbumId)
-	go logProgress(scanId, photosScan.AlbumId, done, ticker, notificationChannel)
+	go logProgress(scanId, photosScan.AlbumId, time.Now(), done, ticker, notificationChannel)
 	var wg sync.WaitGroup
 	var err error
 	if photosScan.AlbumId != "" {
