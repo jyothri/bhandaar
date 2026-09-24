@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 // DBConfig holds database configuration parameters
@@ -89,6 +89,33 @@ func SetupDatabase() error {
 		return fmt.Errorf("failed to run database migrations: %w", err)
 	}
 
+	if err := markInterruptedScans(); err != nil {
+		return fmt.Errorf("failed to mark interrupted scans: %w", err)
+	}
+
+	return nil
+}
+
+// markInterruptedScans marks scans that are still open at startup as failed.
+// Scans run inside this process, so a scan without an end time when the
+// server starts was cut off by a crash or restart and will never finish.
+// Its end time stays null, since when it stopped isn't known.
+func markInterruptedScans() error {
+	update_rows := `update scans
+		set status = 'Failed',
+			error_msg = 'Interrupted: the server stopped before the scan finished'
+		where scan_end_time is null and status is distinct from 'Failed'`
+	res, err := db.Exec(update_rows)
+	if err != nil {
+		return err
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		slog.Warn("Marked interrupted scans as failed", "count", count)
+	}
 	return nil
 }
 
@@ -388,12 +415,13 @@ func GetScanRequestsFromDb(accountKey string) ([]ScanRequests, error) {
 	}
 	read_row := `select distinct COALESCE(sm.name, '') as name, sm.search_filter, s.id,
 			s.scan_type,
-			scan_start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles' as scan_start_time,
-			COALESCE(EXTRACT(EPOCH FROM (scan_end_time - scan_start_time)), -1) as scan_duration_in_sec
+			scan_start_time,
+			COALESCE(EXTRACT(EPOCH FROM (scan_end_time - scan_start_time)), -1) as scan_duration_in_sec,
+			COALESCE(s.status, 'Completed') as status
 			from scans s
 			join scanmetadata sm on sm.scan_id = s.id
 			where sm.name = $1
-			group by sm.name, sm.search_filter, s.id, s.scan_start_time, s.scan_type
+			group by sm.name, sm.search_filter, s.id, s.scan_start_time, s.scan_type, s.status
 			order by s.id desc`
 	scanRequests := []ScanRequests{}
 	err := db.Select(&scanRequests, read_row, accountKey)
@@ -409,8 +437,8 @@ func GetScansFromDb(pageNo int) ([]Scan, int, error) {
 	count_rows := `select count(*) from scans`
 	read_row :=
 		`select S.id, scan_type,
-		 created_on AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles' as created_on,
-		 scan_start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles' as scan_start_time,
+		 created_on,
+		 scan_start_time,
 		 scan_end_time, CONCAT(search_path, search_filter) as metadata,
 		 date_trunc('millisecond', COALESCE(scan_end_time,current_timestamp)-scan_start_time) as duration
 	   from scans S LEFT JOIN scanmetadata SM
@@ -615,11 +643,15 @@ func migrateDB() error {
 		return fmt.Errorf("failed to check for version table: %w", err)
 	}
 	if count == 0 {
-		return migrateDBv0()
+		if err := migrateDBv0(); err != nil {
+			return err
+		}
+	} else if err := migrateAddStatusColumn(); err != nil {
+		// Add migration for status column if needed
+		return err
 	}
 
-	// Add migration for status column if needed
-	return migrateAddStatusColumn()
+	return migrateScanTimesToTimestamptz()
 }
 
 func migrateDBv0() error {
@@ -672,7 +704,7 @@ func migrateAddStatusColumn() error {
 		alter_table := `ALTER TABLE scans
 			ADD COLUMN status VARCHAR(50) DEFAULT 'Completed',
 			ADD COLUMN error_msg TEXT,
-			ADD COLUMN completed_at TIMESTAMP`
+			ADD COLUMN completed_at TIMESTAMPTZ`
 
 		_, err = db.Exec(alter_table)
 		if err != nil {
@@ -684,12 +716,42 @@ func migrateAddStatusColumn() error {
 	return nil
 }
 
+// migrateScanTimesToTimestamptz converts the scans table's time columns from
+// timestamp to timestamptz. They are filled with current_timestamp, so as
+// timestamp they held wall-clock time in the database session's time zone,
+// and reading them as instants depended on that zone. The conversion reads
+// the existing values as UTC, the default of the Postgres image this app
+// runs with. As timestamptz they are instants, whatever the server's zone.
+func migrateScanTimesToTimestamptz() error {
+	var columns []string
+	find_columns := `SELECT column_name FROM information_schema.columns
+		WHERE table_name = 'scans' AND data_type = 'timestamp without time zone'
+		ORDER BY ordinal_position`
+	if err := db.Select(&columns, find_columns); err != nil {
+		return fmt.Errorf("failed to find timestamp columns in scans table: %w", err)
+	}
+	if len(columns) == 0 {
+		return nil
+	}
+
+	alters := make([]string, len(columns))
+	for i, column := range columns {
+		quoted := pq.QuoteIdentifier(column)
+		alters[i] = fmt.Sprintf("ALTER COLUMN %s TYPE timestamptz USING %s AT TIME ZONE 'UTC'", quoted, quoted)
+	}
+	if _, err := db.Exec("ALTER TABLE scans " + strings.Join(alters, ", ")); err != nil {
+		return fmt.Errorf("failed to convert scans time columns to timestamptz: %w", err)
+	}
+	slog.Info("Converted scans time columns to timestamptz", "columns", columns)
+	return nil
+}
+
 const create_scans_table string = `CREATE TABLE IF NOT EXISTS scans (
 		  id serial PRIMARY KEY,
 		  scan_type VARCHAR (50) NOT NULL,
-		  created_on TIMESTAMP NOT NULL,
-		  scan_start_time TIMESTAMP NOT NULL,
-		  scan_end_time TIMESTAMP
+		  created_on TIMESTAMPTZ NOT NULL,
+		  scan_start_time TIMESTAMPTZ NOT NULL,
+		  scan_end_time TIMESTAMPTZ
 		)`
 
 const create_scandata_table string = `CREATE TABLE IF NOT EXISTS scandata (
@@ -818,6 +880,7 @@ type ScanRequests struct {
 	SearchFilter      string    `db:"search_filter" json:"search_filter"`
 	ScanStartTime     time.Time `db:"scan_start_time" json:"scan_start_time"`
 	ScanDurationInSec string    `db:"scan_duration_in_sec" json:"scan_duration_in_sec"`
+	Status            string    `db:"status" json:"status"`
 }
 
 type ScanData struct {

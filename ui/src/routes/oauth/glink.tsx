@@ -6,6 +6,8 @@ type oauthCode = {
   code: string;
   state: string;
   scope: string;
+  // Set instead of code when the user declines, e.g. "access_denied".
+  error: string;
 };
 
 export const Route = createFileRoute("/oauth/glink")({
@@ -16,6 +18,7 @@ export const Route = createFileRoute("/oauth/glink")({
       code: (search.code as string) || "",
       state: (search.state as string) || "",
       scope: (search.scope as string) || "",
+      error: (search.error as string) || "",
     };
   },
   // Hand the one-time code to the backend before anything renders, so it is
@@ -28,18 +31,27 @@ export const Route = createFileRoute("/oauth/glink")({
         state,
         scope,
       });
-      throw redirect({ href: `${backend_url}/api/glink?${params}` });
+      // Replace this history entry, so Back skips the spent callback URL.
+      throw redirect({
+        href: `${backend_url}/api/glink?${params}`,
+        replace: true,
+      });
     }
   },
 });
 
 function RouteComponent() {
+  const { error } = Route.useSearch();
+  let message =
+    "Account linking failed: the response from Google doesn't match this browser session.";
+  if (error === "access_denied") {
+    message = "Linking was cancelled.";
+  } else if (error) {
+    message = `Account linking failed: Google returned "${error}".`;
+  }
   return (
     <div>
-      <p>
-        Account linking failed: the response from Google doesn't match this
-        browser session.
-      </p>
+      <p>{message}</p>
       <Link to="/request">Try again</Link>
     </div>
   );

@@ -38,5 +38,9 @@ export type ScanRequest = {
   scan_type: string;
   search_filter: string;
   scan_start_time: string;
-  scan_duration_in_sec: number;
+  // Seconds as a decimal string, or "-1" while the scan has no end time.
+  scan_duration_in_sec: string;
+  // "Failed" once a scan fails or is interrupted. Scans that are still
+  // running also read "Completed" today (review item 7.10).
+  status: string;
 };

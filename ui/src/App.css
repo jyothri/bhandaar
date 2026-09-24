@@ -1,1 +1,13 @@
 @import "tailwindcss";
+
+@layer base {
+  /* Follow the system theme; native controls (date pickers, selects,
+     checkboxes, progress bars) pick it up from color-scheme. */
+  :root {
+    color-scheme: light dark;
+  }
+
+  body {
+    @apply bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100;
+  }
+}

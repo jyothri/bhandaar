@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- A hard drive: a rounded body with a darker lower half and two lights. -->
+  <clipPath id="body">
+    <rect x="3" y="7" width="26" height="18" rx="4"/>
+  </clipPath>
+  <g clip-path="url(#body)">
+    <rect x="3" y="7" width="26" height="18" fill="#2563eb"/>
+    <rect x="3" y="17" width="26" height="8" fill="#1e40af"/>
+  </g>
+  <rect x="7" y="11" width="12" height="2" rx="1" fill="#bfdbfe"/>
+  <circle cx="18" cy="21" r="1.8" fill="#bfdbfe"/>
+  <circle cx="23" cy="21" r="1.8" fill="#4ade80"/>
+</svg>

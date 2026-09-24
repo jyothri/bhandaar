@@ -8,6 +8,7 @@ import { config } from "../config";
 import { createOAuthState } from "../oauthState";
 import { ScanMetadata, ScanType } from "../types/scans";
 import ScanProgress from "../components/ScanProgress";
+import Input from "../components/Input";
 
 export const Route = createFileRoute("/request")({
   component: Request,
@@ -44,21 +45,21 @@ function buildGmailFilter({
   startDate,
   endDate,
 }: RequestForm): string {
-  let filter = "";
+  const terms: string[] = [];
   if (inbox) {
-    filter += "label:inbox ";
+    terms.push("label:inbox");
   }
   if (unread) {
-    filter += "is:unread ";
+    terms.push("is:unread");
   }
   if (startDate !== "") {
-    filter += `after:${dateForApi(startDate)} `;
+    terms.push(`after:${dateForApi(startDate)}`);
   }
   if (endDate !== "") {
     // Gmail's before: is exclusive; use the next day to include endDate.
-    filter += `before:${dateForApi(endDate, 1)} `;
+    terms.push(`before:${dateForApi(endDate, 1)}`);
   }
-  return filter;
+  return terms.join(" ");
 }
 
 function Request() {
@@ -112,6 +113,14 @@ function Request() {
       });
       return;
     }
+    // YYYY-MM-DD strings compare in date order.
+    if (form.startDate && form.endDate && form.endDate < form.startDate) {
+      setMessage({
+        kind: "error",
+        text: "The end date is before the start date.",
+      });
+      return;
+    }
     const request: ScanMetadata = {
       ScanType: ScanType.GMail,
       GMailScan: {
@@ -133,7 +142,6 @@ function Request() {
   }
 
   function linkGoogleAccount() {
-    console.log("Linking Google Account");
     const spiUrl = "https://accounts.google.com/o/oauth2/v2/auth";
     const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
     const params = new URLSearchParams({
@@ -155,7 +163,7 @@ function Request() {
       </h2>
       <div
         id="container"
-        className="grid grid-cols-2 border-8 border-gray-200 gap-2"
+        className="grid grid-cols-2 border-8 border-gray-200 dark:border-gray-700 gap-2"
       >
         <div className="justify-self-center col-span-2">
           <button
@@ -215,21 +223,19 @@ function Request() {
           <label htmlFor="datepicker-range-start">Date range</label>
         </div>
         <div className="pl-3">
-          <input
+          <Input
             id="datepicker-range-start"
             name="start"
             type="date"
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5  dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
             placeholder="Select date start"
             value={form.startDate}
             onChange={(e) => updateForm({ startDate: e.target.value })}
           />
           <span className="mx-4 text-gray-500">to</span>
-          <input
+          <Input
             id="datepicker-range-end"
             name="end"
             type="date"
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5  dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
             placeholder="Select date end"
             value={form.endDate}
             onChange={(e) => updateForm({ endDate: e.target.value })}
@@ -239,13 +245,12 @@ function Request() {
           <label htmlFor="filter">Query filter</label>
         </div>
         <div className="pl-3">
-          <input
+          <Input
             id="filter"
             type="text"
-            placeholder=""
             disabled={true}
             value={queryFilter}
-            className="border-2 border-gray-200 rounded-lg w-10/12"
+            className="w-10/12"
           />
         </div>
         <div className="justify-self-center col-span-2 p-3">

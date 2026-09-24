@@ -13,8 +13,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 | | Count |
 |---|---|
-| Open | 19 |
-| Done | 31 |
+| Open | 13 |
+| Done | 43 |
 | Won't fix | 1 |
 | *of which Deferred* | 1 (7.6) |
 
@@ -33,6 +33,7 @@ This work was first raised as one PR (#6). After review it was split into focuse
 | 2026-09-24 | production deploy | Backend and UI images built from `main` after #7–#9 deployed; `DB_*` connection and schema migration confirmed; rollback images kept until 2027-09-24 | 2.2, 2.6, 7.7, 7.8, 7.11–7.14 live |
 | 2026-09-24 | #12 | UI bugs and security: random OAuth `state` checked on the callback; OAuth URLs built with `URLSearchParams`; callback redirect moved to `beforeLoad`; shared `fetchJson`; SSE hook fixes; date and Gmail filter fixes; label targets | 1.1–1.10 |
 | 2026-09-24 | #13 | React / TanStack Query idioms: Gmail filter computed during render; request form in one state object; `enabled` instead of the `"none"` sentinel; query keys in one place, with invalidation of the real ones; mutation errors handled once and Submit disabled while pending; one message at a time; `Header` inside the router. `npm run lint` is clean | 3.1–3.6, 3.8 |
+| 2026-09-24 | #14 | Durations, start times and an indeterminate progress bar; backend returns scan times as UTC instants; empty, loading and error states in history; th cells and typo; shared `Table` / `Input`; dark mode for body and form; favicon and package name; no `console.log`; `typecheck` script and a CI `check` job. Review follow-ups: cancelled consent message, `replace` on the callback redirect, stream errors before the first update, history refetch until scans finish, reversed dates rejected, no trailing space in the filter. PR review: `scans` time columns migrated to `timestamptz`; scans that can't start, or are left open by a restart, marked Failed; history shows status and polls only for recent open scans | 4.3–4.6, 5.2, 5.3; 1.11–1.14, 3.9, 5.5 |
 
 ---
 
@@ -90,6 +91,24 @@ This work was first raised as one PR (#6). After review it was split into focuse
   The Inbox, Unread and Date range labels all use `htmlFor="filter"`, so clicking any of them focuses the query box.
   *Fix:* point them at `inbox`, `unread` and `datepicker-range-start`.
   *Done in #12.*
+
+Raised in review after #13; all done in #14:
+
+- [x] **1.11 Cancelled consent shows the wrong message** — `src/routes/oauth/glink.tsx`
+  Declining on Google's screen returns `?error=access_denied&state=…` with no code, and the page said the response "doesn't match this browser session".
+  *Done in #14:* `validateSearch` reads `error`. `access_denied` shows "Linking was cancelled."; any other error is named.
+
+- [x] **1.12 Back returns to the spent callback** — `src/routes/oauth/glink.tsx`
+  The redirect to the backend pushed a history entry, so Back returned to `/oauth/glink?code=…`, showed "Account linking failed", and left the code in history.
+  *Done in #14:* `throw redirect({ href, replace: true })`, which makes the router use `window.location.replace`. Verified: linking adds one history entry instead of two, and Back lands on `/request`.
+
+- [x] **1.13 Stream errors are hidden before the first update** — `src/components/ScanProgress.tsx`
+  `ScanProgress` returned `null` until data arrived, so a stream that failed immediately showed nothing.
+  *Done in #14:* the error line renders with or without data. It still appears only once the `EventSource` is `CLOSED` (1.7), e.g. on an HTTP error; while the browser keeps retrying an unreachable server, nothing is shown.
+
+- [x] **1.14 Reversed dates aren't caught** — `src/routes/request.tsx`
+  An end date before the start date gives a valid filter that matches nothing, so the scan "succeeds" with zero messages.
+  *Done in #14:* `submitRequest` rejects it, comparing the `YYYY-MM-DD` strings.
 
 ## 2. Configuration and deployment
 
@@ -183,6 +202,14 @@ This work was first raised as one PR (#6). After review it was split into focuse
   *Fix:* move it into `__root.tsx` alongside the nav.
   *Done in #13.*
 
+- [x] **3.9 Request history never picks up a finished scan** — `src/routes/requests.tsx`
+  Raised in review after #13. `scanRequests` kept `staleTime: Infinity`, so after the one fetch triggered by submitting, a running scan stayed "not finished" until a full reload.
+  *Done in #14:* default `staleTime` (refetch on mount), `refetchOnWindowFocus: true` for this query (it's off globally in `App.tsx`), and a 10-second `refetchInterval` while any listed scan has no end time. *PR #14 review:* scans that never get an end time kept the page polling. Fixed in the same PR:
+  - The backend marks a scan Failed when `Gmail()`, `CloudDrive()` or `Photos()` returns early after `LogStartScan`.
+  - At startup, it marks scans that are still open Failed ("Interrupted: the server stopped before the scan finished"), leaving their end time null.
+  - The history API includes `status`, and the Duration column reads "Failed" or "Failed after m:ss".
+  - Polling runs only while a scan has no end time, isn't Failed, and started less than 6 hours ago.
+
 ## 4. UI / UX
 
 - [ ] **4.1 The home route (`/`, "Data") is a placeholder** — `src/routes/index.tsx`
@@ -191,31 +218,48 @@ This work was first raised as one PR (#6). After review it was split into focuse
 
 - [ ] **4.2 Only Gmail scans can be requested**, although `ScanType` also lists Local, GDrive, GStorage and GPhotos.
 
-- [ ] **4.3 Values are shown raw**
+- [x] **4.3 Values are shown raw**
   - The progress table shows raw seconds and ignores `completion_pct`. Add a `<progress>` bar and mm:ss formatting.
   - History shows the raw `scan_start_time`. Format it with `Intl.DateTimeFormat`.
 
-- [ ] **4.4 Missing empty and error states** — `src/routes/requests.tsx`
-  Show "No scans for this account" when the list is empty, and surface errors from the scan-requests query.
+  *Done in #14:*
+  - Elapsed time and history durations are m:ss (h:mm:ss from an hour up), via `src/format.ts`. A scan with no end time reads "Not finished" instead of `-1`.
+  - The always-0 ETA column became a Progress column: an indeterminate `<progress>` while messages are being fetched, and a percentage once `completion_pct` is non-zero (7.6).
+  - **Found along the way:** the history API sent Pacific wall-clock time labelled as UTC. `GetScanRequestsFromDb` and `GetScansFromDb` converted with `AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles'`, so a scan started at 16:52 UTC came back as `09:52Z`, and `GetScansFromDb` mixed that with an unconverted `scan_end_time`. Both now use `AT TIME ZONE 'UTC'` alone and return the real instant, which the UI formats in the viewer's time zone. Verified against the local database: scan 10 (16:52 UTC) shows as 9:52 AM in a Pacific-time browser.
+  - *PR #14 review:* reading the columns `AT TIME ZONE 'UTC'` still assumed the database session's zone was UTC, because they were `TIMESTAMP` filled with `current_timestamp`. A startup migration now converts `created_on`, `scan_start_time`, `scan_end_time` and `completed_at` to `timestamptz` (`USING col AT TIME ZONE 'UTC'`), and the queries read them as they are. It only converts columns that are still `timestamp`, so it runs once. Verified on a copy of the local database: with the database's zone set to `America/New_York`, scan 10 comes back as `12:52-04:00`, the same instant. The migration reads existing values as UTC, which is only right if the database's zone was UTC when they were written. *Checked on production 2026-09-24 (read-only):* `SHOW timezone` is `Etc/UTC`, from `postgresql.conf`, with no per-database or per-role override. The database's `localtimestamp` matched real UTC to the second, and the three production scans are still `timestamp without time zone`, so the migration will convert them correctly. Other tables' `TIMESTAMP` columns (e.g. `messagemetadata.date`) are unchanged.
 
-- [ ] **4.5 Styling inconsistencies**
+- [x] **4.4 Missing empty and error states** — `src/routes/requests.tsx`
+  Show "No scans for this account" when the list is empty, and surface errors from the scan-requests query.
+  *Done in #14:* also "Loading scans…" while loading, and the accounts error now includes its message. A failing request shows its error after TanStack Query's default 3 retries (about 7 seconds).
+
+- [x] **4.5 Styling inconsistencies**
   - Dark mode is half done: the header and tables have `dark:` classes, the page body and form don't.
   - The progress table header uses `<td scope="col">`; it should be `<th>` (`ScanProgress.tsx:30-44`).
   - Typo: "Elapsted" (`ScanProgress.tsx:34`).
   - Long input and table class strings are duplicated. Extract small `Input` / `Table` components.
 
-- [ ] **4.6 Leftover scaffolding**
+  *Done in #14:* the body gets light and dark colours and `color-scheme: light dark` (so native controls follow), and container borders have dark variants. The progress headers are `<th scope="col">`, and the typo is fixed. `components/Table.tsx` (`Table`, `Tr`, `Td`) and `components/Input.tsx` replace the duplicated class strings.
+
+- [x] **4.6 Leftover scaffolding**
   `index.html` still uses the Vite default icon, and `package.json` is still named `"react"`.
+  *Done in #14:* `public/favicon.svg` (a small drive icon) replaces `vite.svg`, and the package is `bhandaar-ui`.
 
 ## 5. Code health
 
 - [ ] **5.1** Delete the empty `src/App.css` and the unused types in `src/types/optionals.ts`, or start using them.
-- [ ] **5.2** Remove the leftover `console.log` calls in `src/api/index.ts`, `src/components/hooks/useSse.ts` and `src/routes/request.tsx`.
-- [ ] **5.3** Add a `typecheck` script (`tsc -b`) and run lint and typecheck in CI.
+  *Correction (2026-09-24):* `App.css` isn't empty. It holds the Tailwind import, and since #14 the base theme styles, so keep it. Only `optionals.ts` is left.
+- [x] **5.2** Remove the leftover `console.log` calls in `src/api/index.ts`, `src/components/hooks/useSse.ts` and `src/routes/request.tsx`.
+  *Done:* the ones in `api/index.ts` and the request page's error handling went in #12 and #13; the rest in #14. `src/` has no `console` calls left.
+- [x] **5.3** Add a `typecheck` script (`tsc -b`) and run lint and typecheck in CI.
+  *Done in #14:* the UI workflow's new `check` job runs `npm ci`, `npm run lint` and `npm run typecheck` with Node from `ui/.nvmrc`, and the image job `needs` it.
 - [ ] **5.4** Add tests (there are none):
   - Vitest for the pure functions: filter builder, date formatting, `fetchJson`.
   - React Testing Library for the request form.
   - Moving the filter logic out of the component makes it testable on its own.
+
+- [x] **5.5 The Gmail filter ends with a space** — `src/routes/request.tsx`
+  Raised in review after #13: every term was appended with a trailing space, which was stored as `search_filter` and shown in history.
+  *Done in #14:* `buildGmailFilter` joins an array of terms with single spaces.
 
 ---
 
@@ -276,7 +320,7 @@ Found on 2026-09-24 while setting up and testing the local environment. These ar
   - Listing every page before fetching anything restructures the scan, costs extra quota and delays the first fetch.
   - `Labels.Get` counts are exact, but only for a single folder with no filter.
 
-  *When revisited:* send a `listing_complete` flag. Before it's set, show "processed N, M queued". After it, processed + pending is the exact total, so a percentage (and an ETA from the processing rate) becomes meaningful. Until then, hide the always-0 ETA column in the UI (ties to 4.3).
+  *When revisited:* send a `listing_complete` flag. Before it's set, show "processed N, M queued". After it, processed + pending is the exact total, so a percentage (and an ETA from the processing rate) becomes meaningful. Until then, hide the always-0 ETA column in the UI (ties to 4.3). *Done in #14:* the ETA column is gone, and the progress bar is indeterminate until `completion_pct` is non-zero.
 
 - [x] **7.7 Progress hub delivers each event to only one client, and can hang scans** — `be/notification/hub.go`, `be/web/sse.go`
   Found 2026-09-24: the dev endpoint showed no scan progress while `sm` did. `GetSubscriber("all")` gave every `/sse/scanprogress` connection the *same* unbuffered channel, so the connections competed for events and each event reached exactly one of them. Dev had two long-lived connections (probably two tabs) and lost the race. StrictMode's extra dev-mode connection can do the same. Worse, `pushToSubscriber` was a blocking send into that shared channel, which is created by the first connection ever and never removed. So a scan running while no tab is connected blocks in `logProgress`; `startGmailScan` then blocks at `done <- true` while holding the global `lock`, and every later Gmail scan waits on that lock. Production's image has the same hub (unchanged since `ce4e286`). A read-only check on 2026-09-24 found no stuck scans there (3 Gmail scans, all finished in ≤5.3s), so the hang hadn't happened yet.
@@ -311,6 +355,7 @@ Found on 2026-09-24 while setting up and testing the local environment. These ar
   **Decision (2026-09-24): keep global dedupe.** `messagemetadata` holds each message once per user, attributed to the scan that first saw it. A scan's `scan_id` rows are the messages *new* in that scan, not everything it matched. Anything showing per-scan results (e.g. the results view in 4.1) should label them "new messages" and use the scan's processed count for the total matched.
 
 - [ ] **7.10 Every new scan shows `Completed` while it's still running** — `be/db/database.go:103-107`, `:672-674`
+  *Partly addressed in #14:* scans that fail to start, and scans left open by a crash or restart (like scan 6), are now marked `Failed`. A running scan still reads `Completed` until it ends.
   The migration adds `status VARCHAR(50) DEFAULT 'Completed'` (so existing rows count as completed), and `LogStartScan` never sets `status`. So a scan is `Completed` from the moment it's created, until it's marked `Failed`. Scan 6 never ran, because the server crashed first (7.8), but its row still says `Completed`, with no end time.
   *Fix:* have `LogStartScan` insert `status = 'Running'` (or `'Pending'`). With 7.5 (`completed_at`), the status, end time and completion time then agree.
 

@@ -2,11 +2,35 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getScannedAccounts, getScanRequests } from "../api";
 import { queryKeys } from "../api/queryKeys";
+import { formatDateTime, formatDuration } from "../format";
+import { Table, Td, Tr } from "../components/Table";
 import { useState } from "react";
+import { ScanRequest } from "../types/scans";
 
 export const Route = createFileRoute("/requests")({
   component: Requests,
 });
+
+// Stop polling for a scan that has been open this long; it's stuck.
+const MAX_POLL_AGE_MS = 6 * 60 * 60 * 1000;
+
+// The backend sends "-1" for a scan without an end time.
+function scanDuration(scan: ScanRequest): string {
+  const seconds = Number(scan.scan_duration_in_sec);
+  if (scan.status === "Failed") {
+    return seconds < 0 ? "Failed" : `Failed after ${formatDuration(seconds)}`;
+  }
+  return seconds < 0 ? "Not finished" : formatDuration(seconds);
+}
+
+// A scan that may still finish: no end time, not failed, and recent.
+function mayStillFinish(scan: ScanRequest): boolean {
+  return (
+    Number(scan.scan_duration_in_sec) < 0 &&
+    scan.status !== "Failed" &&
+    Date.now() - Date.parse(scan.scan_start_time) < MAX_POLL_AGE_MS
+  );
+}
 
 function Requests() {
   const [selectedAccount, setSelectedAccount] = useState("none");
@@ -14,18 +38,27 @@ function Requests() {
   const {
     data: scannedAccounts,
     isLoading,
-    isError,
+    error: accountsError,
   } = useQuery({
     queryKey: queryKeys.scannedAccounts,
     queryFn: () => getScannedAccounts(),
     staleTime: Infinity,
   });
 
-  const { data: scanRequests } = useQuery({
+  const {
+    data: scanRequests,
+    isLoading: scanRequestsLoading,
+    error: scanRequestsError,
+  } = useQuery({
     queryKey: queryKeys.scanRequests(selectedAccount),
     queryFn: () => getScanRequests(selectedAccount),
     enabled: selectedAccount !== "none",
-    staleTime: Infinity,
+    // A running scan's duration changes when it finishes, so don't keep
+    // this list forever: refetch on mount and focus, and poll while any
+    // scan may still finish.
+    refetchOnWindowFocus: true,
+    refetchInterval: (query) =>
+      query.state.data?.some(mayStillFinish) ? 10_000 : false,
   });
 
   function handleSelectAccount(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -37,16 +70,19 @@ function Requests() {
       <h2 className="p-2 justify-self-center heading font-bold text-xl">
         Request history
       </h2>
-      <div id="container" className="border-8 border-gray-200 gap-2">
+      <div
+        id="container"
+        className="border-8 border-gray-200 dark:border-gray-700 gap-2"
+      >
         <div className="grid grid-cols-2 ">
           {isLoading && (
             <div className="flex justify-center items-center sm:rounded-lg dark:text-gray-300">
               Fetching data..
             </div>
           )}
-          {isError && (
-            <div className="flex justify-center items-center sm:rounded-lg dark:text-gray-300">
-              Error fetching data.
+          {accountsError && (
+            <div className="flex justify-center items-center sm:rounded-lg text-red-500">
+              Couldn't load accounts: {accountsError.message}
             </div>
           )}
           <div className="justify-self-end pl-3">
@@ -68,48 +104,38 @@ function Requests() {
             </select>
           </div>
         </div>
-        {scanRequests !== undefined && scanRequests?.length > 0 && (
-          <table className="w-7/8 mt-3 text-sm text-left rtl:text-right text-gray-500 dark:text-gray-400 justify-self-center">
-            <thead>
-              <tr className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
-                <th scope="col" className="px-6 py-3">
-                  Name
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Scan Type
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Scan id
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Search Filter
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Scan start
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Processing Time (sec)
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {scanRequests?.map((scanRequest) => (
-                <tr
-                  key={scanRequest.scan_id}
-                  className="odd:bg-white odd:dark:bg-gray-900 even:bg-gray-50 even:dark:bg-gray-800 border-b dark:border-gray-700 border-gray-200"
-                >
-                  <td className="px-6 py-4">{scanRequest.name}</td>
-                  <td className="px-6 py-4">{scanRequest.scan_type}</td>
-                  <td className="px-6 py-4">{scanRequest.scan_id}</td>
-                  <td className="px-6 py-4">{scanRequest.search_filter}</td>
-                  <td className="px-6 py-4">{scanRequest.scan_start_time}</td>
-                  <td className="px-6 py-4">
-                    {scanRequest.scan_duration_in_sec}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {scanRequestsLoading && <p className="p-3">Loading scans…</p>}
+        {scanRequestsError && (
+          <p className="p-3 text-red-500">
+            Couldn't load scans: {scanRequestsError.message}
+          </p>
+        )}
+        {scanRequests?.length === 0 && (
+          <p className="p-3">No scans for this account.</p>
+        )}
+        {scanRequests !== undefined && scanRequests.length > 0 && (
+          <Table
+            className="w-7/8"
+            headers={[
+              "Name",
+              "Scan Type",
+              "Scan id",
+              "Search Filter",
+              "Scan start",
+              "Duration",
+            ]}
+          >
+            {scanRequests.map((scanRequest) => (
+              <Tr key={scanRequest.scan_id}>
+                <Td>{scanRequest.name}</Td>
+                <Td>{scanRequest.scan_type}</Td>
+                <Td>{scanRequest.scan_id}</Td>
+                <Td>{scanRequest.search_filter}</Td>
+                <Td>{formatDateTime(scanRequest.scan_start_time)}</Td>
+                <Td>{scanDuration(scanRequest)}</Td>
+              </Tr>
+            ))}
+          </Table>
         )}
       </div>
     </div>

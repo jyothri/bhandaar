@@ -26,13 +26,11 @@ function useSse<T>(
     });
 
     eventSource.addEventListener(endMessageKey, () => {
-      console.log("Close Connection to server events");
       eventSource.close();
       setError(null);
     });
 
     eventSource.onopen = () => {
-      console.log("Listening for server events.");
       setError(null);
     };
 

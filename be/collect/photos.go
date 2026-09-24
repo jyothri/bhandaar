@@ -63,7 +63,7 @@ func Photos(photosScan GPhotosScan) (int, error) {
 	// Validate photos client
 	_, err = getPhotosService(photosScan.RefreshToken)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get photos service for scan %d: %w", scanId, err)
+		return failStart(scanId, fmt.Errorf("failed to get photos service for scan %d: %w", scanId, err))
 	}
 
 	// Save metadata in background
