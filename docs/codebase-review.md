@@ -13,8 +13,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 | | Count |
 |---|---|
-| Open | 26 |
-| Done | 24 |
+| Open | 19 |
+| Done | 31 |
 | Won't fix | 1 |
 | *of which Deferred* | 1 (7.6) |
 
@@ -32,6 +32,7 @@ This work was first raised as one PR (#6). After review it was split into focuse
 | 2026-09-24 | this doc | Findings and decisions: 7.6 deferred, 7.9 won't fix (keep global dedupe), 2.6 investigation, PR #6 review follow-ups | 7.6, 7.9, 7.10 (open) |
 | 2026-09-24 | production deploy | Backend and UI images built from `main` after #7–#9 deployed; `DB_*` connection and schema migration confirmed; rollback images kept until 2027-09-24 | 2.2, 2.6, 7.7, 7.8, 7.11–7.14 live |
 | 2026-09-24 | #12 | UI bugs and security: random OAuth `state` checked on the callback; OAuth URLs built with `URLSearchParams`; callback redirect moved to `beforeLoad`; shared `fetchJson`; SSE hook fixes; date and Gmail filter fixes; label targets | 1.1–1.10 |
+| 2026-09-24 | #13 | React / TanStack Query idioms: Gmail filter computed during render; request form in one state object; `enabled` instead of the `"none"` sentinel; query keys in one place, with invalidation of the real ones; mutation errors handled once and Submit disabled while pending; one message at a time; `Header` inside the router. `npm run lint` is clean | 3.1–3.6, 3.8 |
 
 ---
 
@@ -147,33 +148,40 @@ This work was first raised as one PR (#6). After review it was split into focuse
 
 ## 3. React / TanStack Query idioms
 
-- [ ] **3.1 `queryFilter` is derived data kept in state** — `src/routes/request.tsx:101-120`
+- [x] **3.1 `queryFilter` is derived data kept in state** — `src/routes/request.tsx:101-120`
   A `useEffect` calls `setQueryFilter`, causing an extra render and an exhaustive-deps lint warning.
   *Fix:* compute it during render (`useMemo` optional).
+  *Done in #13:* `buildGmailFilter()` and `dateForApi()` are pure functions outside the component, and the filter is computed during render (no `useMemo`; it's cheap).
 
-- [ ] **3.2 Form state is spread across many `useState` calls** — `src/routes/request.tsx:19-25`
+- [x] **3.2 Form state is spread across many `useState` calls** — `src/routes/request.tsx:19-25`
   Consider one form-state object, or a form library if more scan types are coming.
+  *Done in #13:* one typed `RequestForm` object, changed through `updateForm(changes)`. No form library for now.
 
-- [ ] **3.3 Use `enabled` instead of the `"none"` sentinel** — `src/routes/requests.tsx:23`, `src/api/index.ts:52`
+- [x] **3.3 Use `enabled` instead of the `"none"` sentinel** — `src/routes/requests.tsx:23`, `src/api/index.ts:52`
   *Fix:* pass `enabled: selectedAccount !== "none"` and drop the special case from `getScanRequests`.
+  *Done in #13.*
 
-- [ ] **3.4 Invalidated query key doesn't exist** — `src/routes/request.tsx:36`
+- [x] **3.4 Invalidated query key doesn't exist** — `src/routes/request.tsx:36`
   It invalidates `["scans"]`, which no query uses. Because of `staleTime: Infinity`, the history page stays stale after a new scan.
   *Fix:* define keys in one place (e.g. `queryKeys.scanRequests(account)`) and invalidate `getScanRequests`.
+  *Done in #13:* keys live in `src/api/queryKeys.ts`. A successful scan request invalidates every account's scan-request list, and the scanned-accounts list, since a first scan adds its account there.
 
-- [ ] **3.5 Mutation errors are handled twice** — `src/routes/request.tsx:40`, `:63-68`
+- [x] **3.5 Mutation errors are handled twice** — `src/routes/request.tsx:40`, `:63-68`
   `onError` duplicates the try/catch around `mutateAsync`.
   *Fix:* keep one, and use `isPending` to disable Submit so it can't be double-clicked.
+  *Done in #13:* kept `onError`, which now shows the message; `submitRequest` calls `mutate`. Submit is disabled, and reads "Submitting…", while pending.
 
-- [ ] **3.6 Stale messages linger** — `src/routes/request.tsx`
+- [x] **3.6 Stale messages linger** — `src/routes/request.tsx`
   `infoMessage` is never cleared on error, so success and error text can show at the same time.
+  *Done in #13:* one `message` state with a `kind` (error or info). Each new message replaces the last one, and submitting clears it.
 
 - [ ] **3.7 Username is read from the option's text** — `src/routes/request.tsx:73`
   *Fix:* look up the account in `accounts` by `clientKey`.
 
-- [ ] **3.8 `Header` is outside `RouterProvider`** — `src/App.tsx:32`
+- [x] **3.8 `Header` is outside `RouterProvider`** — `src/App.tsx:32`
   It can't use `Link` or router hooks.
   *Fix:* move it into `__root.tsx` alongside the nav.
+  *Done in #13.*
 
 ## 4. UI / UX
 
@@ -215,12 +223,11 @@ This work was first raised as one PR (#6). After review it was split into focuse
 
 Merge order for the split PRs: #7, then #8 (stacked on it); #9 independently; this doc last.
 
-Section 1 is done in #12. 2.5, 2.6, 7.7 and 7.8 are done and deployed.
+Section 1 is done in #12, and section 3 (except 3.7) in #13. 2.5, 2.6, 7.7 and 7.8 are done and deployed.
 
 1. **7.1–7.4** OAuth account linking in the backend: the handler continuing after a failed token request, the secret in the query string, the open redirect (7.3 allowlist) and the lost 400. Optionally move the OAuth `state` from the browser (1.1) to the backend in the same change.
-2. **3.4** Query-key invalidation.
-3. **4.1** Results view (next feature).
-4. Everything else, as convenient.
+2. **4.1** Results view (next feature).
+3. Everything else, as convenient.
 
 ---
 
