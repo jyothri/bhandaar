@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/jyothri/hdd/constants"
 	"github.com/jyothri/hdd/notification"
 )
 
@@ -101,5 +100,6 @@ func setHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("access-control-allow-origin", constants.FrontendUrl)
+	// Access-Control-Allow-Origin is set by the CORS middleware, which
+	// echoes the request's origin when it's one of -frontend_url's.
 }

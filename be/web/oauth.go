@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -35,9 +36,15 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "redirectUri not found in request", http.StatusBadRequest)
 		return
 	}
+	returnUrl, err := linkReturnURL(redirectUri)
+	if err != nil {
+		slog.Warn("Rejected account-linking redirectUri", "redirect_uri", redirectUri, "error", err)
+		http.Error(w, "redirectUri is not allowed", http.StatusBadRequest)
+		return
+	}
 
 	// Retrieve authZ code from query params.
-	err := r.ParseForm()
+	err = r.ParseForm()
 	if handleMaxBytesError(w, r, err, OAuthCallbackMaxBodySize) {
 		return
 	}
@@ -105,18 +112,31 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	http.Redirect(w, r, returnUrl, http.StatusFound)
+}
+
+// linkReturnURL checks that redirectUri belongs to a UI this backend serves
+// (one of -frontend_url's origins, which CORS already trusts), and returns
+// the page on that UI to send the user to after linking. Only the origin
+// is compared; the return URL is built from -frontend_url, never from the
+// request.
+func linkReturnURL(redirectUri string) (string, error) {
 	u, err := url.Parse(redirectUri)
 	if err != nil {
-		slog.Error("Failed to parse redirect URI",
-			"redirect_uri", redirectUri,
-			"error", err)
-		http.Error(w, "Invalid redirect URI", http.StatusBadRequest)
-		return
+		return "", err
 	}
-
-	returnUrl := u.Scheme + "://" + u.Host + "/request"
-	w.Header().Set("Location", returnUrl)
-	w.WriteHeader(http.StatusFound)
+	if u.User == nil {
+		for _, origin := range constants.FrontendOrigins() {
+			frontend, err := url.Parse(origin)
+			if err != nil || frontend.Host == "" {
+				continue
+			}
+			if u.Scheme == frontend.Scheme && strings.EqualFold(u.Host, frontend.Host) {
+				return frontend.Scheme + "://" + frontend.Host + "/request", nil
+			}
+		}
+	}
+	return "", fmt.Errorf("origin %s://%s is not in -frontend_url (%s)", u.Scheme, u.Host, constants.FrontendUrl)
 }
 
 func getDisplayName(email string, client_key string) string {

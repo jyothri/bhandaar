@@ -13,7 +13,7 @@
     For more information on how to obtain these check [these steps](debug.md#creds).
     - OAUTH_CLIENT_ID
     - OAUTH_CLIENT_SECRET
-    - FRONTEND_URL
+    - FRONTEND_URL (the UI's origin; a comma-separated list if the UI is served from more than one)
   - Bring the stack up
     ```
     docker compose -f build/docker-compose.yml up

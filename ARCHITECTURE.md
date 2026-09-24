@@ -339,7 +339,7 @@ Services:
 - `OAUTH_CLIENT_ID` - Google OAuth client ID
 - `OAUTH_CLIENT_SECRET` - Google OAuth client secret
 - `GOOGLE_APPLICATION_CREDENTIALS` - Path to service account JSON
-- `FRONTEND_URL` - Frontend URL for CORS
+- `FRONTEND_URL` - UI origin, or a comma-separated list of origins (e.g. `https://sm.jkurapati.com,http://192.168.1.118:5173`). Used for CORS, and as the only origins account linking may return to
 
 **Frontend:**
 - Backend API URL configured in `ui/src/api/index.ts`

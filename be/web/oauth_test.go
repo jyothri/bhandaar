@@ -131,3 +131,65 @@ func TestLinkSendsFormEncodedTokenRequest(t *testing.T) {
 		t.Errorf("got %d %q, want 400 for a response without a refresh token", rec.Code, rec.Body.String())
 	}
 }
+
+// 7.3: only the -frontend_url origin may receive the user after linking.
+func TestLinkReturnURL(t *testing.T) {
+	original := constants.FrontendUrl
+	// A list, as production uses: the public UI and the LAN one.
+	constants.FrontendUrl = "https://sm.example.com/, http://192.168.1.118:5173"
+	t.Cleanup(func() { constants.FrontendUrl = original })
+
+	allowed := map[string]string{
+		"https://sm.example.com/oauth/glink":    "https://sm.example.com/request",
+		"https://SM.example.com/oauth/glink":    "https://sm.example.com/request",
+		"https://sm.example.com/anything?x=1":   "https://sm.example.com/request",
+		"http://192.168.1.118:5173/oauth/glink": "http://192.168.1.118:5173/request",
+	}
+	for uri, want := range allowed {
+		got, err := linkReturnURL(uri)
+		if err != nil || got != want {
+			t.Errorf("linkReturnURL(%q) = %q, %v; want %q", uri, got, err, want)
+		}
+	}
+
+	rejected := []string{
+		"https://evil.example.com/oauth/glink",
+		"http://sm.example.com/oauth/glink",           // scheme
+		"https://sm.example.com:8443/oauth/glink",     // port
+		"http://192.168.1.118:8080/oauth/glink",       // other port on a listed host
+		"https://sm.example.com.evil.com/oauth/glink", // suffix
+		"https://sm.example.com@evil.com/oauth/glink", // userinfo trick
+		"https://user@sm.example.com/oauth/glink",     // any userinfo
+		"//evil.com/oauth/glink",
+		"/oauth/glink",
+		"javascript:alert(1)",
+		"%zz",
+	}
+	for _, uri := range rejected {
+		if got, err := linkReturnURL(uri); err == nil {
+			t.Errorf("linkReturnURL(%q) = %q, want an error", uri, got)
+		}
+	}
+}
+
+func TestLinkRejectsForeignRedirectBeforeExchange(t *testing.T) {
+	called := false
+	fakeTokenEndpoint(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})
+
+	rec := linkRequest(t, url.Values{
+		"code":        {"abc"},
+		"redirectUri": {"https://evil.example.com/oauth/glink"},
+	}.Encode())
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if called {
+		t.Error("the code was exchanged for a rejected redirectUri")
+	}
+	if loc := rec.Header().Get("Location"); loc != "" {
+		t.Errorf("Location = %q, want no redirect", loc)
+	}
+}

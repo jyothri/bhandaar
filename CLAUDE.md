@@ -73,6 +73,8 @@ go run .
 go build -o hdd
 
 # Run with custom flags
+# -frontend_url takes one origin or a comma-separated list; it sets CORS and
+# the origins account linking may redirect back to
 go run . -oauth_client_id=$OAUTH_CLIENT_ID -oauth_client_secret=$OAUTH_CLIENT_SECRET -frontend_url=http://localhost:5173
 
 # Build Docker image (from repository root)
