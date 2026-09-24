@@ -31,7 +31,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 | 2026-09-24 | `c427d8a` | CI builds on PRs but pushes only from `main` (`pushImage`); UI workflow sets `enableBuildKit` | 2.5 |
 | 2026-09-24 | `4555752` | Progress hub rewritten as a real broadcast with non-blocking sends; first backend tests (`hub_test.go`, race-clean); 2.4 confirmed in logs (streams now stay open 6–14 min); new 7.8–7.10 | 7.7 (done); 7.8, 7.9, 7.10 (new, open) |
 | 2026-09-24 | `f994bed` | Gmail scan waits for in-flight fetches before returning (no more crash on list failure); `start` passed into `logProgress` (fixes a data race and wrong Photos elapsed time); tests can import `constants`; regression test `gmail_test.go` | 7.8 |
-(Details of production database authentication are omitted from the public repo.)
+| 2026-09-24 | `0662735` | 2.6 investigated: prod compose DB env was always unused; #9 changed the default password to empty, so the next backend image cannot log in. 7.9: keep global dedupe | 2.6 (updated); 7.9 (won't fix) |
+| 2026-09-24 | *(pending)* | 2.6 corrected: prod `.env` uses `<prod-env-var>` (set and valid), so the fix is only renaming the `be` service's env to `DB_*`; no secret changes | 2.6 |
 
 ---
 
@@ -121,12 +122,9 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
   - #9 (`5394a8c`, 2025-12-24) switched to `DB_*` with defaults `hddb` / **empty password** / `hdd_db`. It also changed the repo's own `be/build/docker-compose.yml` to `DB_*`, but the separate prod compose wasn't updated.
   - (Details of production database authentication are omitted from the public repo.)
   - **So the next backend image pull will fail to connect to the database.** That same pull is what delivers 7.7 and 7.8.
-  - (Details of production database authentication are omitted from the public repo.)
+  - ~~The obvious mapping isn't enough: prod's `.env` has an empty `<prod-env-var>`…~~ *Corrected 2026-09-24:* that check tested the wrong variable name. Prod's `.env` (and `.env.sops`) define **`<prod-env-var>`** (set, non-empty), and the compose file already passes `${<prod-env-var>}` to both `hdd_db` and `be`. Logging in over TCP with `<prod-env-var>` works. The secret is fine; only the names the `be` service passes are wrong.
 
-  *Fix:* in prod `<prod-repo>/storagemanager/`:
-  1. Set `<prod-env-var>` in `.env` (and `.env.sops`) to the role's actual password, or rotate it with `ALTER ROLE hddb PASSWORD '…'` and use the new one.
-  2. In the `be` service, replace the `POSTGRES_*` entries with `DB_HOST=hdd_db`, `DB_USER=${<prod-env-var>}`, `DB_PASSWORD=${<prod-env-var>}`, `DB_NAME=${<prod-env-var>}`.
-  3. Only then pull the new backend image.
+  *Fix (no secret changes):* in prod `<prod-repo>/storagemanager/docker-compose.yml`, in the `be` service only, replace the three `POSTGRES_*` entries with `DB_HOST=hdd_db`, `DB_PORT=5432`, `DB_USER=${<prod-env-var>}`, `DB_PASSWORD=${<prod-env-var>}`, `DB_NAME=${<prod-env-var>}` and `DB_SSL_MODE=disable`. Leave `hdd_db`'s own `POSTGRES_*` alone. Do this before pulling the next backend image. The current image ignores these variables, so the edit is safe to apply now. Back up the database first: the new image also runs schema migrations.
 
   Optionally, make the backend fail fast with a clear error when `DB_PASSWORD` is empty outside local dev.
 
