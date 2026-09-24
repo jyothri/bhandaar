@@ -77,5 +77,5 @@ export const getScanRequests = async (
   if (accountKey === "none") {
     return [];
   }
-  return fetchJson("/api/scans/requests/" + accountKey);
+  return fetchJson(`/api/scans/requests/${encodeURIComponent(accountKey)}`);
 };
