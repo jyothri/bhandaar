@@ -30,6 +30,7 @@ This work was first raised as one PR (#6). After review it was split into focuse
 | 2026-09-24 | #9 | `flag.Parse()` in `main` with lazily built OAuth configs; progress hub rewritten as a non-blocking broadcast (keeps newest on full buffer, separate all-scans set); Gmail scan waits for in-flight fetches, no start-time race, no pending leak; first backend tests | 7.7, 7.8, 7.11, 7.12, 7.13, 7.14 |
 | 2026-09-24 | production (outside this repo) | Reverse proxy for the dev endpoint; SSE proxy timeouts; UI cache headers; `be` service passes `DB_*` | 2.3 (cache headers), 2.4, 2.6 |
 | 2026-09-24 | this doc | Findings and decisions: 7.6 deferred, 7.9 won't fix (keep global dedupe), 2.6 investigation, PR #6 review follow-ups | 7.6, 7.9, 7.10 (open) |
+| 2026-09-24 | production deploy | Backend and UI images built from `main` after #7–#9 deployed; `DB_*` connection and schema migration confirmed; rollback images kept until 2027-09-24 | 2.2, 2.6, 7.7, 7.8, 7.11–7.14 live |
 
 ---
 
@@ -124,6 +125,7 @@ This work was first raised as one PR (#6). After review it was split into focuse
   *Fix (no secret changes):* in prod `<prod-repo>/storagemanager/docker-compose.yml`, in the `be` service only, replace the three `POSTGRES_*` entries with `DB_HOST=hdd_db`, `DB_PORT=5432`, `DB_USER=${<prod-env-var>}`, `DB_PASSWORD=${<prod-env-var>}`, `DB_NAME=${<prod-env-var>}` and `DB_SSL_MODE=disable`. Leave `hdd_db`'s own `POSTGRES_*` alone. Do this before pulling the next backend image. The current image ignores these variables, so the edit is safe to apply now. Back up the database first: the new image also runs schema migrations.
   *Done 2026-09-24 (by the owner, on the prod box):* database backed up to `a local SQL dump` (73K). The `be` service now passes `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`/`DB_SSL_MODE`, and `hdd_db`'s own `POSTGRES_*` are untouched. `docker compose config` is clean. `be` was recreated with the current image: it logged `Successfully connected to DB!`, `/api/health` returned 200, and `/api/scans` still returns all historical data. Committed in `<prod-repo>` as `3475aac` (not pushed).
   *Caveat:* the recreate used the image already running, so it doesn't prove the new `DB_*` names work. They are first exercised by the next backend image: check its log for `Successfully connected to database`. Tag the current image before pulling, so you can roll back.
+  *Confirmed on deploy (2026-09-24):* the `main` image with #9 logged `Connecting to database host=hdd_db … user=hddb` and then `Successfully connected to database`, so the `DB_*` names work. It also ran the migration that adds `status`, `error_msg` and `completed_at` to `scans`; existing scans are intact. The previous backend and UI images are kept, tagged `pre-review-2026-09`, for rollback. A one-off cron job on the prod box removes them on or after 2027-09-24.
 
   Optionally, make the backend fail fast with a clear error when `DB_PASSWORD` is empty outside local dev.
 
@@ -201,7 +203,7 @@ This work was first raised as one PR (#6). After review it was split into focuse
 
 Merge order for the split PRs: #7, then #8 (stacked on it); #9 independently; this doc last.
 
-1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change): decides whether account linking is safe. Also **2.5** and **2.6** before the next image build or pull, since either can break production on its own. Production still needs the **7.7** and **7.8** fixes, which reach it with the next backend image; **2.6** is done, so that image can connect (first real test of the `DB_*` names).
+1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change): decides whether account linking is safe. (2.5, 2.6, 7.7 and 7.8 are done and deployed.)
 2. **1.2–1.4** OAuth URL encoding, the render-time redirect, and error handling (`fetchJson`). Fix **7.1**, **7.2** and **7.4** in the same pass, since they are on the same flow.
 3. **3.4** Query-key invalidation, plus the remaining items in section 1.
 4. **4.1** Results view (next feature).
@@ -265,6 +267,7 @@ Found on 2026-09-24 while setting up and testing the local environment. These ar
   - `GetPublisher` makes a fresh channel per scan, which removes a race where a new scan could get the previous scan's already-closed channel.
   - Removed the unused `ClosePublisher`.
   - `sse.go`: after writing the `close` event on a closed channel, the handler now flushes and returns, instead of also sending an empty progress event and spinning on the closed channel.
+  *Deployed to production 2026-09-24* (backend image built from `main` after #9).
 
   *Tests:* `be/notification/hub_test.go` is the repo's first test file. It covers every subscriber receiving every update, a non-reading subscriber not blocking, no subscribers, publisher close closing only its own key's subscribers, idempotent unsubscribe, and concurrent subscribe/publish. It passes with `go test -race -count=10` (run in `golang:1.25`, since this box has no C compiler for cgo).
   *Live check on `dev`:* two `curl` clients both received both events of scan 4. With zero clients connected, after one had connected and left (the old hang condition), scans 7 and 8 ran back to back and both completed.
@@ -278,6 +281,7 @@ Found on 2026-09-24 while setting up and testing the local environment. These ar
   - **Data race on the package-level `start`:** a scan's `start = time.Now()` raced with the previous scan's `logProgress` reading it for its final event. The race detector flagged it in the new test. `start` is now a parameter of `logProgress`.
   - **Photos progress showed the wrong elapsed time:** `startPhotosScan` never set `start`, so it reported time since the last *Gmail* scan. Fixed by the same change.
   - **No test could import `constants`:** `constants`' `init()` called `flag.Parse()` before the test binary registers `-test.*` flags. First worked around with a `testing.Testing()` check; replaced by the proper fix in 7.14.
+  *Deployed to production 2026-09-24* (backend image built from `main` after #9).
 
   *Verified:* `go test -race -count=10 ./...` passes (in `golang:1.25`). Live scan 9 on `dev` completed with correct progress events and no panics. *Not reproduced live:* the rate-limit crash itself, since that needs Gmail's quota exhausted; the fake-server test covers it. The pre-existing `gofmt` drift in `be/db/database.go` was left alone.
 
