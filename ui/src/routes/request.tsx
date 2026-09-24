@@ -162,7 +162,7 @@ function Request() {
         </div>
 
         <div className="justify-self-end pl-3 flex items-center">
-          <label htmlFor="filter">Inbox</label>
+          <label htmlFor="inbox">Inbox</label>
         </div>
         <div className="pl-3">
           <input
@@ -175,7 +175,7 @@ function Request() {
         </div>
 
         <div className="justify-self-end pl-3 flex items-center">
-          <label htmlFor="filter">Unread</label>
+          <label htmlFor="unread">Unread</label>
         </div>
         <div className="pl-3">
           <input
@@ -188,7 +188,7 @@ function Request() {
         </div>
 
         <div className="justify-self-end pl-3 flex items-center">
-          <label htmlFor="filter">Date range</label>
+          <label htmlFor="datepicker-range-start">Date range</label>
         </div>
         <div className="pl-3">
           <input
