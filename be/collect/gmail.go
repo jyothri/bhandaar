@@ -21,21 +21,21 @@ import (
 var counter_processed atomic.Int64
 var counter_pending atomic.Int64
 var start time.Time
-var gmailConfig *oauth2.Config
 
-const (
-	MaxRetryCount = 3
-	SleepTime     = 1 * time.Second
-)
-
-func init() {
-	gmailConfig = &oauth2.Config{
+// Built on first use, after main has parsed the OAuth flags.
+var gmailConfig = sync.OnceValue(func() *oauth2.Config {
+	return &oauth2.Config{
 		ClientID:     constants.OauthClientId,
 		ClientSecret: constants.OauthClientSecret,
 		Endpoint:     google.Endpoint,
 		Scopes:       []string{gmail.GmailReadonlyScope},
 	}
-}
+})
+
+const (
+	MaxRetryCount = 3
+	SleepTime     = 1 * time.Second
+)
 
 // resetCounters resets progress counters to zero for a new scan
 func resetCounters() {
@@ -48,7 +48,7 @@ func getGmailService(refreshToken string) (*gmail.Service, error) {
 		RefreshToken: refreshToken,
 	}
 	ctx := context.Background()
-	gmailService, err := gmail.NewService(ctx, option.WithTokenSource(gmailConfig.TokenSource(ctx, &tokenSrc)))
+	gmailService, err := gmail.NewService(ctx, option.WithTokenSource(gmailConfig().TokenSource(ctx, &tokenSrc)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gmail service: %w", err)
 	}

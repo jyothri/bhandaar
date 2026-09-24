@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jyothri/hdd/constants"
@@ -23,23 +24,22 @@ var paginationFields []string = []string{"nextPageToken", "incompleteSearch"}
 
 const pageSize = 1000
 
-var cloudConfig *oauth2.Config
-
-func init() {
-	cloudConfig = &oauth2.Config{
+// Built on first use, after main has parsed the OAuth flags.
+var cloudConfig = sync.OnceValue(func() *oauth2.Config {
+	return &oauth2.Config{
 		ClientID:     constants.OauthClientId,
 		ClientSecret: constants.OauthClientSecret,
 		Endpoint:     google.Endpoint,
 		Scopes:       []string{drive.DriveReadonlyScope},
 	}
-}
+})
 
 func getDriveService(refreshToken string) (*drive.Service, error) {
 	tokenSrc := oauth2.Token{
 		RefreshToken: refreshToken,
 	}
 	ctx := context.Background()
-	driveService, err := drive.NewService(ctx, option.WithTokenSource(cloudConfig.TokenSource(ctx, &tokenSrc)))
+	driveService, err := drive.NewService(ctx, option.WithTokenSource(cloudConfig().TokenSource(ctx, &tokenSrc)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create drive service: %w", err)
 	}
