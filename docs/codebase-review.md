@@ -13,8 +13,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 | | Count |
 |---|---|
-| Open | 12 |
-| Done | 45 |
+| Open | 6 |
+| Done | 51 |
 | Won't fix | 1 |
 | *of which Deferred* | 1 (7.6) |
 
@@ -36,6 +36,7 @@ This work was first raised as one PR (#6). After review it was split into focuse
 | 2026-09-24 | #14 | Durations, start times and an indeterminate progress bar; backend returns scan times as UTC instants; empty, loading and error states in history; th cells and typo; shared `Table` / `Input`; dark mode for body and form; favicon and package name; no `console.log`; `typecheck` script and a CI `check` job. Review follow-ups: cancelled consent message, `replace` on the callback redirect, stream errors before the first update, history refetch until scans finish, reversed dates rejected, no trailing space in the filter. PR review: `scans` time columns migrated to `timestamptz`; scans that can't start, or are left open by a restart, marked Failed; history shows status and polls only for recent open scans | 4.3–4.6, 5.2, 5.3; 1.11–1.14, 3.9, 5.5 |
 | 2026-09-24 | #15 | Major upgrades: Vite 8 and plugin-react-swc 4; ESLint 10 and react-hooks 7 (React Compiler rules, no code changes needed); TypeScript 6.0; globals 17 and react-refresh 0.5 (its Vite preset, off for route files). TypeScript 7 split out as 6.3 | 6.2; 6.3 (open) |
 | 2026-09-24 | #16 (stacked on #15) | Vitest + Testing Library: 36 unit tests (filter builder, date and duration formatting, `fetchJson`, OAuth state) and 8 request-form tests through the real router; filter logic moved to `src/gmailFilter.ts`; `npm test` runs in the CI `check` job | 5.4 |
+| 2026-09-24 | #17 | Backend OAuth linking: token exchange via `x/oauth2` (form body, errors stop the handler, tokens no longer logged); redirect only to `-frontend_url` origins, which now takes a list; real 400/502 responses. Scan status: new scans start `Running`; `completed_at` dropped | 7.1–7.5, 7.10 |
 
 ---
 
@@ -282,9 +283,10 @@ Merge order for the split PRs: #7, then #8 (stacked on it); #9 independently; th
 
 Section 1 is done in #12, and section 3 (except 3.7) in #13. 2.5, 2.6, 7.7 and 7.8 are done and deployed.
 
-1. **7.1–7.4** OAuth account linking in the backend: the handler continuing after a failed token request, the secret in the query string, the open redirect (7.3 allowlist) and the lost 400. Optionally move the OAuth `state` from the browser (1.1) to the backend in the same change.
-2. **4.1** Results view (next feature).
-3. Everything else, as convenient.
+OAuth account linking (7.1–7.4) and scan status (7.5, 7.10) are done in #17. **Before deploying #17:** set production's `FRONTEND_URL` to `https://sm.jkurapati.com,http://192.168.1.118:5173`, or linking from `sm.jkurapati.com` will be rejected.
+
+1. **4.1** Results view (next feature).
+2. Everything else, as convenient.
 
 ---
 
@@ -315,25 +317,29 @@ Section 1 is done in #12, and section 3 (except 3.7) in #13. 2.5, 2.6, 7.7 and 7
 
 Found on 2026-09-24 while setting up and testing the local environment. These are outside the original `ui/` scope. Items 7.1–7.4 are in OAuth account linking (`be/web/oauth.go`) and sit on the same flow as items 1.1–1.3, so fix them together. Items 7.5–7.6 came from the first end-to-end scan (scan 1), and 7.7–7.10 from debugging missing scan progress on the dev endpoint.
 
-- [ ] **7.1 Handler continues after the token request fails** — `be/web/oauth.go:68-73`
+- [x] **7.1 Handler continues after the token request fails** — `be/web/oauth.go:68-73`
   When `httpClient.Do` returns an error, the handler logs it and writes a 500 but doesn't `return`. The next line calls `defer res.Body.Close()` on a nil `res`, so the handler panics, and the recovered panic surfaces as a broken response.
-  *Fix:* `http.Error(w, ..., http.StatusBadGateway); return`. Also check `res.StatusCode` before decoding.
+  *Done in #17 (with 7.2):* the exchange uses `x/oauth2`'s `Config.Exchange`, which returns an error for transport failures and non-2xx responses. Both now return 502 and stop. Tests against a fake token endpoint cover an unreachable endpoint (the old panic) and an error status.
 
-- [ ] **7.2 Token exchange sends the secret in the query string, unencoded** — `be/web/oauth.go:53-54`
+- [x] **7.2 Token exchange sends the secret in the query string, unencoded** — `be/web/oauth.go:53-54`
   The client secret, code and `redirect_uri` are joined into the URL with `fmt.Sprintf` and sent as a POST with no body. Query strings end up in proxy and server logs, and a value containing `&`, `+` or `/` corrupts the request. Google's token endpoint expects a form body.
-  *Fix:* send the fields form-encoded with `http.PostForm(googleTokenUrl, url.Values{...})`, or use `golang.org/x/oauth2`'s `Config.Exchange`.
+  *Done in #17:* `Config.Exchange` with `google.Endpoint` sends a form-encoded POST body, with a 30-second timeout. A test checks the query string is empty, and that the code, `redirect_uri`, client ID and a secret containing `/ + & =` arrive intact. **Found along the way:** the old "token missing" warning logged the whole token response, access token included; it now logs only which tokens were present.
 
-- [ ] **7.3 The final redirect goes wherever the caller says** — `be/web/oauth.go:28`, `:110-121`
+- [x] **7.3 The final redirect goes wherever the caller says** — `be/web/oauth.go:28`, `:110-121`
   The redirect target is built from the caller-supplied `redirectUri` (`scheme://host/request`). A crafted link could send a user to any site after a real Google login: an open redirect. It also combines with the unchecked `state` (1.1).
-  *Fix:* redirect only to an allowlist, e.g. `constants.FrontendUrl`, and reject any `redirectUri` whose origin isn't in it. The same allowlist can check `state` for 1.1.
+  *Done in #17:* `redirectUri` must have the same origin (scheme, host, port, and no userinfo) as an origin in `-frontend_url`. It's checked before the code is exchanged, and the redirect target is built from the flag, never from the request.
+  - Production serves the UI from two origins: `https://sm.jkurapati.com`, where linking happens, and the LAN port `http://192.168.1.118:5173`, which its `FRONTEND_URL` holds today. So `-frontend_url` now takes a comma-separated list, used for both CORS and linking.
+  - The SSE handler no longer overwrites `Access-Control-Allow-Origin` with the raw flag; the CORS middleware echoes the allowed origin.
+  - **Before deploying:** set production's `FRONTEND_URL` to `https://sm.jkurapati.com,http://192.168.1.118:5173`.
+  - The OAuth `state` check stays in the browser (1.1).
 
-- [ ] **7.4 The 400 for a missing `redirectUri` is lost** — `be/web/oauth.go:30-33`
+- [x] **7.4 The 400 for a missing `redirectUri` is lost** — `be/web/oauth.go:30-33`
   `w.Write` is called before `w.WriteHeader(http.StatusBadRequest)`, so Go has already sent a 200 and the 400 is ignored. The same pattern appears at `:71` and `:79`, where a bare `WriteHeader` sends no body.
-  *Fix:* use `http.Error(w, "redirectUri not found in request", http.StatusBadRequest)`.
+  *Done in #17:* `http.Error` with 400 for a missing `redirectUri` (and a missing `code`), and 502 for a bad token response. The test fails against the old handler (status 200, want 400).
 
-- [ ] **7.5 `completed_at` is never set** — `be/db/database.go:549-590`
+- [x] **7.5 `completed_at` is never set** — `be/db/database.go:549-590`
   `MarkScanCompleted` and `MarkScanFailed` set `scan_end_time` and `status` but not `completed_at`. So scan 1 has `status = Completed` with a null `completed_at`, even though the log says "Scan marked as completed". `GetScan` (`:597`) reads the column back, so anything that relies on it sees no completion time.
-  *Fix:* add `completed_at = current_timestamp` to both updates. If `completed_at` duplicates `scan_end_time`, drop one of the two columns.
+  *Done in #17, by dropping the column:* it was null in every row (0 of 3 in production, 0 of 10 locally), and its only reader's callers used just `Status`, while `scan_end_time` already records the end. A startup migration runs `DROP COLUMN IF EXISTS completed_at`. Verified on a copy of the local database and on a new one: both end with the same schema, and a second start does nothing.
 
 - [ ] **7.6 Progress events never carry `completion_pct` or `eta_in_sec`** — **Deferred** — `be/collect/gmail.go:255-280`
   `logProgress` fills in the counts and elapsed time but leaves `CompletionPct` and `EtaInSec` at zero. Even the final event after scan 1 finished reported 0%. The UI shows the ETA column (always 0), and 4.3 plans a progress bar that would need these values.
@@ -377,10 +383,10 @@ Found on 2026-09-24 while setting up and testing the local environment. These ar
   *Decide:* either store one row per `(scan_id, message)`, so each scan's results are complete (dedupe in queries instead), or keep global dedupe and make the UI say "N new messages" instead of showing a per-scan listing.
   **Decision (2026-09-24): keep global dedupe.** `messagemetadata` holds each message once per user, attributed to the scan that first saw it. A scan's `scan_id` rows are the messages *new* in that scan, not everything it matched. Anything showing per-scan results (e.g. the results view in 4.1) should label them "new messages" and use the scan's processed count for the total matched.
 
-- [ ] **7.10 Every new scan shows `Completed` while it's still running** — `be/db/database.go:103-107`, `:672-674`
+- [x] **7.10 Every new scan shows `Completed` while it's still running** — `be/db/database.go:103-107`, `:672-674`
   *Partly addressed in #14:* scans that fail to start, and scans left open by a crash or restart (like scan 6), are now marked `Failed`. A running scan still reads `Completed` until it ends.
   The migration adds `status VARCHAR(50) DEFAULT 'Completed'` (so existing rows count as completed), and `LogStartScan` never sets `status`. So a scan is `Completed` from the moment it's created, until it's marked `Failed`. Scan 6 never ran, because the server crashed first (7.8), but its row still says `Completed`, with no end time.
-  *Fix:* have `LogStartScan` insert `status = 'Running'` (or `'Pending'`). With 7.5 (`completed_at`), the status, end time and completion time then agree.
+  *Done in #17:* `LogStartScan` inserts `status = 'Running'`, and the history shows "Running". Verified live: a local scan read `Running` until it completed, and a `Running` scan cut off by a restart was marked `Failed` by the startup sweep.
 
 - [x] **7.11 A full subscriber buffer dropped the newest progress update** — `be/notification/hub.go` (`broadcast`)
   Raised in PR #6 review, on the 7.7 hub: when a subscriber's buffer was full, `broadcast` discarded the *incoming* update. Progress events are cumulative snapshots, so the newest is the valuable one. A lagging client could miss a scan's final event and show stale counts indefinitely.

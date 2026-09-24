@@ -40,7 +40,8 @@ export type ScanRequest = {
   scan_start_time: string;
   // Seconds as a decimal string, or "-1" while the scan has no end time.
   scan_duration_in_sec: string;
-  // "Failed" once a scan fails or is interrupted. Scans that are still
-  // running also read "Completed" today (review item 7.10).
+  // "Running" until the scan ends, then "Completed" or "Failed" (also for an
+  // interrupted scan). Scans from before statuses were recorded read
+  // "Completed", even if they never finished.
   status: string;
 };

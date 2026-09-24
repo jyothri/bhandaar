@@ -129,9 +129,9 @@ func Close() error {
 
 func LogStartScan(scanType string) (int, error) {
 	insert_row := `insert into scans
-									(scan_type, created_on, scan_start_time)
+									(scan_type, created_on, scan_start_time, status)
 								values
-									($1, current_timestamp, current_timestamp) RETURNING id`
+									($1, current_timestamp, current_timestamp, 'Running') RETURNING id`
 	lastInsertId := 0
 	err := db.QueryRow(insert_row, scanType).Scan(&lastInsertId)
 	if err != nil {
@@ -622,7 +622,7 @@ func MarkScanFailed(scanId int, errMsg string) error {
 // GetScanById retrieves a scan by ID
 func GetScanById(scanId int) (*Scan, error) {
 	read_row := `select id, scan_type, COALESCE(status, 'Completed') as status,
-		error_msg, completed_at FROM scans WHERE id = $1`
+		error_msg FROM scans WHERE id = $1`
 
 	var scan Scan
 	err := db.Get(&scan, read_row, scanId)
@@ -651,7 +651,20 @@ func migrateDB() error {
 		return err
 	}
 
+	if err := migrateDropCompletedAt(); err != nil {
+		return err
+	}
 	return migrateScanTimesToTimestamptz()
+}
+
+// migrateDropCompletedAt drops scans.completed_at. Nothing ever set it, so
+// every value was null, and scan_end_time already records when a scan
+// finished or failed.
+func migrateDropCompletedAt() error {
+	if _, err := db.Exec(`ALTER TABLE scans DROP COLUMN IF EXISTS completed_at`); err != nil {
+		return fmt.Errorf("failed to drop scans.completed_at: %w", err)
+	}
+	return nil
 }
 
 func migrateDBv0() error {
@@ -691,7 +704,7 @@ func migrateDBv0() error {
 	return migrateAddStatusColumn()
 }
 
-// migrateAddStatusColumn adds status, error_msg, and completed_at columns to scans table
+// migrateAddStatusColumn adds status and error_msg columns to scans table
 func migrateAddStatusColumn() error {
 	// Check if status column exists
 	check_column := `SELECT column_name FROM information_schema.columns
@@ -703,14 +716,13 @@ func migrateAddStatusColumn() error {
 	if err != nil {
 		alter_table := `ALTER TABLE scans
 			ADD COLUMN status VARCHAR(50) DEFAULT 'Completed',
-			ADD COLUMN error_msg TEXT,
-			ADD COLUMN completed_at TIMESTAMPTZ`
+			ADD COLUMN error_msg TEXT`
 
 		_, err = db.Exec(alter_table)
 		if err != nil {
 			return fmt.Errorf("failed to add status columns to scans table: %w", err)
 		}
-		slog.Info("Added status, error_msg, and completed_at columns to scans table")
+		slog.Info("Added status and error_msg columns to scans table")
 	}
 
 	return nil
@@ -870,7 +882,6 @@ type Scan struct {
 	Duration      string       `db:"duration"`
 	Status        string       `db:"status"`
 	ErrorMsg      sql.NullString `db:"error_msg"`
-	CompletedAt   sql.NullTime `db:"completed_at"`
 }
 
 type ScanRequests struct {
