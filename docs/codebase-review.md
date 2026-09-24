@@ -14,7 +14,7 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 | | Count |
 |---|---|
 | Open | 36 |
-| Done | 9 |
+| Done | 12 |
 | Won't fix | 1 |
 | *of which Deferred* | 1 (7.6) |
 
@@ -33,7 +33,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 | 2026-09-24 | `f994bed` | Gmail scan waits for in-flight fetches before returning (no more crash on list failure); `start` passed into `logProgress` (fixes a data race and wrong Photos elapsed time); tests can import `constants`; regression test `gmail_test.go` | 7.8 |
 | 2026-09-24 | `0662735` | 2.6 investigated: prod compose DB env was always unused; #9 changed the default password to empty, so the next backend image cannot log in. 7.9: keep global dedupe | 2.6 (updated); 7.9 (won't fix) |
 | 2026-09-24 | `96efe83` | 2.6 corrected: prod `.env` uses `<prod-env-var>` (set and valid), so the fix is only renaming the `be` service's env to `DB_*`; no secret changes | 2.6 |
-| 2026-09-24 | *(pending)* | Renamed `docs/ui-review.md` → `docs/codebase-review.md` (branch → `feature/review-ui-backend-ops`); 2.6 done in prod (`<prod-repo>` `3475aac`); prod nginx changes committed there (`8fb8cd9`, `d1caefe`) | 2.6 |
+| 2026-09-24 | `0e8d708` | Renamed `docs/ui-review.md` → `docs/codebase-review.md` (branch → `feature/review-ui-backend-ops`); 2.6 done in prod (`<prod-repo>` `3475aac`); prod nginx changes committed there (`8fb8cd9`, `d1caefe`) | 2.6 |
+| 2026-09-24 | *(pending)* | PR #6 review: CI `test` job runs `go test -race`, image job needs it; path filters fixed; hub keeps the newest snapshot on a full buffer; skipped Gmail messages no longer counted as active; hub tests isolated; CLAUDE.md backend-URL note updated | 2.7, 7.11, 7.12 (new, done) |
 
 ---
 
@@ -130,6 +131,10 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
   *Caveat:* the recreate used the image already running, so it doesn't prove the new `DB_*` names work. They are first exercised by the next backend image: check its log for `Successfully connected to database`. Tag the current image before pulling, so you can roll back.
 
   Optionally, make the backend fail fast with a clear error when `DB_PASSWORD` is empty outside local dev.
+
+- [x] **2.7 CI never ran the tests, and path filters missed build inputs** — `.github/workflows/backend-docker-image.yml`, `ui-docker-image.yml`
+  Raised in PR #6 review: both workflows only built Docker images, so the new tests (7.7, 7.8) could regress unnoticed. The backend workflow's filter was `"**.go"`, so changes to `be/go.mod`, `be/go.sum`, `be/build/Dockerfile` or the workflow itself didn't trigger it. The filter also matched the unrelated `agent/linux/` Go module. The UI workflow didn't trigger on its own changes either.
+  *Done (2026-09-24):* the backend workflow has a `test` job (`actions/setup-go@v5` with `go-version-file: be/go.mod`, then `go test -race ./...` in `be/`; `ubuntu-latest` has gcc for cgo). The image job `needs: test`, so a failing test also blocks the push from `main`. Filters are now `be/**` + the workflow file for the backend, and `ui/**` + the workflow file for the UI. Both pass `actionlint`.
 
 ## 3. React / TanStack Query idioms
 
@@ -287,6 +292,15 @@ Found on 2026-09-24 while setting up and testing the local environment. These ar
 - [ ] **7.10 Every new scan shows `Completed` while it's still running** — `be/db/database.go:103-107`, `:672-674`
   The migration adds `status VARCHAR(50) DEFAULT 'Completed'` (so existing rows count as completed), and `LogStartScan` never sets `status`. So a scan is `Completed` from the moment it's created, until it's marked `Failed`. Scan 6 never ran, because the server crashed first (7.8), but its row still says `Completed`, with no end time.
   *Fix:* have `LogStartScan` insert `status = 'Running'` (or `'Pending'`). With 7.5 (`completed_at`), the status, end time and completion time then agree.
+
+- [x] **7.11 A full subscriber buffer dropped the newest progress update** — `be/notification/hub.go` (`broadcast`)
+  Raised in PR #6 review, on the 7.7 hub: when a subscriber's buffer was full, `broadcast` discarded the *incoming* update. Progress events are cumulative snapshots, so the newest is the valuable one. A lagging client could miss a scan's final event and show stale counts indefinitely.
+  *Done (2026-09-24):* on a full buffer, `broadcast` now discards the oldest queued snapshot and enqueues the new one, and warns only if that still fails. New test `TestFullBufferKeepsNewestUpdate`: it publishes 48 updates to a non-reading subscriber and expects the buffer to end on update 48. It fails on the previous hub (20/20 runs) and passes with the fix.
+  *Test hygiene:* hub tests now wait for the hub to finish with their publisher (`closeAndWait`) before returning. Before, a late broadcast to `NOTIFICATION_ALL` could leak into the next test under `-count=N`, which made `TestEverySubscriberReceivesEveryUpdate` flaky at high counts. The suite passes `-count=300`, and `-race -count=20`.
+
+- [x] **7.12 Skipped messages stayed counted as active** — `be/collect/gmail.go` (`getMessageInfo`)
+  Raised in PR #6 review (it predates the PR): the permanent-failure path logged "skipping" and returned without `counter_pending.Add(-1)`, so a scan that skipped any message ended with `ActiveCount > 0` in its final progress event.
+  *Done (2026-09-24):* that path now decrements `counter_pending`. The retry path doesn't, because the retried fetch still owns the message. New test `TestSkippedMessagesAreNotLeftActive`: a fake Gmail API returns 404 for one of 3 messages. On the old code the final event showed `processed=2 active=1`; with the fix it's `processed=2 active=0`.
 
 ---
 

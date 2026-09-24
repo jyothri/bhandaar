@@ -4,14 +4,30 @@ on:
   push:
     branches: ["main"]
     paths:
-      - "**.go"
+      - "be/**"
+      - ".github/workflows/backend-docker-image.yml"
   pull_request:
     branches: ["main"]
     paths:
-      - "**.go"
+      - "be/**"
+      - ".github/workflows/backend-docker-image.yml"
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: be/go.mod
+          cache-dependency-path: be/go.sum
+      - name: Test (with race detector)
+        run: go test -race ./...
+        working-directory: be
+
   backend:
+    # Don't build or push an image whose tests fail.
+    needs: test
     runs-on: ubuntu-latest
 
     steps:

@@ -43,6 +43,35 @@ func publish(t *testing.T, pub chan<- Progress, p Progress) {
 	}
 }
 
+// waitPublisherGone waits until processNotifications has finished with key's
+// publisher; removing it from the map is the last thing it does.
+func waitPublisherGone(t *testing.T, key string) {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		globalHub.mu.RLock()
+		_, exists := globalHub.publishers[key]
+		globalHub.mu.RUnlock()
+		if !exists {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("publisher %q still registered", key)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+// closeAndWait closes a test's publisher and waits until the hub is done with
+// it, so its broadcasts can't leak into later tests' NOTIFICATION_ALL
+// subscribers.
+func closeAndWait(t *testing.T, pub chan<- Progress, key string) {
+	t.Helper()
+	close(pub)
+	waitPublisherGone(t, key)
+}
+
 func TestEverySubscriberReceivesEveryUpdate(t *testing.T) {
 	a, unsubA := Subscribe(NOTIFICATION_ALL)
 	defer unsubA()
@@ -58,7 +87,7 @@ func TestEverySubscriberReceivesEveryUpdate(t *testing.T) {
 			}
 		}
 	}
-	close(pub)
+	closeAndWait(t, pub, "every-subscriber")
 }
 
 func TestPublishingNeverBlocks(t *testing.T) {
@@ -70,13 +99,51 @@ func TestPublishingNeverBlocks(t *testing.T) {
 	for i := 0; i < subscriberBuffer*3; i++ {
 		publish(t, pub, Progress{ScanId: i})
 	}
-	close(pub)
+	closeAndWait(t, pub, "never-blocks")
+}
+
+func TestFullBufferKeepsNewestUpdate(t *testing.T) {
+	// Progress is a cumulative snapshot: a lagging client must still end up
+	// with the latest one (e.g. a scan's final event), not stale counts.
+	// Subscribe to this publisher's own key (not NOTIFICATION_ALL, which other
+	// tests' publishers may still be broadcasting to). The hub closes this
+	// channel once the publisher closes, so draining it needs no timing.
+	ch, unsub := Subscribe("keeps-newest")
+	defer unsub()
+
+	pub := GetPublisher("keeps-newest")
+	const total = subscriberBuffer * 3
+	for i := 1; i <= total; i++ {
+		publish(t, pub, Progress{ScanId: i})
+	}
+	closeAndWait(t, pub, "keeps-newest")
+
+	var got []int
+	deadline := time.After(timeout)
+	for done := false; !done; {
+		select {
+		case p, ok := <-ch:
+			if !ok {
+				done = true
+				break
+			}
+			got = append(got, p.ScanId)
+		case <-deadline:
+			t.Fatal("timed out waiting for the subscriber channel to close")
+		}
+	}
+	if len(got) != subscriberBuffer {
+		t.Fatalf("got %d buffered updates, want %d", len(got), subscriberBuffer)
+	}
+	if last := got[len(got)-1]; last != total {
+		t.Fatalf("newest update in buffer is %d, want %d (got %v)", last, total, got)
+	}
 }
 
 func TestPublishingWithNoSubscribers(t *testing.T) {
 	pub := GetPublisher("no-subscribers")
 	publish(t, pub, Progress{ScanId: 1})
-	close(pub)
+	closeAndWait(t, pub, "no-subscribers")
 }
 
 func TestPublisherCloseClosesOnlyItsOwnSubscribers(t *testing.T) {
@@ -89,7 +156,7 @@ func TestPublisherCloseClosesOnlyItsOwnSubscribers(t *testing.T) {
 	publish(t, pub, Progress{ScanId: 7})
 	receive(t, own)
 	receive(t, all)
-	close(pub)
+	closeAndWait(t, pub, "closing-key")
 
 	expectClosed(t, own)
 	select {
@@ -109,7 +176,7 @@ func TestUnsubscribeStopsDeliveryAndCloses(t *testing.T) {
 
 	pub := GetPublisher("after-unsubscribe")
 	publish(t, pub, Progress{ScanId: 1})
-	close(pub)
+	closeAndWait(t, pub, "after-unsubscribe")
 }
 
 func TestConcurrentSubscribeAndPublish(t *testing.T) {
@@ -130,5 +197,5 @@ func TestConcurrentSubscribeAndPublish(t *testing.T) {
 		publish(t, pub, Progress{ScanId: i})
 	}
 	<-done
-	close(pub)
+	closeAndWait(t, pub, "concurrent")
 }

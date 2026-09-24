@@ -5,10 +5,12 @@ on:
     branches: ["main"]
     paths:
       - "ui/**"
+      - ".github/workflows/ui-docker-image.yml"
   pull_request:
     branches: ["main"]
     paths:
       - "ui/**"
+      - ".github/workflows/ui-docker-image.yml"
 
 jobs:
   ui:

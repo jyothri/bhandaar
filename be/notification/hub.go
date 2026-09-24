@@ -8,7 +8,7 @@ import (
 const NOTIFICATION_ALL string = "all"
 
 // subscriberBuffer is how many progress updates a slow subscriber can fall
-// behind before updates to it are dropped. Publishing never blocks.
+// behind before its oldest queued update is discarded. Publishing never blocks.
 const subscriberBuffer = 16
 
 // Hub fans progress notifications out to every subscriber. Each Subscribe
@@ -103,9 +103,20 @@ func broadcast(key string, progress Progress) {
 		select {
 		case ch <- progress:
 		default:
-			slog.Warn("Dropping progress update for slow subscriber",
-				"subscription", key,
-				"scan_id", progress.ScanId)
+			// Buffer full. Updates are cumulative snapshots, so discard the
+			// oldest queued one rather than this newer one; otherwise a lagging
+			// client could miss a scan's final event and show stale counts.
+			select {
+			case <-ch:
+			default:
+			}
+			select {
+			case ch <- progress:
+			default:
+				slog.Warn("Dropping progress update for slow subscriber",
+					"subscription", key,
+					"scan_id", progress.ScanId)
+			}
 		}
 	}
 }

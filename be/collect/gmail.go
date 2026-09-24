@@ -224,6 +224,8 @@ func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan
 			"message_id", id,
 			"retries_exhausted", retryCount == 0,
 			"error", err)
+		// No longer pending (a retry above keeps it pending instead).
+		counter_pending.Add(-1)
 		return
 	}
 	from := ""
