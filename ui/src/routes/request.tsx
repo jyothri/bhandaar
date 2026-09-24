@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { requestScan, getAccounts } from "../api";
 import { queryKeys } from "../api/queryKeys";
 import { config } from "../config";
+import { buildGmailFilter } from "../gmailFilter";
 import { createOAuthState } from "../oauthState";
 import { ScanMetadata, ScanType } from "../types/scans";
 import ScanProgress from "../components/ScanProgress";
@@ -31,36 +32,6 @@ const initialForm: RequestForm = {
   startDate: "",
   endDate: "",
 };
-
-// Formats a YYYY-MM-DD date as Gmail's YYYY/MM/DD, shifted by `days`.
-function dateForApi(input: string, days = 0): string {
-  const [year, month, day] = input.split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day + days));
-  return date.toISOString().slice(0, 10).replace(/-/g, "/");
-}
-
-function buildGmailFilter({
-  inbox,
-  unread,
-  startDate,
-  endDate,
-}: RequestForm): string {
-  const terms: string[] = [];
-  if (inbox) {
-    terms.push("label:inbox");
-  }
-  if (unread) {
-    terms.push("is:unread");
-  }
-  if (startDate !== "") {
-    terms.push(`after:${dateForApi(startDate)}`);
-  }
-  if (endDate !== "") {
-    // Gmail's before: is exclusive; use the next day to include endDate.
-    terms.push(`before:${dateForApi(endDate, 1)}`);
-  }
-  return terms.join(" ");
-}
 
 function Request() {
   const queryClient = useQueryClient();
