@@ -1,3 +1,6 @@
+// @vitest-environment node
+// No DOM needed; skips starting jsdom for this file.
+
 import { describe, expect, it, vi } from "vitest";
 import { buildGmailFilter, dateForApi } from "./gmailFilter";
 

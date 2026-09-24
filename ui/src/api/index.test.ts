@@ -1,3 +1,6 @@
+// @vitest-environment node
+// No DOM needed; skips starting jsdom for this file.
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAccounts, getScanRequests, requestScan } from ".";
 import { ScanType } from "../types/scans";

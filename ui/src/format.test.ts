@@ -1,3 +1,6 @@
+// @vitest-environment node
+// No DOM needed; skips starting jsdom for this file.
+
 import { describe, expect, it } from "vitest";
 import { formatDateTime, formatDuration } from "./format";
 
