@@ -1,7 +1,7 @@
 # UI Review
 
 - **Date:** 2026-09-23
-- **Scope:** `ui/` (all 18 source/config files, ~900 lines)
+- **Scope:** `ui/` (all 18 source/config files, ~900 lines); section 7 adds backend findings (`be/`) from local testing
 - **Reviewed at:** `feature/driveagent-relocated-sidecar` (commit `7e93442`); `ui/` is identical on `main`
 - **Baseline (run after dev setup):** `tsc -b` passes · `npm run build` passes · `npm run lint` reports 5 errors, 2 warnings (all covered by items 1.7, 3.1, 3.5 and `prefer-const` in `src/api/index.ts`)
 
@@ -9,12 +9,12 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix
 
 ## Status
 
-*Last updated: 2026-09-23*
+*Last updated: 2026-09-24*
 
 | | Count |
 |---|---|
-| Open | 32 |
-| Done | 1 |
+| Open | 38 |
+| Done | 2 |
 | Won't fix | 0 |
 
 ### Change log
@@ -23,6 +23,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix
 |---|---|---|---|
 | 2026-09-23 | `b3a81fc` | Review notes added | — |
 | 2026-09-23 | `5d4f052` | UI dependencies upgraded within current majors: 19 advisories (10 high) → 0; tailwind moved to devDependencies; renamed router devtools/plugin APIs; router plugin moved before `plugin-react-swc` (dev server refused to start otherwise); Node 22 pinned via `ui/.nvmrc` | 6.1 |
+| 2026-09-24 | `3cc9a7e` | Backend URL and Google client ID moved to Vite env vars (`src/config.ts`, `ui/.env.development`, `ui/.env.production`); dev server now uses the local backend; optional `DEV_PUBLIC_HOST` in `vite.config.ts` for serving the dev env via `<dev-endpoint>` | 2.1 |
+| 2026-09-24 | *(this doc update)* | Backend OAuth findings added as section 7; first end-to-end test via `<dev-endpoint>` (Google linking + scan 1) added 2.4, 7.5, 7.6; 1.9 corrected (`label:unread` works) | 7.1–7.6, 2.4 (new, open) |
 
 ---
 
@@ -62,7 +64,7 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix
   *Fix:* the `<input type="date">` value is already `YYYY-MM-DD`; store it as is.
 
 - [ ] **1.9 Gmail filter syntax errors** — `src/routes/request.tsx:105-120`
-  - `label:unread` should be `is:unread`.
+  - ~~`label:unread` should be `is:unread`.~~ *Corrected 2026-09-24:* scan 1 used `label:inbox label:unread` and returned 40 unread inbox messages, so Gmail accepts `label:unread`. `is:unread` is the documented form, but switching is optional.
   - Gmail's `before:` is exclusive, so the chosen end date is left out. Add one day, or label the field to say so.
   - Stray double space after `after:` (line 114).
 
@@ -72,9 +74,10 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix
 
 ## 2. Configuration and deployment
 
-- [ ] **2.1 Backend URL and OAuth client ID are hard-coded** — `src/api/index.ts:4`, `src/routes/request.tsx:128`
+- [x] **2.1 Backend URL and OAuth client ID are hard-coded** — `src/api/index.ts:4`, `src/routes/request.tsx:128`
   Local dev always talks to production.
   *Fix:* use `import.meta.env.VITE_BACKEND_URL` and `VITE_GOOGLE_CLIENT_ID`, and add a `.env.example`.
+  *Done in `3cc9a7e`:* both values come from `src/config.ts`, which throws a clear error at startup if either is missing; they are typed in `src/vite-env.d.ts`. Instead of a `.env.example`, the per-mode files are committed: `ui/.env.development` (`http://localhost:8090`) and `ui/.env.production` (production URL, so the Docker build is unchanged). Neither value is secret. Local overrides go in `.env.development.local`, which is gitignored.
 
 - [ ] **2.2 Router devtools are mounted in every build** — `src/routes/__root.tsx:20`
   *Fix:* gate them behind `import.meta.env.DEV`, or lazy-load them.
@@ -83,6 +86,10 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix
   - Pin the base image (e.g. `node:22-alpine` instead of `node:latest`).
   - Use `npm ci` instead of `npm install`.
   - Add an nginx SPA fallback (`try_files $uri /index.html`). Without it, a browser landing directly on `/oauth/glink` or `/requests` gets a 404, and the Google OAuth redirect lands on `/oauth/glink`. **High priority.**
+
+- [ ] **2.4 nginx drops the progress stream every 60 seconds** — prod nginx `<prod-repo>/nginx/nginx/conf/nginx.conf`, `location /sse` in the `sm` and the dev endpoint blocks
+  Seen 2026-09-24: progress-stream connections through the dev endpoint ended at exactly 1m0.01s and 1m3.0s. That's nginx's default `proxy_read_timeout` of 60s, which cuts the stream whenever no event arrives for a minute. The browser reconnects, but each drop makes the UI briefly show "Connection lost" (see 1.7). nginx may also buffer the stream and delay events.
+  *Fix:* in both `/sse` locations, add `proxy_read_timeout 1h;`, `proxy_buffering off;` and `proxy_cache off;`. The `Upgrade`/`Connection` headers aren't needed for SSE. Optionally have the backend send a keep-alive comment every ~30s, so any proxy timeout stays harmless.
 
 ## 3. React / TanStack Query idioms
 
@@ -152,8 +159,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix
 
 ## Suggested order
 
-1. **1.1** OAuth `state` and **2.3** SPA fallback in nginx: these decide whether account linking is safe and works at all.
-2. **1.2–1.4** OAuth URL encoding, the render-time redirect, and error handling (`fetchJson`).
+1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change) and **2.3** SPA fallback in nginx: these decide whether account linking is safe and works at all.
+2. **1.2–1.4** OAuth URL encoding, the render-time redirect, and error handling (`fetchJson`). Fix **7.1**, **7.2** and **7.4** in the same pass, since they are on the same flow.
 3. **3.4** Query-key invalidation, plus the remaining items in section 1.
 4. **4.1** Results view (next feature).
 5. Everything else, as convenient.
@@ -173,6 +180,36 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix
 
 ---
 
+## 7. Backend (`be/`)
+
+Found on 2026-09-24 while setting up and testing the local environment. These are outside the original `ui/` scope. Items 7.1–7.4 are in OAuth account linking (`be/web/oauth.go`) and sit on the same flow as items 1.1–1.3, so fix them together. Items 7.5–7.6 came from the first end-to-end scan (scan 1).
+
+- [ ] **7.1 Handler continues after the token request fails** — `be/web/oauth.go:68-73`
+  When `httpClient.Do` returns an error, the handler logs it and writes a 500 but doesn't `return`. The next line calls `defer res.Body.Close()` on a nil `res`, so the handler panics, and the recovered panic surfaces as a broken response.
+  *Fix:* `http.Error(w, ..., http.StatusBadGateway); return`. Also check `res.StatusCode` before decoding.
+
+- [ ] **7.2 Token exchange sends the secret in the query string, unencoded** — `be/web/oauth.go:53-54`
+  The client secret, code and `redirect_uri` are joined into the URL with `fmt.Sprintf` and sent as a POST with no body. Query strings end up in proxy and server logs, and a value containing `&`, `+` or `/` corrupts the request. Google's token endpoint expects a form body.
+  *Fix:* send the fields form-encoded with `http.PostForm(googleTokenUrl, url.Values{...})`, or use `golang.org/x/oauth2`'s `Config.Exchange`.
+
+- [ ] **7.3 The final redirect goes wherever the caller says** — `be/web/oauth.go:28`, `:110-121`
+  The redirect target is built from the caller-supplied `redirectUri` (`scheme://host/request`). A crafted link could send a user to any site after a real Google login: an open redirect. It also combines with the unchecked `state` (1.1).
+  *Fix:* redirect only to an allowlist, e.g. `constants.FrontendUrl`, and reject any `redirectUri` whose origin isn't in it. The same allowlist can check `state` for 1.1.
+
+- [ ] **7.4 The 400 for a missing `redirectUri` is lost** — `be/web/oauth.go:30-33`
+  `w.Write` is called before `w.WriteHeader(http.StatusBadRequest)`, so Go has already sent a 200 and the 400 is ignored. The same pattern appears at `:71` and `:79`, where a bare `WriteHeader` sends no body.
+  *Fix:* use `http.Error(w, "redirectUri not found in request", http.StatusBadRequest)`.
+
+- [ ] **7.5 `completed_at` is never set** — `be/db/database.go:549-590`
+  `MarkScanCompleted` and `MarkScanFailed` set `scan_end_time` and `status` but not `completed_at`. So scan 1 has `status = Completed` with a null `completed_at`, even though the log says "Scan marked as completed". `GetScan` (`:597`) reads the column back, so anything that relies on it sees no completion time.
+  *Fix:* add `completed_at = current_timestamp` to both updates. If `completed_at` duplicates `scan_end_time`, drop one of the two columns.
+
+- [ ] **7.6 Progress events never carry `completion_pct` or `eta_in_sec`** — `be/collect/gmail.go:255-280`
+  `logProgress` fills in the counts and elapsed time but leaves `CompletionPct` and `EtaInSec` at zero. Even the final event after scan 1 finished reported 0%. The UI shows the ETA column (always 0), and 4.3 plans a progress bar that would need these values.
+  *Fix:* compute them from processed / (processed + pending), or send an explicit `done` flag with the final event. Otherwise drop both fields and the UI's ETA column.
+
+---
+
 ## Local dev environment
 
 Set up on 2026-09-23. It exists only on the developer machine and is not in the repo, except for `ui/.nvmrc`.
@@ -185,4 +222,6 @@ Set up on 2026-09-23. It exists only on the developer machine and is not in the 
     go run . -frontend_url=http://localhost:5173
   ```
   OAuth linking also needs real `-oauth_client_id` and `-oauth_client_secret` values; both default to `dummy`.
-- **UI:** `cd ui && npm run dev`. Until **2.1** is fixed, the UI calls the production backend, not the local one.
+- **UI:** `cd ui && npm run dev` (port 5173) calls the local backend at `http://localhost:8090` (from `ui/.env.development`). The backend's CORS default (`-frontend_url=http://localhost:5173`) already allows it.
+- **Remote access (`<dev-endpoint>`):** set up 2026-09-24. Verified the same day: Google account linking and a Gmail scan (scan 1: 40 messages) both worked end to end through it. The production nginx on <prod-host> (`<prod-repo>/nginx`) proxies `/api` and `/sse` to `<dev-host>:8090` and everything else to `<dev-host>:5173`, behind the same access control as `sm.jkurapati.com`. The Let's Encrypt certificate was issued via the certbot container (webroot) and renews like the others. To use it, put `VITE_BACKEND_URL=<dev-endpoint>` and `DEV_PUBLIC_HOST=<dev-endpoint>` in `ui/.env.development.local` (gitignored). `DEV_PUBLIC_HOST` makes `vite.config.ts` listen on all interfaces, accept only that `Host`, and run live reload over `wss` on port 443. Start the backend with `-frontend_url=<dev-endpoint>`. Delete the `.local` file to go back to plain localhost.
+- **Local OAuth linking:** Google only redirects to registered URIs. As of 2026-09-24 the OAuth client allows `http://localhost:5173/oauth/glink` (Vite dev), `http://localhost:8080/oauth/glink`, `http://localhost:8090/oauth/glink` and `https://sm.jkurapati.com/oauth/glink`, so the dev server works without changes. The UI builds the redirect URI from the page's own origin (`window.location`), so a UI served from any other host or port will be rejected by Google.
