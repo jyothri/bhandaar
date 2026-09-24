@@ -129,9 +129,9 @@ func Close() error {
 
 func LogStartScan(scanType string) (int, error) {
 	insert_row := `insert into scans
-									(scan_type, created_on, scan_start_time)
+									(scan_type, created_on, scan_start_time, status)
 								values
-									($1, current_timestamp, current_timestamp) RETURNING id`
+									($1, current_timestamp, current_timestamp, 'Running') RETURNING id`
 	lastInsertId := 0
 	err := db.QueryRow(insert_row, scanType).Scan(&lastInsertId)
 	if err != nil {

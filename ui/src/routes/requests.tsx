@@ -20,7 +20,10 @@ function scanDuration(scan: ScanRequest): string {
   if (scan.status === "Failed") {
     return seconds < 0 ? "Failed" : `Failed after ${formatDuration(seconds)}`;
   }
-  return seconds < 0 ? "Not finished" : formatDuration(seconds);
+  if (seconds < 0) {
+    return scan.status === "Running" ? "Running" : "Not finished";
+  }
+  return formatDuration(seconds);
 }
 
 // A scan that may still finish: no end time, not failed, and recent.
