@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getScannedAccounts, getScanRequests } from "../api";
 import { queryKeys } from "../api/queryKeys";
 import { formatDateTime, formatDuration } from "../format";
+import { Table, Td, Tr } from "../components/Table";
 import { useState } from "react";
 
 export const Route = createFileRoute("/requests")({
@@ -96,49 +97,28 @@ function Requests() {
           <p className="p-3">No scans for this account.</p>
         )}
         {scanRequests !== undefined && scanRequests.length > 0 && (
-          <table className="w-7/8 mt-3 text-sm text-left rtl:text-right text-gray-500 dark:text-gray-400 justify-self-center">
-            <thead>
-              <tr className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
-                <th scope="col" className="px-6 py-3">
-                  Name
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Scan Type
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Scan id
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Search Filter
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Scan start
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Duration
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {scanRequests?.map((scanRequest) => (
-                <tr
-                  key={scanRequest.scan_id}
-                  className="odd:bg-white odd:dark:bg-gray-900 even:bg-gray-50 even:dark:bg-gray-800 border-b dark:border-gray-700 border-gray-200"
-                >
-                  <td className="px-6 py-4">{scanRequest.name}</td>
-                  <td className="px-6 py-4">{scanRequest.scan_type}</td>
-                  <td className="px-6 py-4">{scanRequest.scan_id}</td>
-                  <td className="px-6 py-4">{scanRequest.search_filter}</td>
-                  <td className="px-6 py-4">
-                    {formatDateTime(scanRequest.scan_start_time)}
-                  </td>
-                  <td className="px-6 py-4">
-                    {scanDuration(scanRequest.scan_duration_in_sec)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <Table
+            className="w-7/8"
+            headers={[
+              "Name",
+              "Scan Type",
+              "Scan id",
+              "Search Filter",
+              "Scan start",
+              "Duration",
+            ]}
+          >
+            {scanRequests.map((scanRequest) => (
+              <Tr key={scanRequest.scan_id}>
+                <Td>{scanRequest.name}</Td>
+                <Td>{scanRequest.scan_type}</Td>
+                <Td>{scanRequest.scan_id}</Td>
+                <Td>{scanRequest.search_filter}</Td>
+                <Td>{formatDateTime(scanRequest.scan_start_time)}</Td>
+                <Td>{scanDuration(scanRequest.scan_duration_in_sec)}</Td>
+              </Tr>
+            ))}
+          </Table>
         )}
       </div>
     </div>

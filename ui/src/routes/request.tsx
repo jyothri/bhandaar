@@ -8,6 +8,7 @@ import { config } from "../config";
 import { createOAuthState } from "../oauthState";
 import { ScanMetadata, ScanType } from "../types/scans";
 import ScanProgress from "../components/ScanProgress";
+import Input from "../components/Input";
 
 export const Route = createFileRoute("/request")({
   component: Request,
@@ -223,21 +224,19 @@ function Request() {
           <label htmlFor="datepicker-range-start">Date range</label>
         </div>
         <div className="pl-3">
-          <input
+          <Input
             id="datepicker-range-start"
             name="start"
             type="date"
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5  dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
             placeholder="Select date start"
             value={form.startDate}
             onChange={(e) => updateForm({ startDate: e.target.value })}
           />
           <span className="mx-4 text-gray-500">to</span>
-          <input
+          <Input
             id="datepicker-range-end"
             name="end"
             type="date"
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5  dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
             placeholder="Select date end"
             value={form.endDate}
             onChange={(e) => updateForm({ endDate: e.target.value })}
@@ -247,13 +246,12 @@ function Request() {
           <label htmlFor="filter">Query filter</label>
         </div>
         <div className="pl-3">
-          <input
+          <Input
             id="filter"
             type="text"
-            placeholder=""
             disabled={true}
             value={queryFilter}
-            className="border-2 border-gray-200 rounded-lg w-10/12"
+            className="w-10/12"
           />
         </div>
         <div className="justify-self-center col-span-2 p-3">

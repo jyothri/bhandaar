@@ -3,6 +3,7 @@ import useSSE from "../components/hooks/useSse";
 import { useState } from "react";
 import { Progress } from "../types/scans";
 import { formatDuration } from "../format";
+import { Table, Td, Tr } from "./Table";
 
 export default function ScanProgress() {
   const [sseData, setSseData] = useState<Progress | null>(null);
@@ -30,43 +31,26 @@ export default function ScanProgress() {
         Scan Progress
       </h4>
       <div id="container" className="border-2 border-gray-200 gap-2">
-        <table className="w-5/8 mt-3 text-sm text-left rtl:text-right text-gray-500 dark:text-gray-400 justify-self-center">
-          <thead>
-            <tr className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
-              <th scope="col" className="px-6 py-3">
-                Scan Id
-              </th>
-              <th scope="col" className="px-6 py-3">
-                Elapsed
-              </th>
-              <th scope="col" className="px-6 py-3">
-                Processed
-              </th>
-              <th scope="col" className="px-6 py-3">
-                Processing
-              </th>
-              <th scope="col" className="px-6 py-3">
-                Progress
-              </th>
-            </tr>
-          </thead>
-          <tbody className="">
-            <tr
-              key={sseData.scan_id}
-              className="odd:bg-white odd:dark:bg-gray-900 even:bg-gray-50 even:dark:bg-gray-800 border-b dark:border-gray-700 border-gray-200"
-            >
-              <td className="px-6 py-4">{sseData.scan_id}</td>
-              <td className="px-6 py-4">
-                {formatDuration(sseData.elapsed_in_sec)}
-              </td>
-              <td className="px-6 py-4">{sseData.processed_count}</td>
-              <td className="px-6 py-4">{sseData.active_count}</td>
-              <td className="px-6 py-4">
-                <ProgressBar progress={sseData} />
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <Table
+          className="w-5/8"
+          headers={[
+            "Scan Id",
+            "Elapsed",
+            "Processed",
+            "Processing",
+            "Progress",
+          ]}
+        >
+          <Tr key={sseData.scan_id}>
+            <Td>{sseData.scan_id}</Td>
+            <Td>{formatDuration(sseData.elapsed_in_sec)}</Td>
+            <Td>{sseData.processed_count}</Td>
+            <Td>{sseData.active_count}</Td>
+            <Td>
+              <ProgressBar progress={sseData} />
+            </Td>
+          </Tr>
+        </Table>
         {errorLine}
       </div>
     </div>
