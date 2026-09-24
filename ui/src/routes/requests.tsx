@@ -21,14 +21,18 @@ function Requests() {
   const {
     data: scannedAccounts,
     isLoading,
-    isError,
+    error: accountsError,
   } = useQuery({
     queryKey: queryKeys.scannedAccounts,
     queryFn: () => getScannedAccounts(),
     staleTime: Infinity,
   });
 
-  const { data: scanRequests } = useQuery({
+  const {
+    data: scanRequests,
+    isLoading: scanRequestsLoading,
+    error: scanRequestsError,
+  } = useQuery({
     queryKey: queryKeys.scanRequests(selectedAccount),
     queryFn: () => getScanRequests(selectedAccount),
     enabled: selectedAccount !== "none",
@@ -51,9 +55,9 @@ function Requests() {
               Fetching data..
             </div>
           )}
-          {isError && (
-            <div className="flex justify-center items-center sm:rounded-lg dark:text-gray-300">
-              Error fetching data.
+          {accountsError && (
+            <div className="flex justify-center items-center sm:rounded-lg text-red-500">
+              Couldn't load accounts: {accountsError.message}
             </div>
           )}
           <div className="justify-self-end pl-3">
@@ -75,7 +79,16 @@ function Requests() {
             </select>
           </div>
         </div>
-        {scanRequests !== undefined && scanRequests?.length > 0 && (
+        {scanRequestsLoading && <p className="p-3">Loading scans…</p>}
+        {scanRequestsError && (
+          <p className="p-3 text-red-500">
+            Couldn't load scans: {scanRequestsError.message}
+          </p>
+        )}
+        {scanRequests?.length === 0 && (
+          <p className="p-3">No scans for this account.</p>
+        )}
+        {scanRequests !== undefined && scanRequests.length > 0 && (
           <table className="w-7/8 mt-3 text-sm text-left rtl:text-right text-gray-500 dark:text-gray-400 justify-self-center">
             <thead>
               <tr className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
