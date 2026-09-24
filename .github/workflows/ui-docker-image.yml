@@ -30,9 +30,11 @@ jobs:
         run: npm run lint
       - name: Typecheck
         run: npm run typecheck
+      - name: Test
+        run: npm test
 
   ui:
-    # Don't build or push an image that fails lint or typecheck.
+    # Don't build or push an image that fails lint, typecheck or tests.
     needs: check
     runs-on: ubuntu-latest
 
