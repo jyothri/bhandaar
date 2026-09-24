@@ -25,10 +25,10 @@ import (
 
 var photosApiBaseUrl = "https://photoslibrary.googleapis.com/"
 var throttler = rate.NewLimiter(150, 10)
-var photosConfig *oauth2.Config
 
-func init() {
-	photosConfig = &oauth2.Config{
+// Built on first use, after main has parsed the OAuth flags.
+var photosConfig = sync.OnceValue(func() *oauth2.Config {
+	return &oauth2.Config{
 		ClientID:     constants.OauthClientId,
 		ClientSecret: constants.OauthClientSecret,
 		Endpoint:     google.Endpoint,
@@ -36,7 +36,7 @@ func init() {
 			"https://www.googleapis.com/auth/photoslibrary.readonly",
 			"https://www.googleapis.com/auth/photoslibrary.sharing"},
 	}
-}
+})
 
 func getPhotosService(refreshToken string) (*http.Client, error) {
 	if refreshToken == "" {
@@ -45,7 +45,7 @@ func getPhotosService(refreshToken string) (*http.Client, error) {
 	tokenSrc := oauth2.Token{
 		RefreshToken: refreshToken,
 	}
-	client := photosConfig.Client(context.Background(), &tokenSrc)
+	client := photosConfig().Client(context.Background(), &tokenSrc)
 	if client == nil {
 		return nil, fmt.Errorf("failed to create photos client")
 	}
@@ -105,7 +105,7 @@ func startPhotosScan(scanId int, photosScan GPhotosScan, photosMediaItem chan<- 
 	ticker := time.NewTicker(5 * time.Second)
 	done := make(chan bool)
 	notificationChannel := notification.GetPublisher(photosScan.AlbumId)
-	go logProgress(scanId, photosScan.AlbumId, done, ticker, notificationChannel)
+	go logProgress(scanId, photosScan.AlbumId, time.Now(), done, ticker, notificationChannel)
 	var wg sync.WaitGroup
 	var err error
 	if photosScan.AlbumId != "" {

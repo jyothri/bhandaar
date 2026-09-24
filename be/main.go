@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log/slog"
 	"os"
 
@@ -26,6 +27,8 @@ func init() {
 }
 
 func main() {
+	flag.Parse()
+
 	// Initialize database connection
 	if err := db.SetupDatabase(); err != nil {
 		slog.Error("Failed to initialize database", "error", err)
