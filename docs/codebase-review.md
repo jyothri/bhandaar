@@ -1,7 +1,7 @@
-# UI Review
+# Codebase Review: UI, Backend, Ops
 
 - **Date:** 2026-09-23
-- **Scope:** `ui/` (all 18 source/config files, ~900 lines); section 7 adds backend findings (`be/`) from local testing
+- **Scope:** started as a review of `ui/` (all 18 source/config files, ~900 lines). It grew to cover the backend (`be/`, section 7) and ops (CI, Docker, production nginx and compose on <prod-host>, section 2) as testing turned up issues there. Renamed from `docs/ui-review.md` on 2026-09-24.
 - **Reviewed at:** `feature/driveagent-relocated-sidecar` (commit `7e93442`); `ui/` is identical on `main`
 - **Baseline (run after dev setup):** `tsc -b` passes · `npm run build` passes · `npm run lint` reports 5 errors, 2 warnings (all covered by items 1.7, 3.1, 3.5 and `prefer-const` in `src/api/index.ts`)
 
@@ -13,8 +13,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 | | Count |
 |---|---|
-| Open | 37 |
-| Done | 8 |
+| Open | 36 |
+| Done | 9 |
 | Won't fix | 1 |
 | *of which Deferred* | 1 (7.6) |
 
@@ -32,7 +32,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 | 2026-09-24 | `4555752` | Progress hub rewritten as a real broadcast with non-blocking sends; first backend tests (`hub_test.go`, race-clean); 2.4 confirmed in logs (streams now stay open 6–14 min); new 7.8–7.10 | 7.7 (done); 7.8, 7.9, 7.10 (new, open) |
 | 2026-09-24 | `f994bed` | Gmail scan waits for in-flight fetches before returning (no more crash on list failure); `start` passed into `logProgress` (fixes a data race and wrong Photos elapsed time); tests can import `constants`; regression test `gmail_test.go` | 7.8 |
 | 2026-09-24 | `0662735` | 2.6 investigated: prod compose DB env was always unused; #9 changed the default password to empty, so the next backend image cannot log in. 7.9: keep global dedupe | 2.6 (updated); 7.9 (won't fix) |
-| 2026-09-24 | *(pending)* | 2.6 corrected: prod `.env` uses `<prod-env-var>` (set and valid), so the fix is only renaming the `be` service's env to `DB_*`; no secret changes | 2.6 |
+| 2026-09-24 | `96efe83` | 2.6 corrected: prod `.env` uses `<prod-env-var>` (set and valid), so the fix is only renaming the `be` service's env to `DB_*`; no secret changes | 2.6 |
+| 2026-09-24 | *(pending)* | Renamed `docs/ui-review.md` → `docs/codebase-review.md` (branch → `feature/review-ui-backend-ops`); 2.6 done in prod (`<prod-repo>` `3475aac`); prod nginx changes committed there (`8fb8cd9`, `d1caefe`) | 2.6 |
 
 ---
 
@@ -101,12 +102,12 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
   - `ui/.dockerignore` was never used, because the build context is the repo root. It is replaced by `ui/Dockerfile.dockerignore`, which BuildKit reads for `ui/Dockerfile`. It keeps a local `ui/node_modules`, `dist` and `.env*.local` out of the image.
   - Verified with a local build: the image builds, only `https://sm.jkurapati.com` is baked in, and it's 93 MB.
   - **The serving config deliberately stays out of this repo.** Production's `ui` container mounts its own `nginx.conf` from the `<prod-repo>` repo over `/etc/nginx/conf.d/`, and nothing else runs this image. So a copy here would never be used, and it would drift. The image ships nginx's stock config, so a plain `docker run` returns 404 for client-side routes; mount a config if you run it standalone. A baked-in `ui/nginx.conf` was tried and removed on 2026-09-24.
-  - **Cache headers were added to production's config instead** (2026-09-24, prod `<prod-repo>/storagemanager/nginx/conf/nginx.conf`, uncommitted there, backup `a backup copy` next to `nginx/`). Hashed `/assets/*` files get `Cache-Control: public, max-age=31536000, immutable`, and a missing asset returns a real 404 instead of `index.html`. Everything else, including `index.html` and the SPA fallback, gets `no-cache`, so a new deploy is picked up. After reloading the container, `/`, `/requests` and `/oauth/glink` still return `index.html` (200).
+  - **Cache headers were added to production's config instead** (2026-09-24, prod `<prod-repo>/storagemanager/nginx/conf/nginx.conf`; committed in `<prod-repo>` as `d1caefe`). Hashed `/assets/*` files get `Cache-Control: public, max-age=31536000, immutable`, and a missing asset returns a real 404 instead of `index.html`. Everything else, including `index.html` and the SPA fallback, gets `no-cache`, so a new deploy is picked up. After reloading the container, `/`, `/requests` and `/oauth/glink` still return `index.html` (200).
 
 - [x] **2.4 nginx drops the progress stream every 60 seconds** — prod nginx `<prod-repo>/nginx/nginx/conf/nginx.conf`, `location /sse` in the `sm` and the dev endpoint blocks
   Seen 2026-09-24: progress-stream connections through the dev endpoint ended at exactly 1m0.01s and 1m3.0s. That's nginx's default `proxy_read_timeout` of 60s, which cuts the stream whenever no event arrives for a minute. The browser reconnects, but each drop makes the UI briefly show "Connection lost" (see 1.7). nginx may also buffer the stream and delay events.
   *Fix:* in both `/sse` locations, add `proxy_read_timeout 1h;`, `proxy_buffering off;` and `proxy_cache off;`. The `Upgrade`/`Connection` headers aren't needed for SSE. Optionally have the backend send a keep-alive comment every ~30s, so any proxy timeout stays harmless.
-  *Done on the prod box on 2026-09-24; not in this repo:* added `proxy_read_timeout 1h; proxy_buffering off; proxy_cache off;` to the `/sse` locations of both `sm.jkurapati.com` and `<dev-endpoint>`. Ran `nginx -t`, then reloaded (no restart). Backup: `<prod-repo>a backup copy`. The change is left uncommitted in `<prod-repo>` with the owner's other edits. *Confirmed 2026-09-24:* after the reload, dev backend logs show streams through the dev endpoint staying open for 6m57s, 13m51s and 3m20s, with no more drops at exactly 60s. The keep-alive comment is not done.
+  *Done on the prod box on 2026-09-24; not in this repo:* added `proxy_read_timeout 1h; proxy_buffering off; proxy_cache off;` to the `/sse` locations of both `sm.jkurapati.com` and `<dev-endpoint>`. Ran `nginx -t`, then reloaded (no restart). Committed in `<prod-repo>` as `8fb8cd9`, together with the the dev endpoint block. *Confirmed 2026-09-24:* after the reload, dev backend logs show streams through the dev endpoint staying open for 6m57s, 13m51s and 3m20s, with no more drops at exactly 60s. The keep-alive comment is not done.
 
 - [x] **2.5 CI pushes `:latest` from pull requests** — `.github/workflows/ui-docker-image.yml`, `backend-docker-image.yml`
   Both workflows run on `pull_request` as well as `push` to `main`, and call `docker-build-push` with `addLatest: true` and pushing left on. So building any PR that touches `ui/` or `be/` overwrites `jyothri/bhandaar-ui:latest` / `jyothri/bhandaar:latest`, which production runs (`<prod-repo>/storagemanager/docker-compose.yml`). The next `docker compose pull` there would deploy unmerged code.
@@ -114,7 +115,7 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
   *Done (2026-09-24):* both workflows now pass `pushImage: ${{ github.event_name == 'push' }}`, and the only `push` trigger is `main`. So PRs still build, which catches broken Dockerfiles, but never push. In `docker-build-push@v6`, `skipPush` is `getInput("pushImage") === "false"`. With push skipped, it still logs in to Docker Hub when credentials are available (for private base images), and skips the login otherwise, e.g. for fork PRs without secrets. The UI workflow also sets `enableBuildKit: true`, because `ui/Dockerfile.dockerignore` (2.3) is only honoured by BuildKit. It worked before only because the runner's Docker already defaults to BuildKit. Both files pass `actionlint` 1.7.12.
   *Not done:* pinning production to a version tag instead of `:latest`. *To confirm:* the next PR's run log should show the build step without a push.
 
-- [ ] **2.6 Production compose passes DB settings under names the backend doesn't read** — prod `<prod-repo>/storagemanager/docker-compose.yml`, `be/db/database.go:51-54`
+- [x] **2.6 Production compose passes DB settings under names the backend doesn't read** — prod `<prod-repo>/storagemanager/docker-compose.yml`, `be/db/database.go:51-54`
   Since issue #9 (`5394a8c`), the backend reads `DB_HOST`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`, but the `be` service passes `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`. A current backend image would ignore those and use the defaults (`hddb`, empty password, `hdd_db`). It works only if the production values happen to match. This is unverified: I didn't read the production values.
   *Investigated 2026-09-24 (read-only; no secrets printed). It's a code change on top of config that was always dead:*
   - The `POSTGRES_*` entries on `be` date from the prod compose's first commit (`6b554d0`, 2025-03-09, in `<prod-repo>`). **No backend version ever read them.**
@@ -125,6 +126,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
   - ~~The obvious mapping isn't enough: prod's `.env` has an empty `<prod-env-var>`…~~ *Corrected 2026-09-24:* that check tested the wrong variable name. Prod's `.env` (and `.env.sops`) define **`<prod-env-var>`** (set, non-empty), and the compose file already passes `${<prod-env-var>}` to both `hdd_db` and `be`. Logging in over TCP with `<prod-env-var>` works. The secret is fine; only the names the `be` service passes are wrong.
 
   *Fix (no secret changes):* in prod `<prod-repo>/storagemanager/docker-compose.yml`, in the `be` service only, replace the three `POSTGRES_*` entries with `DB_HOST=hdd_db`, `DB_PORT=5432`, `DB_USER=${<prod-env-var>}`, `DB_PASSWORD=${<prod-env-var>}`, `DB_NAME=${<prod-env-var>}` and `DB_SSL_MODE=disable`. Leave `hdd_db`'s own `POSTGRES_*` alone. Do this before pulling the next backend image. The current image ignores these variables, so the edit is safe to apply now. Back up the database first: the new image also runs schema migrations.
+  *Done 2026-09-24 (by the owner, on the prod box):* database backed up to `a local SQL dump` (73K). The `be` service now passes `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`/`DB_SSL_MODE`, and `hdd_db`'s own `POSTGRES_*` are untouched. `docker compose config` is clean. `be` was recreated with the current image: it logged `Successfully connected to DB!`, `/api/health` returned 200, and `/api/scans` still returns all historical data. Committed in `<prod-repo>` as `3475aac` (not pushed).
+  *Caveat:* the recreate used the image already running, so it doesn't prove the new `DB_*` names work. They are first exercised by the next backend image: check its log for `Successfully connected to database`. Tag the current image before pulling, so you can roll back.
 
   Optionally, make the backend fail fast with a clear error when `DB_PASSWORD` is empty outside local dev.
 
@@ -196,7 +199,7 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 ## Suggested order
 
-1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change): decides whether account linking is safe. Also **2.5** and **2.6** before the next image build or pull, since either can break production on its own. Production still needs the **7.7** and **7.8** fixes, which reach it with the next backend image. **2.6 must be done first, or that image cannot connect to the database.**
+1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change): decides whether account linking is safe. Also **2.5** and **2.6** before the next image build or pull, since either can break production on its own. Production still needs the **7.7** and **7.8** fixes, which reach it with the next backend image; **2.6** is done, so that image can connect (first real test of the `DB_*` names).
 2. **1.2–1.4** OAuth URL encoding, the render-time redirect, and error handling (`fetchJson`). Fix **7.1**, **7.2** and **7.4** in the same pass, since they are on the same flow.
 3. **3.4** Query-key invalidation, plus the remaining items in section 1.
 4. **4.1** Results view (next feature).
@@ -300,5 +303,5 @@ Set up on 2026-09-23. It exists only on the developer machine and is not in the 
   ```
   OAuth linking also needs real `-oauth_client_id` and `-oauth_client_secret` values; both default to `dummy`.
 - **UI:** `cd ui && npm run dev` (port 5173) calls the local backend at `http://localhost:8090` (from `ui/.env.development`). The backend's CORS default (`-frontend_url=http://localhost:5173`) already allows it.
-- **Remote access (`<dev-endpoint>`):** set up 2026-09-24. Verified the same day: Google account linking and a Gmail scan (scan 1: 40 messages) both worked end to end through it. The production nginx on <prod-host> (`<prod-repo>/nginx`) proxies `/api` and `/sse` to `<dev-host>:8090` and everything else to `<dev-host>:5173`, behind the same access control as `sm.jkurapati.com`. The Let's Encrypt certificate was issued via the certbot container (webroot) and renews like the others. To use it, put `VITE_BACKEND_URL=<dev-endpoint>` and `DEV_PUBLIC_HOST=<dev-endpoint>` in `ui/.env.development.local` (gitignored). `DEV_PUBLIC_HOST` makes `vite.config.ts` listen on all interfaces, accept only that `Host`, and run live reload over `wss` on port 443. Start the backend with `-frontend_url=<dev-endpoint>`. Delete the `.local` file to go back to plain localhost.
+- **Remote access (`<dev-endpoint>`):** set up 2026-09-24. The prod nginx block is committed in `<prod-repo>` as `8fb8cd9`. Verified the same day: Google account linking and a Gmail scan (scan 1: 40 messages) both worked end to end through it. The production nginx on <prod-host> (`<prod-repo>/nginx`) proxies `/api` and `/sse` to `<dev-host>:8090` and everything else to `<dev-host>:5173`, behind the same access control as `sm.jkurapati.com`. The Let's Encrypt certificate was issued via the certbot container (webroot) and renews like the others. To use it, put `VITE_BACKEND_URL=<dev-endpoint>` and `DEV_PUBLIC_HOST=<dev-endpoint>` in `ui/.env.development.local` (gitignored). `DEV_PUBLIC_HOST` makes `vite.config.ts` listen on all interfaces, accept only that `Host`, and run live reload over `wss` on port 443. Start the backend with `-frontend_url=<dev-endpoint>`. Delete the `.local` file to go back to plain localhost.
 - **Local OAuth linking:** Google only redirects to registered URIs. As of 2026-09-24 the OAuth client allows `http://localhost:5173/oauth/glink` (Vite dev), `http://localhost:8080/oauth/glink`, `http://localhost:8090/oauth/glink` and `https://sm.jkurapati.com/oauth/glink`, so the dev server works without changes. The UI builds the redirect URI from the page's own origin (`window.location`), so a UI served from any other host or port will be rejected by Google.
