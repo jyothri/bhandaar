@@ -3,9 +3,26 @@
 - **Date:** 2026-09-23
 - **Scope:** `ui/` (all 18 source/config files, ~900 lines)
 - **Reviewed at:** `feature/driveagent-relocated-sidecar` (commit `7e93442`); `ui/` is identical on `main`
-- **Not run:** `tsc` / `npm run lint` (`node_modules` not installed)
+- **Baseline (run after dev setup):** `tsc -b` passes · `npm run build` passes · `npm run lint` reports 5 errors, 2 warnings (all covered by items 1.7, 3.1, 3.5 and `prefer-const` in `src/api/index.ts`)
 
 Status legend: `[ ]` open · `[x]` done · `[-]` won't fix
+
+## Status
+
+*Last updated: 2026-09-23*
+
+| | Count |
+|---|---|
+| Open | 32 |
+| Done | 1 |
+| Won't fix | 0 |
+
+### Change log
+
+| Date | Commit | Change | Items |
+|---|---|---|---|
+| 2026-09-23 | `b3a81fc` | Review notes added | — |
+| 2026-09-23 | `5d4f052` | UI dependencies upgraded within current majors: 19 advisories (10 high) → 0; tailwind moved to devDependencies; renamed router devtools/plugin APIs; router plugin moved before `plugin-react-swc` (dev server refused to start otherwise); Node 22 pinned via `ui/.nvmrc` | 6.1 |
 
 ---
 
@@ -140,3 +157,32 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix
 3. **3.4** Query-key invalidation, plus the remaining items in section 1.
 4. **4.1** Results view (next feature).
 5. Everything else, as convenient.
+
+---
+
+## 6. Dependencies
+
+- [x] **6.1 Upgrade within current major versions** — done in `5d4f052`
+  React 19.0 → 19.3, TanStack Query 5.66 → 5.103, TanStack Router 1.111 → 1.170, Tailwind 4.0 → 4.3, Vite 6.1 → 6.4, typescript-eslint 8.24 → 8.70. `npm audit`: 19 → 0.
+
+- [ ] **6.2 Major-version upgrades (deferred; do as separate changes)**
+  - Vite 6 → 8 and `@vitejs/plugin-react-swc` 3 → 4: the bundler underneath changes.
+  - ESLint 9 → 10 and `eslint-plugin-react-hooks` 5 → 7: the new plugin adds React Compiler rules that will flag more code.
+  - TypeScript 5.7 → 7: the compiler has been rewritten.
+  - `globals` 15 → 17, `eslint-plugin-react-refresh` 0.4 → 0.5.
+
+---
+
+## Local dev environment
+
+Set up on 2026-09-23. It exists only on the developer machine and is not in the repo, except for `ui/.nvmrc`.
+
+- **Node:** 22 via nvm (`cd ui && nvm use`).
+- **Postgres:** Docker container `postgres` (image `postgres:17`, port 5432, volume `bhandaar-pgdata`). Restart with `docker start postgres`.
+- **Backend:** there's no `.env` loader, and `be/.env` isn't gitignored, so pass the settings as environment variables:
+  ```bash
+  cd be && DB_HOST=localhost DB_USER=postgres DB_PASSWORD=postgres DB_NAME=postgres \
+    go run . -frontend_url=http://localhost:5173
+  ```
+  OAuth linking also needs real `-oauth_client_id` and `-oauth_client_secret` values; both default to `dummy`.
+- **UI:** `cd ui && npm run dev`. Until **2.1** is fixed, the UI calls the production backend, not the local one.
