@@ -13,8 +13,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 | | Count |
 |---|---|
-| Open | 7 |
-| Done | 49 |
+| Open | 6 |
+| Done | 51 |
 | Won't fix | 1 |
 | *of which Deferred* | 1 (7.6) |
 
@@ -34,6 +34,8 @@ This work was first raised as one PR (#6). After review it was split into focuse
 | 2026-09-24 | #12 | UI bugs and security: random OAuth `state` checked on the callback; OAuth URLs built with `URLSearchParams`; callback redirect moved to `beforeLoad`; shared `fetchJson`; SSE hook fixes; date and Gmail filter fixes; label targets | 1.1–1.10 |
 | 2026-09-24 | #13 | React / TanStack Query idioms: Gmail filter computed during render; request form in one state object; `enabled` instead of the `"none"` sentinel; query keys in one place, with invalidation of the real ones; mutation errors handled once and Submit disabled while pending; one message at a time; `Header` inside the router. `npm run lint` is clean | 3.1–3.6, 3.8 |
 | 2026-09-24 | #14 | Durations, start times and an indeterminate progress bar; backend returns scan times as UTC instants; empty, loading and error states in history; th cells and typo; shared `Table` / `Input`; dark mode for body and form; favicon and package name; no `console.log`; `typecheck` script and a CI `check` job. Review follow-ups: cancelled consent message, `replace` on the callback redirect, stream errors before the first update, history refetch until scans finish, reversed dates rejected, no trailing space in the filter. PR review: `scans` time columns migrated to `timestamptz`; scans that can't start, or are left open by a restart, marked Failed; history shows status and polls only for recent open scans | 4.3–4.6, 5.2, 5.3; 1.11–1.14, 3.9, 5.5 |
+| 2026-09-24 | #15 | Major upgrades: Vite 8 and plugin-react-swc 4; ESLint 10 and react-hooks 7 (React Compiler rules, no code changes needed); TypeScript 6.0; globals 17 and react-refresh 0.5 (its Vite preset, off for route files). TypeScript 7 split out as 6.3 | 6.2; 6.3 (open) |
+| 2026-09-24 | #16 (stacked on #15) | Vitest + Testing Library: 36 unit tests (filter builder, date and duration formatting, `fetchJson`, OAuth state) and 8 request-form tests through the real router; filter logic moved to `src/gmailFilter.ts`; `npm test` runs in the CI `check` job | 5.4 |
 | 2026-09-24 | #17 | Backend OAuth linking: token exchange via `x/oauth2` (form body, errors stop the handler, tokens no longer logged); redirect only to `-frontend_url` origins, which now takes a list; real 400/502 responses. Scan status: new scans start `Running`; `completed_at` dropped | 7.1–7.5, 7.10 |
 
 ---
@@ -253,10 +255,21 @@ Raised in review after #13; all done in #14:
   *Done:* the ones in `api/index.ts` and the request page's error handling went in #12 and #13; the rest in #14. `src/` has no `console` calls left.
 - [x] **5.3** Add a `typecheck` script (`tsc -b`) and run lint and typecheck in CI.
   *Done in #14:* the UI workflow's new `check` job runs `npm ci`, `npm run lint` and `npm run typecheck` with Node from `ui/.nvmrc`, and the image job `needs` it.
-- [ ] **5.4** Add tests (there are none):
+- [x] **5.4** Add tests (there are none):
   - Vitest for the pure functions: filter builder, date formatting, `fetchJson`.
   - React Testing Library for the request form.
   - Moving the filter logic out of the component makes it testable on its own.
+
+  *Done in #16:*
+  - **Setup:** Vitest 5 with jsdom, run by `npm test`. The test config fixes the two required `VITE_*` values, so tests ignore local `.env` files. The filter logic moved to `src/gmailFilter.ts`.
+  - **36 unit tests:**
+    - Filter builder: all options, next-day `before:`, and month/year/leap/DST boundaries, in three non-UTC zones.
+    - Duration and date formatting, including the same instant at different offsets.
+    - `fetchJson`, through the API functions: text, JSON and HTML errors, and no `[object Object]`.
+    - OAuth state helpers.
+  - **8 request-form tests** in `src/test/`, rendered through the real route tree: validation, the filter, labels, one POST with Submit disabled while pending, error replacing success, and the Google link's state.
+  - Reintroducing earlier bugs fails the matching tests: Submit not disabled, a label on the wrong input, and a trailing space.
+  - CI's `check` job runs `npm test`.
 
 - [x] **5.5 The Gmail filter ends with a space** — `src/routes/request.tsx`
   Raised in review after #13: every term was appended with a trailing space, which was stored as `search_filter` and shown in history.
@@ -282,11 +295,21 @@ OAuth account linking (7.1–7.4) and scan status (7.5, 7.10) are done in #17. *
 - [x] **6.1 Upgrade within current major versions** — done in #7
   React 19.0 → 19.3, TanStack Query 5.66 → 5.103, TanStack Router 1.111 → 1.170, Tailwind 4.0 → 4.3, Vite 6.1 → 6.4, typescript-eslint 8.24 → 8.70. `npm audit`: 19 → 0.
 
-- [ ] **6.2 Major-version upgrades (deferred; do as separate changes)**
+- [x] **6.2 Major-version upgrades (deferred; do as separate changes)**
   - Vite 6 → 8 and `@vitejs/plugin-react-swc` 3 → 4: the bundler underneath changes.
   - ESLint 9 → 10 and `eslint-plugin-react-hooks` 5 → 7: the new plugin adds React Compiler rules that will flag more code.
   - TypeScript 5.7 → 7: the compiler has been rewritten.
   - `globals` 15 → 17, `eslint-plugin-react-refresh` 0.4 → 0.5.
+
+  *Done in #15, one commit per group, except TypeScript 7 (see 6.3):*
+  - **Vite 8, plugin-react-swc 4:** no config changes needed. The Tailwind and TanStack Router plugins already accept Vite 8, and Node 22.23 meets its `>=22.12`. The build takes about 0.4 s instead of 1.5 s, and the main chunk is 315 kB instead of 339 kB. The env check still fails a misconfigured build, the devtools stay out of `dist`, route components hot-update with state kept, and the Docker image builds.
+  - **ESLint 10, react-hooks 7:** the recommended set grows from 2 rules to 16, adding the React Compiler checks. The existing code passes them all, and a probe file confirmed they fire.
+  - **TypeScript 6.0.3:** no config changes needed. 6.0 no longer auto-includes `@types/*` packages (`types` defaults to `[]`), which doesn't affect this app.
+  - **globals 17, react-refresh 0.5:** the rule now comes from the plugin's Vite preset, at `error`. 0.5 also reports local components in files with other exports, which in TanStack route files is a false positive (autoCodeSplitting handles fast refresh), so the rule is off for `src/routes/**`.
+
+- [ ] **6.3 TypeScript 7** — blocked
+  Split out of 6.2 on 2026-09-24. The `typescript@7` package no longer exposes the compiler API (its root export is only the version; the rest is under `unstable/*`), and every `typescript-eslint` release, including canary, requires `typescript <6.1.0`. Upgrading would break `npm run lint` and the CI `check` job.
+  *When unblocked:* upgrade once `typescript-eslint` supports TS 7. Running TS 7 for `tsc` alongside TS 6 for linting was considered and rejected: it means two compilers that may disagree.
 
 ---
 

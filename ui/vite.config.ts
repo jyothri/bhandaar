@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import tailwindcss from "@tailwindcss/vite";
@@ -39,5 +40,17 @@ export default defineConfig(({ command, mode }) => {
           hmr: { host: publicHost, protocol: "wss", clientPort: 443 },
         }
       : undefined,
+    test: {
+      environment: "jsdom",
+      setupFiles: ["./src/test/setup.ts"],
+      // Fixed values for src/config.ts, so tests never depend on a
+      // developer's .env files.
+      env: {
+        VITE_BACKEND_URL: "http://backend.test",
+        VITE_GOOGLE_CLIENT_ID: "test-client-id",
+      },
+      unstubGlobals: true,
+      unstubEnvs: true,
+    },
   };
 });
