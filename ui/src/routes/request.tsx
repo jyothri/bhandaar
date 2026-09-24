@@ -44,21 +44,21 @@ function buildGmailFilter({
   startDate,
   endDate,
 }: RequestForm): string {
-  let filter = "";
+  const terms: string[] = [];
   if (inbox) {
-    filter += "label:inbox ";
+    terms.push("label:inbox");
   }
   if (unread) {
-    filter += "is:unread ";
+    terms.push("is:unread");
   }
   if (startDate !== "") {
-    filter += `after:${dateForApi(startDate)} `;
+    terms.push(`after:${dateForApi(startDate)}`);
   }
   if (endDate !== "") {
     // Gmail's before: is exclusive; use the next day to include endDate.
-    filter += `before:${dateForApi(endDate, 1)} `;
+    terms.push(`before:${dateForApi(endDate, 1)}`);
   }
-  return filter;
+  return terms.join(" ");
 }
 
 function Request() {
