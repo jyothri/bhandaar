@@ -112,6 +112,14 @@ function Request() {
       });
       return;
     }
+    // YYYY-MM-DD strings compare in date order.
+    if (form.startDate && form.endDate && form.endDate < form.startDate) {
+      setMessage({
+        kind: "error",
+        text: "The end date is before the start date.",
+      });
+      return;
+    }
     const request: ScanMetadata = {
       ScanType: ScanType.GMail,
       GMailScan: {
