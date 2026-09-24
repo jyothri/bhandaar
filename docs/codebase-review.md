@@ -215,11 +215,12 @@ This work was first raised as one PR (#6). After review it was split into focuse
 
 Merge order for the split PRs: #7, then #8 (stacked on it); #9 independently; this doc last.
 
-1. **1.1** OAuth `state` (with **7.3** redirect allowlist, same backend change): decides whether account linking is safe. (2.5, 2.6, 7.7 and 7.8 are done and deployed.)
-2. **1.2–1.4** OAuth URL encoding, the render-time redirect, and error handling (`fetchJson`). Fix **7.1**, **7.2** and **7.4** in the same pass, since they are on the same flow.
-3. **3.4** Query-key invalidation, plus the remaining items in section 1.
-4. **4.1** Results view (next feature).
-5. Everything else, as convenient.
+Section 1 is done in #12. 2.5, 2.6, 7.7 and 7.8 are done and deployed.
+
+1. **7.1–7.4** OAuth account linking in the backend: the handler continuing after a failed token request, the secret in the query string, the open redirect (7.3 allowlist) and the lost 400. Optionally move the OAuth `state` from the browser (1.1) to the backend in the same change.
+2. **3.4** Query-key invalidation.
+3. **4.1** Results view (next feature).
+4. Everything else, as convenient.
 
 ---
 
