@@ -100,7 +100,10 @@ npm run dev
 npm run build
 
 # Type check
-npx tsc -b
+npm run typecheck
+
+# Run tests (Vitest; npm run test:watch to watch)
+npm test
 
 # Lint
 npm run lint
@@ -185,7 +188,8 @@ For Cloud Storage access, set `GOOGLE_APPLICATION_CREDENTIALS` to service accoun
 
 ## Important Notes
 
-- **Tests**: Very few: `be/notification/hub_test.go` and `be/collect/gmail_test.go` (fake Gmail API via `httptest`). Run `go test ./...` from `be/`; add `-race` where cgo/gcc is available, e.g. `docker run --rm -v "$PWD":/src -w /src golang:1.23.5 go test -race ./...` (match the `toolchain` in `be/go.mod`). `flag.Parse()` runs in `main`, so tests use flag defaults; read flag values lazily, never from another package's `init()`. CI runs `go test -race ./...` (backend workflow `test` job) before building the image.
+- **UI tests**: Vitest + Testing Library (jsdom), run with `npm test` from `ui/`. Unit tests sit next to their modules (`src/*.test.ts`); route-level tests go in `src/test/`, because the router generator treats every file under `src/routes` as a route. `src/test/renderRoute.tsx` renders a path through the real route tree. The test config in `vite.config.ts` fixes `VITE_BACKEND_URL` (`http://backend.test`) and `VITE_GOOGLE_CLIENT_ID`, so tests ignore local `.env` files. CI runs lint, typecheck and tests in the UI workflow's `check` job before building the image.
+- **Backend tests**: Very few: `be/notification/hub_test.go` and `be/collect/gmail_test.go` (fake Gmail API via `httptest`). Run `go test ./...` from `be/`; add `-race` where cgo/gcc is available, e.g. `docker run --rm -v "$PWD":/src -w /src golang:1.23.5 go test -race ./...` (match the `toolchain` in `be/go.mod`). `flag.Parse()` runs in `main`, so tests use flag defaults; read flag values lazily, never from another package's `init()`. CI runs `go test -race ./...` (backend workflow `test` job) before building the image.
 - **Database connection**: Configured via environment variables (see Database Setup section). Defaults: host `hdd_db`, port `5432`, user `hddb`, password empty, database `hdd_db`. For local development, set `DB_HOST=localhost` and configure credentials to match your PostgreSQL instance.
 - **Backend API URL**: Read from `VITE_BACKEND_URL` via `ui/src/config.ts` (with `VITE_GOOGLE_CLIENT_ID`). `ui/.env.development` points at `http://localhost:8090`, `ui/.env.production` at `https://sm.jkurapati.com`; put local overrides in the gitignored `ui/.env.development.local`
 - **Known issue**: Directory size calculation differs between local scans (recursive) and cloud scans (directory-level only) - see be/README.md "Kinks" section

@@ -13,8 +13,8 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 
 | | Count |
 |---|---|
-| Open | 13 |
-| Done | 44 |
+| Open | 12 |
+| Done | 45 |
 | Won't fix | 1 |
 | *of which Deferred* | 1 (7.6) |
 
@@ -35,6 +35,7 @@ This work was first raised as one PR (#6). After review it was split into focuse
 | 2026-09-24 | #13 | React / TanStack Query idioms: Gmail filter computed during render; request form in one state object; `enabled` instead of the `"none"` sentinel; query keys in one place, with invalidation of the real ones; mutation errors handled once and Submit disabled while pending; one message at a time; `Header` inside the router. `npm run lint` is clean | 3.1–3.6, 3.8 |
 | 2026-09-24 | #14 | Durations, start times and an indeterminate progress bar; backend returns scan times as UTC instants; empty, loading and error states in history; th cells and typo; shared `Table` / `Input`; dark mode for body and form; favicon and package name; no `console.log`; `typecheck` script and a CI `check` job. Review follow-ups: cancelled consent message, `replace` on the callback redirect, stream errors before the first update, history refetch until scans finish, reversed dates rejected, no trailing space in the filter. PR review: `scans` time columns migrated to `timestamptz`; scans that can't start, or are left open by a restart, marked Failed; history shows status and polls only for recent open scans | 4.3–4.6, 5.2, 5.3; 1.11–1.14, 3.9, 5.5 |
 | 2026-09-24 | #15 | Major upgrades: Vite 8 and plugin-react-swc 4; ESLint 10 and react-hooks 7 (React Compiler rules, no code changes needed); TypeScript 6.0; globals 17 and react-refresh 0.5 (its Vite preset, off for route files). TypeScript 7 split out as 6.3 | 6.2; 6.3 (open) |
+| 2026-09-24 | #16 (stacked on #15) | Vitest + Testing Library: 36 unit tests (filter builder, date and duration formatting, `fetchJson`, OAuth state) and 8 request-form tests through the real router; filter logic moved to `src/gmailFilter.ts`; `npm test` runs in the CI `check` job | 5.4 |
 
 ---
 
@@ -253,10 +254,21 @@ Raised in review after #13; all done in #14:
   *Done:* the ones in `api/index.ts` and the request page's error handling went in #12 and #13; the rest in #14. `src/` has no `console` calls left.
 - [x] **5.3** Add a `typecheck` script (`tsc -b`) and run lint and typecheck in CI.
   *Done in #14:* the UI workflow's new `check` job runs `npm ci`, `npm run lint` and `npm run typecheck` with Node from `ui/.nvmrc`, and the image job `needs` it.
-- [ ] **5.4** Add tests (there are none):
+- [x] **5.4** Add tests (there are none):
   - Vitest for the pure functions: filter builder, date formatting, `fetchJson`.
   - React Testing Library for the request form.
   - Moving the filter logic out of the component makes it testable on its own.
+
+  *Done in #16:*
+  - **Setup:** Vitest 5 with jsdom, run by `npm test`. The test config fixes the two required `VITE_*` values, so tests ignore local `.env` files. The filter logic moved to `src/gmailFilter.ts`.
+  - **36 unit tests:**
+    - Filter builder: all options, next-day `before:`, and month/year/leap/DST boundaries, in three non-UTC zones.
+    - Duration and date formatting, including the same instant at different offsets.
+    - `fetchJson`, through the API functions: text, JSON and HTML errors, and no `[object Object]`.
+    - OAuth state helpers.
+  - **8 request-form tests** in `src/test/`, rendered through the real route tree: validation, the filter, labels, one POST with Submit disabled while pending, error replacing success, and the Google link's state.
+  - Reintroducing earlier bugs fails the matching tests: Submit not disabled, a label on the wrong input, and a trailing space.
+  - CI's `check` job runs `npm test`.
 
 - [x] **5.5 The Gmail filter ends with a space** — `src/routes/request.tsx`
   Raised in review after #13: every term was appended with a trailing space, which was stored as `search_filter` and shown in history.
