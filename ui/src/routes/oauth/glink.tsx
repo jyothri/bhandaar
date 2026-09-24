@@ -31,7 +31,11 @@ export const Route = createFileRoute("/oauth/glink")({
         state,
         scope,
       });
-      throw redirect({ href: `${backend_url}/api/glink?${params}` });
+      // Replace this history entry, so Back skips the spent callback URL.
+      throw redirect({
+        href: `${backend_url}/api/glink?${params}`,
+        replace: true,
+      });
     }
   },
 });
