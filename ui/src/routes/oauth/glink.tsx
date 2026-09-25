@@ -32,9 +32,13 @@ export const Route = createFileRoute("/oauth/glink")({
         scope,
       });
       // Replace this history entry, so Back skips the spent callback URL.
+      // reloadDocument forces a full page load: when the backend shares the
+      // UI's origin (production), the router would otherwise treat
+      // /api/glink as a client-side route and never reach the backend.
       throw redirect({
         href: `${backend_url}/api/glink?${params}`,
         replace: true,
+        reloadDocument: true,
       });
     }
   },
