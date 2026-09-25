@@ -10,7 +10,7 @@
   - The google application credentials file should be present
     in the host at `~/keys/gae_creds.json`
   - Set the credentials as environment variables in [docker-compose.yml](build/docker-compose.yml) file. (currently set as dummy values) <br />
-    For more information on how to obtain these check [these steps](debug.md#creds).
+    For more information on how to obtain these check [these steps](../docs/archive/be/debug.md#creds).
     - OAUTH_CLIENT_ID
     - OAUTH_CLIENT_SECRET
     - FRONTEND_URL (the UI's origin; a comma-separated list if the UI is served from more than one)
