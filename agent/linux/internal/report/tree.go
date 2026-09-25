@@ -59,7 +59,7 @@ func isMacMetadata(name string) bool {
 // files.comparison_status for leaves. When includeMacMetadata is false,
 // matching leaf entries are left out of Children (their contribution to
 // an ancestor's persisted Counts/Category is not recomputed — this is a
-// leaf-level-only filter, documented in specs/drive-comparison-agent.md).
+// leaf-level-only filter, documented in docs/specs/drive-comparison-agent.md).
 func buildTree(st *store.Store, driveID string, includeMacMetadata bool) (*TreeNode, error) {
 	return buildNode(st, driveID, "", ".", includeMacMetadata)
 }
