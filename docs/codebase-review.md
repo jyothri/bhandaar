@@ -14,7 +14,7 @@ Status legend: `[ ]` open · `[x]` done · `[-]` won't fix · **Deferred** = ope
 | | Count |
 |---|---|
 | Open | 6 |
-| Done | 51 |
+| Done | 53 |
 | Won't fix | 1 |
 | *of which Deferred* | 1 (7.6) |
 
@@ -37,6 +37,8 @@ This work was first raised as one PR (#6). After review it was split into focuse
 | 2026-09-24 | #15 | Major upgrades: Vite 8 and plugin-react-swc 4; ESLint 10 and react-hooks 7 (React Compiler rules, no code changes needed); TypeScript 6.0; globals 17 and react-refresh 0.5 (its Vite preset, off for route files). TypeScript 7 split out as 6.3 | 6.2; 6.3 (open) |
 | 2026-09-24 | #16 (stacked on #15) | Vitest + Testing Library: 36 unit tests (filter builder, date and duration formatting, `fetchJson`, OAuth state) and 8 request-form tests through the real router; filter logic moved to `src/gmailFilter.ts`; `npm test` runs in the CI `check` job | 5.4 |
 | 2026-09-24 | #17 | Backend OAuth linking: token exchange via `x/oauth2` (form body, errors stop the handler, tokens no longer logged); redirect only to `-frontend_url` origins, which now takes a list; real 400/502 responses. Scan status: new scans start `Running`; `completed_at` dropped | 7.1–7.5, 7.10 |
+| 2026-09-24 | #18 | OAuth callback forwards the code with a full page load; account linking was broken in production since #12 | 1.15 |
+| 2026-09-24 | #19 | Progress events carry `status` and `error`, and each scan ends with a final event; the progress row shows "Completed" or "Failed: …" | 4.7 |
 
 ---
 
@@ -112,6 +114,12 @@ Raised in review after #13; all done in #14:
 - [x] **1.14 Reversed dates aren't caught** — `src/routes/request.tsx`
   An end date before the start date gives a valid filter that matches nothing, so the scan "succeeds" with zero messages.
   *Done in #14:* `submitRequest` rejects it, comparing the `YYYY-MM-DD` strings.
+
+Found in production after #17 was deployed:
+
+- [x] **1.15 The OAuth callback never reached the backend in production** — `src/routes/oauth/glink.tsx`
+  Since #12 (1.3), `/oauth/glink` forwarded the code with `throw redirect({ href })`. In production the backend shares the UI's origin (`https://sm.jkurapati.com`), so TanStack Router turned the `href` into a client-side navigation to an unknown `/api/glink` route ("Not Found"), and nothing reached the backend. The nginx log showed Google's callbacks at 20:52:25 and 20:57:09 UTC, and the backend log showed no `/api/glink` request for either. Every check had used a backend on another origin (`localhost:8090`), which takes the full-page path.
+  *Done in #18:* the redirect also passes `reloadDocument: true`. A test renders the callback with the UI on the backend's origin and on a different one; the same-origin case fails without the fix. A production-like build (UI and `/api` on one origin) went from 0 backend requests to 1.
 
 ## 2. Configuration and deployment
 
@@ -246,6 +254,14 @@ Raised in review after #13; all done in #14:
 - [x] **4.6 Leftover scaffolding**
   `index.html` still uses the Vite default icon, and `package.json` is still named `"react"`.
   *Done in #14:* `public/favicon.svg` (a small drive icon) replaces `vite.svg`, and the package is `bhandaar-ui`.
+
+- [x] **4.7 The progress row never showed how a scan ended** — `be/notification/hub.go`, `src/components/ScanProgress.tsx`
+  Found in production (2026-09-24): scan 4 failed within a second (`invalid_grant`), but the request page kept showing a row of zeros. Progress events carried only counts, and nothing signalled that a scan had ended.
+  *Done in #19:*
+  - **Backend:** progress events carry `status` (Running / Completed / Failed) and `error`. `MarkScanCompleted` and `MarkScanFailed` publish a final event, so it matches the database for every scan type.
+  - **UI:** "Completed", or "Failed: <reason>" with the full error as a tooltip, replaces the bar. A late Running event is ignored. `invalid_grant` becomes a "Link the account again" hint.
+  - **Verified end to end:** a bogus-token Gmail scan showed "Failed: …", and a local scan showed "Completed".
+  - **Not done:** the five-column progress table still overflows at phone width (about 470 px at 390 px), with or without an error.
 
 ## 5. Code health
 

@@ -223,3 +223,33 @@ func TestClientKeyAllDoesNotCollideWithSubscribeAll(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 }
+
+func TestPublishScanEndReachesAllScansSubscribers(t *testing.T) {
+	ch, unsubscribe := SubscribeAll()
+	defer unsubscribe()
+
+	PublishScanEnd(7, StatusFailed, "boom")
+
+	select {
+	case got := <-ch:
+		want := Progress{ScanId: 7, Status: StatusFailed, Error: "boom"}
+		if got != want {
+			t.Errorf("got %+v, want %+v", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no scan-end event delivered")
+	}
+}
+
+func TestPublishScanEndWithNoSubscribersDoesNotBlock(t *testing.T) {
+	done := make(chan struct{})
+	go func() {
+		PublishScanEnd(8, StatusCompleted, "")
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("PublishScanEnd blocked with no subscribers")
+	}
+}

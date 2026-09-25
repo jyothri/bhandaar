@@ -30,6 +30,11 @@ export type Progress = {
   elapsed_in_sec: number;
   eta_in_sec: number;
   scan_id: number;
+  // "Running" while the scan runs. Each scan ends with one event whose
+  // status is "Completed" or "Failed"; only those carry `error`, and they
+  // carry no counts. Missing from backends older than this field.
+  status?: "Running" | "Completed" | "Failed";
+  error?: string;
 };
 
 export type ScanRequest = {

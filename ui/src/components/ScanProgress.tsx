@@ -3,6 +3,7 @@ import useSSE from "../components/hooks/useSse";
 import { useState } from "react";
 import { Progress } from "../types/scans";
 import { formatDuration } from "../format";
+import { describeScanError, mergeProgress } from "../progress";
 import { Table, Td, Tr } from "./Table";
 
 export default function ScanProgress() {
@@ -12,7 +13,7 @@ export default function ScanProgress() {
     backend_url + "/sse/scanprogress",
     "progress",
     "close",
-    setSseData
+    (next) => setSseData((current) => mergeProgress(current, next))
   );
 
   // Shown even before the first update, so a stream that fails right away
@@ -30,7 +31,10 @@ export default function ScanProgress() {
       <h4 className="p-2 justify-self-center font-bold text-lg">
         Scan Progress
       </h4>
-      <div id="container" className="border-2 border-gray-200 dark:border-gray-700 gap-2">
+      <div
+        id="container"
+        className="border-2 border-gray-200 dark:border-gray-700 gap-2"
+      >
         <Table
           className="w-5/8"
           headers={[
@@ -57,10 +61,23 @@ export default function ScanProgress() {
   );
 }
 
-// The backend doesn't send completion_pct yet (review item 7.6), so the bar
-// is indeterminate while messages are being fetched, and switches to a
-// percentage once one arrives. ETA is hidden for the same reason.
+// Once the scan ends, its outcome replaces the bar. While it runs, the
+// backend doesn't send completion_pct yet (review item 7.6), so the bar is
+// indeterminate, and switches to a percentage once one arrives. ETA is
+// hidden for the same reason.
 function ProgressBar({ progress }: { progress: Progress }) {
+  if (progress.status === "Completed") {
+    return (
+      <span className="text-green-600 dark:text-green-400">Completed</span>
+    );
+  }
+  if (progress.status === "Failed") {
+    return (
+      <span className="text-red-500 wrap-anywhere" title={progress.error}>
+        Failed: {describeScanError(progress.error)}
+      </span>
+    );
+  }
   if (progress.completion_pct > 0) {
     return (
       <progress
@@ -70,7 +87,7 @@ function ProgressBar({ progress }: { progress: Progress }) {
       />
     );
   }
-  if (progress.active_count > 0) {
+  if (progress.status === "Running" || progress.active_count > 0) {
     return <progress aria-label="Scan in progress" />;
   }
   return <span>—</span>;
