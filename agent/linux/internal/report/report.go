@@ -3,7 +3,7 @@
 // comparison computation of its own — everything here is a pure read of
 // the checkpoint DB (folder_status / dir_listings / files), so it needs no
 // drive to be mounted and can be re-run any number of times for free. See
-// specs/drive-comparison-agent.md.
+// docs/specs/drive-comparison-agent.md.
 package report
 
 import (

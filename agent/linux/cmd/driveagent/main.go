@@ -5,7 +5,7 @@
 // scanned, or not scanned at all.
 //
 // It never writes to either drive. Three subcommands, each with a single
-// responsibility (see specs/drive-comparison-agent.md):
+// responsibility (see docs/specs/drive-comparison-agent.md):
 //
 //	scan    walks and hashes one drive's files.
 //	compare computes and persists comparison status for scoped paths.

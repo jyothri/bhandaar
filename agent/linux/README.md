@@ -1,7 +1,7 @@
 # driveagent
 
 Standalone tool that tracks and compares two drives for divergence. See
-[`specs/drive-comparison-agent.md`](../../specs/drive-comparison-agent.md)
+[`docs/specs/drive-comparison-agent.md`](../../docs/specs/drive-comparison-agent.md)
 for the full design.
 
 It never writes to either drive. Three subcommands, each with one job:

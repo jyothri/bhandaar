@@ -4,7 +4,7 @@
 // global relocated-detection pass over every currently-missing file on
 // both drives; and incrementally maintains a folder-level status rollup
 // by walking each touched file's ancestor chain up to drive_root. See
-// specs/drive-comparison-agent.md for the full design.
+// docs/specs/drive-comparison-agent.md for the full design.
 package compare
 
 import (
@@ -205,7 +205,7 @@ func keys(m map[string]bool) []string {
 
 // runGlobalRelocatedPass multiset-matches every currently-`missing` file
 // on both drives by content hash, regardless of what was scoped into this
-// run — see specs/drive-comparison-agent.md on why this stays unscoped.
+// run — see docs/specs/drive-comparison-agent.md on why this stays unscoped.
 // (No backup_root handling needed here: comparison_status is only ever
 // set on files that already passed backupRelative's in-scope check in
 // Run, above.)
