@@ -75,6 +75,8 @@ jobs:
           pushImage: ${{ github.event_name == 'push' }}
           registry: docker.io
           dockerfile: ./agentsync/build/Dockerfile
+          # Needed for agentsync/build/Dockerfile.dockerignore (the build context is the repo root).
+          enableBuildKit: true
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 ```
@@ -85,7 +87,7 @@ jobs:
 
 ### `agentsync/build/Dockerfile`
 
-The build context is the repo root, as for `be`, so `agentsync/wire` is available to the `replace` directive.
+The build context is the repo root, as for `be`, so `agentsync/wire` is available to the `replace` directive. To keep the rest of the repo (`ui/node_modules`, `be/`, `.git`) out of the context sent to Docker, add `agentsync/build/Dockerfile.dockerignore`, the same pattern `ui/` already uses. It ignores everything except `agentsync/`. The workflow sets `enableBuildKit: true`, as the UI workflow does, since BuildKit is what reads a per-Dockerfile ignore file.
 
 ```dockerfile
 FROM golang:<version from agentsync/go.mod>-alpine AS go-build
@@ -118,7 +120,7 @@ Unchanged from how `be`/`ui` are deployed today. After the image is pushed, the 
 - **CI enforces the bump.** A PR that changes release-relevant files must set a `Version` higher than the latest `driveagent/v*` tag (see `version-check` below). The release job then creates exactly that tag.
 - `-ldflags` stamps only `version.Commit` (the short SHA, `unknown` by default). `driveagent version` prints both values: `driveagent 0.2.0 (a1b2c3d), protocols [1]`.
 
-**Release-relevant files** are everything under `agent/linux/` except Markdown (`**.md`), plus `agentsync/wire/**`. A change to `wire` changes what the agent sends, so it needs an agent release too. A change to the workflow file alone runs CI but needs no bump and produces no release.
+**Release-relevant files** are everything under `agent/linux/` except Markdown (`**.md`), tests (`**_test.go`), test fixtures (`**/testdata/**`) and scripts (`agent/linux/scripts/**`), plus `agentsync/wire/**` except its tests and fixtures. A change to `wire` changes what the agent sends, so it needs an agent release too. Changes to tests, fixtures, scripts or the workflow file run CI but need no bump and produce no release. The workflow still triggers on them, so tests always run; only `version-check` treats them as not release-relevant.
 
 ### Targets
 

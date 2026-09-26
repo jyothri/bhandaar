@@ -48,10 +48,23 @@ A consequence: a file that hasn't changed since an earlier scan that never uploa
 
 Every `scan` uploads, and there are no modes: the upload is part of the command's success. If the remote can't be reached or refuses the agent, the command fails. (`compare` and `report` still never contact the remote.)
 
-1. **Preflight, before the drive is touched:** health → handshake → token (refresh, or fail with `not logged in: run "driveagent login"`). Health has a 5 s timeout and 2 retries, 1 s apart. Any failure exits with code 3 (unreachable or auth) or 4 (upgrade required) before the scan starts. The uploader opens the drive (`PUT /drives/{id}`) once the scan has recorded it in `state.db`, because a brand-new drive has no row, and so no stream id, before that.
-2. **During the scan**, the uploader runs next to it (see [Uploader](#uploader)). A transient failure is retried with exponential backoff (1 s, 2 s, 4 s … capped at 30 s, with jitter) until `--remote-timeout` (default `2m`) has passed with no successful request. At that point the uploader cancels the scan's context. The scan stops the same way it does on Ctrl-C: the checkpoint stays consistent and the scan can be resumed. The command exits with code 3 and the message `remote unavailable for 2m; scan stopped. Local checkpoint is intact — re-run to resume, and run "driveagent sync" to upload what this scan already recorded`.
-3. A permanent failure (426, re-login needed, `400 INVALID_BATCH`) cancels the scan immediately with code 3 or 4.
-4. **After the scan**, the uploader drains the rest of the current scan's data (the directory listings, deletions and the scan-run finish are all written at the end of a scan), under the same `--remote-timeout` rule. Exit 0 only once the server has acknowledged all of it.
+1. **Preflight, before the drive is touched:** health → handshake → token (refresh, or fail with `not logged in: run "driveagent login"`). Health has a 5 s timeout and 2 retries, 1 s apart. Any failure exits with code 3 (unreachable or auth) or 4 (upgrade required) before the scan starts.
+2. **Local drive checks, before the upload starts.** `cmd/driveagent`, not `scan.Run`, does these, in this order:
+   1. The `--drive-root` check (`RootConflict` / `--replace-root`). With `--replace-root`, `ClearDrive` runs here.
+   2. The [wrong-drive guard](#drive-identity).
+   3. `UpsertDrive`.
+   4. Reading `S`.
+
+   Only then does the uploader open the drive (`PUT /drives/{id}`). So a `--replace-root` always gets its new stream id *before* anything is uploaded; the old root's rows can't land on the old stream. `scan.Run` keeps these checks as assertions, but no longer performs them.
+3. **During the scan**, the uploader runs next to it (see [Uploader](#uploader)). A transient failure is retried with exponential backoff (1 s, 2 s, 4 s … capped at 30 s, with jitter) until `--remote-timeout` (default `2m`) has passed with no successful request. At that point the uploader cancels the scan's context. The scan stops the same way as for Ctrl-C (below): the checkpoint stays consistent and the scan can be resumed. The command exits with code 3 and the message `remote unavailable for 2m; scan stopped. Local checkpoint is intact — re-run to resume, and run "driveagent sync" to upload what this scan already recorded`.
+4. A permanent failure (426, re-login needed, `400 INVALID_BATCH`) cancels the scan immediately with code 3 or 4.
+5. **After the scan**, the uploader drains the rest of the current scan's data (the directory listings, deletions and the scan-run finish are all written at the end of a scan), under the same `--remote-timeout` rule. Exit 0 only once the server has acknowledged all of it.
+
+**Ctrl-C.** Today an interrupted scan returns nil and exits 0. Under the table below, 0 means "everything acknowledged", so that changes:
+- The **first** Ctrl-C (or `SIGTERM`) stops the walk. The uploader then drains what the scan already wrote, under the same `--remote-timeout` rule, and the command exits **130** (the usual code for SIGINT), because the scan is incomplete.
+- A **second** Ctrl-C aborts the drain at once, still exiting 130.
+
+The uploader cancels the scan with `context.WithCancelCause`, so `main` can tell a remote failure (exit 3 or 4) from a user interrupt (exit 130).
 
 Whatever a failed or interrupted scan recorded locally but didn't upload becomes history. A re-run of `scan` doesn't send it, because the re-run skips files it already hashed. `driveagent sync` does. The failure message says so.
 
@@ -64,6 +77,7 @@ Whatever a failed or interrupted scan recorded locally but didn't upload becomes
 | 2 | Usage error, as today |
 | 3 | Remote unavailable, auth failure or upload failure |
 | 4 | Agent upgrade required |
+| 130 | Interrupted by Ctrl-C / `SIGTERM`; what was already written was drained, unless a second Ctrl-C aborted that |
 
 ## Configuration
 
@@ -115,9 +129,8 @@ Tokens are bound to `remote_url`. If the configured URL differs from the one in 
 The access token is refreshed when it has less than 60 s left, or after a `401 TOKEN_EXPIRED`. Refresh happens under an exclusive `flock` on `<state-dir>/credentials.lock`:
 1. Take the lock, then re-read `credentials.json`. If another process already rotated the token and the new access token is valid, use it and stop.
 2. Otherwise call `/auth/refresh` and save the result.
-3. On `409 REFRESH_RACE`, re-read the file after a short wait; the other process's result will be there.
 
-This keeps concurrent processes (two `scan`s of different drives, or a `scan` and a `sync`) from tripping the server's refresh-reuse detection.
+The lock keeps concurrent processes (two `scan`s of different drives, or a `scan` and a `sync`) from refreshing the same token twice. The more common cause of a replay is a **lost refresh response**, or a crash before `credentials.json` was written. The agent then still holds the old token and presents it again. The server's grace window handles that: within 30 s it accepts the old token once more and issues a fresh pair (see the [server spec](remote-sync-server.md#post-agentv1authrefresh)). So a network blip during refresh never forces an interactive `driveagent login`.
 
 ## Drive identity
 
@@ -125,39 +138,46 @@ This keeps concurrent processes (two `scan`s of different drives, or a `scan` an
 
 | Identifier | Linux | macOS |
 |---|---|---|
-| **Filesystem ID** (`fs_uuid`), set at format time: a UUID for ext4/APFS/HFS+, the volume serial for NTFS/exFAT/FAT (e.g. `ABCD-1234`). Plus the filesystem type (`fs_type`) | Find the mount that holds `--drive-root` in `/proc/self/mountinfo` (longest mount-point prefix). Take its source device and filesystem type, then find the `/dev/disk/by-uuid/*` link that points at that device. This is the same data `lsblk -o UUID` shows | `diskutil info -plist <drive-root>`: `VolumeUUID` and `FilesystemType` |
+| **Filesystem ID** (`fs_uuid`), set at format time: a UUID for ext4/APFS/HFS+, the volume serial for NTFS/exFAT/FAT. Plus the filesystem type (`fs_type`) and where the ID came from (`fs_uuid_source`: `linux` or `macos`) | `stat(--drive-root)` gives the device number (`st_dev`). Find the `/proc/self/mountinfo` line whose `major:minor` field matches it, and take its filesystem type and source device. Then find the `/dev/disk/by-uuid/*` link that points at that device (the same data `lsblk -o UUID` shows). Matching on the device number, not the longest path prefix, handles symlinked roots and bind mounts, and avoids `/media/x` matching `/media/xy` | `diskutil info -plist <drive-root>`: `VolumeUUID` and `FilesystemType` |
 | **Hardware serial** (`hw_serial`) of the disk behind that filesystem, as reported through the USB enclosure | The udev record of the partition's parent disk, `/run/udev/data/b<major>:<minor>`: `ID_SERIAL_SHORT`. This is what `lsblk -o SERIAL` shows | The disk's entry in the I/O Registry (`ioreg`): the USB device's serial number |
 
-`diskutil` and `ioreg` are the only external commands the agent runs, and only on macOS. Either identifier can be missing: `--drive-root` on a network or virtual filesystem has no filesystem ID, and many cheap USB enclosures report no serial or a generic one. The agent records whatever it finds. If it finds neither, it prints one warning and the scan goes ahead, but the drive can't be linked across machines (see the [server spec](remote-sync-server.md#matching-physical-drives)).
+`diskutil` and `ioreg` are the only external commands the agent runs, and only on macOS. Either identifier can be missing: `--drive-root` on a network or virtual filesystem has no filesystem ID, and many cheap USB enclosures report no serial or a generic one. Serials on a built-in denylist of generic values (all zeros, `0123456789ABCDEF`, `000000000000`, and similar placeholders seen from USB-SATA bridges) are treated as missing. The agent records whatever it finds. If it finds neither, it prints one warning and the scan goes ahead, but the drive can't be linked across machines (see the [server spec](remote-sync-server.md#matching-physical-drives)).
 
-**Normalising.** Filesystem IDs are compared uppercase with dashes removed. For NTFS and exFAT, Linux reports the volume serial, and `diskutil`'s `VolumeUUID` for those filesystems may not be the same string. Before implementation, plug each real drive into both a Linux box and a Mac and confirm the two sides report the same ID. If macOS reports a different form, the Mac side must derive the serial some other read-only way, or cross-OS linking won't work for those drives. This check is part of rollout step 3.
+**Normalising.** Filesystem IDs are compared uppercase with dashes removed.
 
-**Stored locally** in the `drives` table (`fs_uuid`, `fs_type`, `hw_serial`, `identity_seen_at`; see the [migration](#change-feed-in-statedb)), and sent with every `PUT /drives/{id}`, including from `sync`, which uses the stored values because it doesn't touch the drive.
+**Across Linux and macOS**, the IDs only match for some filesystems:
+- **ext4, APFS, HFS+**: both systems report the filesystem's own UUID, so the same drive gets the same ID on either OS.
+- **FAT, exFAT, NTFS**: they very likely don't match. macOS reports a synthesized `VolumeUUID` rather than the raw volume serial, and reading the raw serial from `/dev/rdiskN` needs root. Linux also shows NTFS serials as 16 hex digits, not the `ABCD-1234` form.
 
-**Wrong-drive guard.** Before walking, `scan` compares what it found with what's stored for that `--drive-id`:
+So for FAT, exFAT and NTFS, drives are **linked automatically only between agents on the same OS** (same `fs_uuid_source`); a Linux copy and a Mac copy of such a drive stay unlinked in v1 (decided 2026-09-25). The same ID on the same OS is still reliable. A quick check on the real drives during rollout step 3 (`lsblk -o NAME,FSTYPE,UUID,SERIAL` on Linux, `diskutil info` on a Mac) confirms which filesystems they use; it no longer blocks anything.
+
+**Stored locally** in the `drives` table (`fs_uuid`, `fs_type`, `fs_uuid_source`, `hw_serial`, `identity_seen_at`; see the [migration](#change-feed-in-statedb)), and sent with every `PUT /drives/{id}`, including from `sync`, which uses the stored values because it doesn't touch the drive.
+
+**Wrong-drive guard.** Before walking (in `cmd/driveagent`, see [Remote is required](#remote-is-required)), `scan` compares what it found with what's stored for that `--drive-id`:
 
 | Stored vs found | Result |
 |---|---|
-| Both have an ID and they differ (filesystem ID, or serial when both have one) | **Refuse**, exit 1, before touching anything: `drive "seagate1" was last scanned on filesystem ABCD1234 (serial S1); the drive at /media/jyothri/Seagate1 has EF015678 (serial S2). Wrong drive? If it was reformatted, re-run with --accept-identity-change` |
+| Both have a filesystem ID, from the same source, and they differ | **Refuse**, exit 1, before touching anything: `drive "seagate1" was last scanned on filesystem ABCD1234; the drive at /media/jyothri/Seagate1 has EF015678. Wrong drive? If it was reformatted, re-run with --accept-identity-change` |
+| Same filesystem ID, different serial | **Warn** and continue, recording the new serial. Many USB-SATA bridges report their own serial rather than the disk's, so moving a disk to another dock changes it |
 | Nothing stored yet (a new drive, or scanned before this feature) | Record what was found |
 | Stored, but not found this time | Warn and keep the stored identity |
 
-This works like the existing `--drive-root` guard (`--replace-root`), and catches plugging the wrong drive in under a familiar label, including one of a mirrored pair. `--accept-identity-change` records the new identity and keeps the checkpoint data, and the scan's own deletion detection then reconciles the contents. To start the drive over instead, use `--replace-root`.
+This works like the existing `--drive-root` guard (`--replace-root`), and catches plugging the wrong drive in under a familiar label. A clone of the drive (same filesystem ID, different serial), such as one half of a mirrored pair made by cloning, only gets the warning; the serial can't be trusted enough to refuse on. `--accept-identity-change` records the new identity and keeps the checkpoint data, and the scan's own deletion detection then reconciles the contents. To start the drive over instead, use `--replace-root`.
 
 ## New commands
 
 ```
-driveagent login          [--remote-url <url>] [--username <name>] [--state-dir <dir>]
+driveagent login          [--remote-url <url>] [--username <name>] [--password-stdin] [--state-dir <dir>]
 driveagent logout         [--state-dir <dir>]
 driveagent sync           [--drive-id <id,id,...>] [--remote-timeout 2m] [--state-dir <dir>]
 driveagent remote-status  [--state-dir <dir>]
 driveagent version
 ```
 
-- **`login`**: health → handshake → prompts for the username (unless `--username` is given) and the password (no echo, via `golang.org/x/term`) → `/auth/login` → saves the credentials. For non-interactive use, it reads the password from `DRIVEAGENT_PASSWORD` if that is set. There is deliberately no `--password` flag, because argv shows up in `ps` and shell history.
+- **`login`**: health → handshake → prompts for the username (unless `--username` is given) and the password (no echo, via `golang.org/x/term`) → `/auth/login` → saves the credentials. For non-interactive use, `--password-stdin` reads the password from standard input, as `docker login` does. There is deliberately no `--password` flag and no password environment variable: argv shows up in `ps` and shell history, and environment variables are inherited by child processes.
 - **`logout`**: `/auth/logout` (best effort), then deletes `credentials.json`.
 - **`sync`**: runs the agent on its own to upload history. See [below](#driveagent-sync).
-- **`remote-status`**: prints reachability and the path used (LAN or DNS, see [Reaching the server from the LAN](#reaching-the-server-from-the-lan)), the handshake decision, the logged-in user, and for each drive its identity and the other machines' copies of the same physical drive (`also scanned by: macbook as seagate1, last synced 2026-09-20`), the synced marker (watermark, number of synced ranges, `synced_at`) and the count of pending history entries. It uploads nothing; its only local write is [reconciling](#reconciling) the marker with the server.
+- **`remote-status`**: prints reachability and the path used (LAN or DNS, see [Reaching the server from the LAN](#reaching-the-server-from-the-lan)), the handshake decision, the logged-in user, and for each drive its identity and the other machines' copies of the same physical drive (`also scanned by: macbook as seagate1, last synced 2026-09-20`), the synced marker (watermark, number of synced ranges, `synced_at`) and the count of pending history entries. It uploads nothing. It reconciles a drive's marker only if it can take that drive's upload lock without waiting; for a drive being scanned, it just shows the server's view.
 - **`version`**: prints the agent version and supported protocols.
 
 `scan` gains `--remote-url`, `--remote-timeout`, `--lan-addr` and `--accept-identity-change`. `sync`, `login` and `remote-status` also take `--lan-addr`.
@@ -167,19 +187,26 @@ driveagent version
 This is the dedicated way to start the agent to upload history. It never touches a drive, so it works with every drive unplugged, and it suits a cron job or systemd timer.
 
 1. **Health → handshake → token.** Nothing is uploaded until the handshake returns `ok` or `upgrade_recommended`. Any failure exits 3 (unreachable or auth) or 4 (upgrade required).
-2. **Reconcile every drive.** For each drive in `state.db` (or only those in `--drive-id`): `PUT /drives/{id}` and [reconcile](#reconciling) the local marker with the returned ranges. Every drive is reconciled, including ones with nothing pending locally, so data the server lost (restored from backup, or a new stream) shows up as pending again.
-3. **Upload.** For each drive with pending history, in `drive_id` order, take that drive's [upload lock](#upload-lock) and upload each [gap](#gaps) as one session, oldest first, until none is left. A gap with no pending entries is closed with an empty batch, so the server's ranges merge too. A drive whose lock is held (a `scan` of it is running) is skipped with a note, and the next `sync` picks it up.
-4. **Report.** Print one line per drive (`seagate2: uploaded 18,532 changes, fully synced` or `… 1,204 still pending`), then exit 0. Mid-upload transient failures follow `--remote-timeout`, then exit 3; whatever was acknowledged before that stays synced, and the next `sync` continues from there.
+2. **Per drive**, in `drive_id` order, for each drive in `state.db` (or only those in `--drive-id`):
+   1. **Try to take the drive's [upload lock](#upload-lock)**, without waiting. If it's held (a `scan` of that drive is running), skip the drive with a note; the next `sync` picks it up.
+   2. **Reconcile**: `PUT /drives/{id}` and [reconcile](#reconciling) the local marker with the server's ranges. Every locked drive is reconciled, including ones with nothing pending locally, so a server or `state.db` that went back in time is caught.
+   3. **Upload** each [gap](#gaps) as one session, oldest first, until none is left. A gap with no pending entries is closed with an empty batch, so the server's ranges merge too.
+   4. Release the lock.
+
+   Reconciling only under the lock means a `sync` can't overwrite a running scan's fresh acknowledgement with an older server snapshot.
+3. **Report.** Print one line per drive (`seagate2: uploaded 18,532 changes, fully synced` or `… 1,204 still pending`), then exit 0. Mid-upload transient failures follow `--remote-timeout`, then exit 3; whatever was acknowledged before that stays synced, and the next `sync` continues from there.
 
 `sync` uploads what's pending when it reads each gap, then exits. It doesn't keep running to follow later writes.
 
 ### Upload during `scan`
 
-Before `scan.Run` starts, `cmd/driveagent` reads the global version clock: `S = sync_clock.v`. Every entry of this drive with a version above `S` was written by this scan. Only one scan runs per drive at a time, and versions are allocated in commit order. That includes `StartScanRun`, which comes after `S` is read, so the scan-run row is part of the current scan's data.
+After the local drive checks (root check, `ClearDrive` if `--replace-root`, wrong-drive guard, `UpsertDrive`), and before `scan.Run` starts, `cmd/driveagent` reads the global version clock: `S = sync_clock.v`. Every entry of this drive with a version above `S` was written by this scan. Only one scan runs per drive at a time, and versions are allocated in commit order. That includes `StartScanRun`, which comes after `S` is read, so the scan-run row is part of the current scan's data.
 
-The scan's upload session covers `(from, ∞)`, where:
-- `from = synced_version` (the drive's watermark) if nothing of this drive at or below `S` is pending. The session then continues the watermark, and the server's ranges stay contiguous.
+The scan's upload session covers `(from, ∞)`. Let `e` be the end of the highest acked range at or below `S` (or the watermark):
+- `from = e` if no pending entry of this drive lies in `(e, S]`. The session then continues that range, and the server's ranges stay contiguous.
 - `from = S` otherwise. The session becomes a new synced range above a gap of history, which `sync` fills later.
+
+The check is one `EXISTS` over the feed indexes.
 
 The session never reads entries at or below `from`, so history is skipped by construction. If the scan supersedes a history entry (rehashes a changed file, deletes it, re-lists a directory), the new version is above `S`, so it is uploaded as current data, and its old version disappears from the history gap.
 
@@ -196,6 +223,7 @@ ALTER TABLE drives       ADD COLUMN synced_version INTEGER NOT NULL DEFAULT 0;  
 ALTER TABLE drives       ADD COLUMN synced_at TIMESTAMP;                        -- last time the marker advanced
 ALTER TABLE drives       ADD COLUMN fs_uuid TEXT;                               -- drive identity (see "Drive identity"); NULL if not detected
 ALTER TABLE drives       ADD COLUMN fs_type TEXT;
+ALTER TABLE drives       ADD COLUMN fs_uuid_source TEXT;                        -- 'linux' | 'macos'
 ALTER TABLE drives       ADD COLUMN hw_serial TEXT;
 ALTER TABLE drives       ADD COLUMN identity_seen_at TIMESTAMP;
 ALTER TABLE files        ADD COLUMN row_version INTEGER NOT NULL DEFAULT 0;
@@ -208,6 +236,18 @@ CREATE TABLE IF NOT EXISTS sync_ranges (
   from_version  INTEGER NOT NULL,        -- exclusive
   to_version    INTEGER NOT NULL,        -- inclusive
   PRIMARY KEY (drive_id, from_version)
+);
+
+-- entries the server rejected (acked but not stored); shown by remote-status
+CREATE TABLE IF NOT EXISTS sync_rejected (
+  drive_id       TEXT NOT NULL,
+  row_version    INTEGER NOT NULL,
+  kind           TEXT NOT NULL,
+  relative_path  TEXT NOT NULL,
+  child_name     TEXT NOT NULL DEFAULT '',
+  reason         TEXT NOT NULL,
+  rejected_at    TIMESTAMP NOT NULL,
+  PRIMARY KEY (drive_id, row_version)
 );
 
 CREATE TABLE IF NOT EXISTS sync_tombstones (
@@ -229,9 +269,12 @@ CREATE INDEX IF NOT EXISTS idx_tombstones_feed ON sync_tombstones(drive_id, row_
 
 **Backfill** (same transaction as the migration): assign a distinct increasing `row_version` to every existing `files`, `dir_listings` and `scan_runs` row, and set `sync_clock.v` to the maximum. Existing checkpoints become history, uploaded in full by the first `sync`.
 
+On a large `state.db` the backfill rewrites every row, which can take a while. The agent prints `upgrading state.db (one-time, N rows)…` with progress. Another `driveagent` started meanwhile gives up after its ~5 s busy timeout; that's expected, and it just needs re-running once the migration is done.
+
 ### Version allocation
 
 - Each version is unique across the whole database. Inside a write transaction, `UPDATE sync_clock SET v = v + ? RETURNING v` reserves a block of `n` versions, and the rows are numbered from that block.
+- Every transaction that writes to the feed starts with **`BEGIN IMMEDIATE`** (the `_txlock=immediate` DSN option of `modernc.org/sqlite` on the writer connection). `SyncDirListings` reads before it writes, and can't know up front how many versions `cascadePurge` will need. So version reservation happens after a read, and a deferred transaction that has to upgrade to a writer after another process committed fails straight away with `SQLITE_BUSY_SNAPSHOT`, which `busy_timeout` doesn't cover. Taking the write lock at `BEGIN` avoids that.
 - SQLite allows one writer at a time, even across processes, so versions become visible in commit order. A reader that has seen everything up to version `V` can never later find a newly committed entry with version ≤ `V`. This is what makes a batch's coverage claim (below) true, and what makes `S` a clean split between history and the current scan. It holds with several processes sharing the file.
 
 ### What bumps a version
@@ -242,7 +285,7 @@ CREATE INDEX IF NOT EXISTS idx_tombstones_feed ON sync_tombstones(drive_id, row_
 | `DeleteFiles` | Deletes the row; upserts a `file` tombstone with a new version |
 | `SyncDirListings` | Insert, or a change in `is_dir`: new version. **A `last_seen_at`-only touch does not bump**, or every scan would re-upload every listing. Stale deletes and `cascadePurge`: a `dir_child` tombstone per removed row |
 | `StartScanRun` / `FinishScanRun` | New version on the `scan_runs` row |
-| `ClearDrive` (`--replace-root`) | Also deletes the drive's tombstones and `sync_ranges`, and sets `sync_stream_id = NULL`, `synced_version = 0`, `synced_at = NULL`. A new stream id is generated on the next upload, which makes the server wipe and restart that drive |
+| `ClearDrive` (`--replace-root`) | Now **one transaction** (today it's four separate statements). Also deletes the drive's tombstones, `sync_ranges` and `sync_rejected`, and sets `sync_stream_id = NULL`, `synced_version = 0`, `synced_at = NULL`. It runs in `cmd/driveagent` before the uploader starts, so the next `PUT` carries a new stream id and the server wipes the old root's data before anything new is uploaded |
 | `UpdateComparisonStatuses`, `UpsertFolderStatus` | **No bump**. Compare data isn't uploaded |
 
 A tombstone is removed when the same key is re-inserted, since the row's new, higher version supersedes it. So **each key appears in the feed at most once**, at its latest version, either as a row or as a tombstone. This is why history and current-scan data can be uploaded in any order; the server applies the same "higher version wins" rule (see the [server spec](remote-sync-server.md#apply-algorithm)). Synced tombstones are pruned after each acknowledged batch. On a machine that never uploads, tombstones accumulate: one small row per deleted file, which is acceptable.
@@ -257,29 +300,35 @@ A feed entry of a drive is **synced** if its version is at or below the drive's 
 
 A batch covers `(from_version, to_version]` (see [batches](#batches)). The marker changes **only after the server has acknowledged the batch**, meaning it committed it and replied. Nothing is written locally when a batch is sent. After the acknowledgement, in one short write transaction:
 
-1. Extend the session's range: insert `(from, to)`, or widen the range that ends at `from`. If `from ≤ synced_version`, move the watermark to `to` instead.
-2. **Compact**: fold every range into the watermark while no pending entry of the drive lies between the watermark and the range's start. Also merge two neighbouring ranges when no pending entry lies between them. "No pending entry between" is checked with the feed indexes (`EXISTS … row_version > a AND row_version <= b`).
+1. Replace the local marker with the `acked_ranges` in the response: the first range from 0 is the watermark, the rest go in `sync_ranges`. The local marker is always a **copy of the server's ranges**, never merged further locally. That's what lets [reconciling](#reconciling) notice when either side goes back in time.
+2. Record any `rejected` entries from the response in `sync_rejected` (see [Rejected entries](#rejected-entries)).
 3. Set `synced_at`, and prune tombstones that are now synced.
 
 A batch that fails, times out or is interrupted leaves the marker where it was, so its rows are still pending and the next run sends them again.
 
-Compaction is what turns "history fully uploaded by `sync`" back into a single watermark, and it also absorbs gaps whose history was superseded by later scans.
+Ranges merge **on the server**, when a batch meets or overlaps an existing range. For a gap that has no pending entries left (its history was superseded by later scans), `sync` sends an empty batch covering the gap, and the server merges the ranges on either side. That's how "history fully uploaded" turns back into a single watermark.
 
 ### Gaps
 
-A **gap** is the interval between the watermark (or the end of one range) and the start of the next range, or the current clock `head` after the last range. It contains all of a drive's pending entries. `sync` uploads gaps one at a time, oldest first. The last batch of a gap is sent with `to_version` equal to the gap's upper end, even if the last entry is lower, so the range meets the next one exactly and merges on both sides.
+A **gap** is the interval between the watermark (or the end of one range) and the start of the next range, or the current clock `head` after the last range. It contains all of a drive's pending entries. `sync` uploads gaps one at a time, oldest first. The last batch of a gap is sent with `to_version` equal to the gap's upper end, even if the last entry is lower, so the range meets the next one exactly and merges on both sides. If the last entry sits exactly at the gap's upper end, that batch already closes the gap; the agent doesn't send a further empty batch, which would have `from = to`.
 
 ### Reconciling
 
-The server's ranges are the source of truth. Whenever a drive is opened (`PUT /drives/{id}` at the start of a `scan` upload, in `sync`, and in `remote-status`), the server returns `acked_ranges` (its watermark first). The agent **replaces** its local marker with them, then compacts:
+Whenever a drive is opened (`PUT /drives/{id}` at the start of a `scan` upload, in `sync`, and in `remote-status` under the lock), the server returns `acked_ranges`. The agent compares them with its local marker (its copy of the server's ranges as of the last acknowledgement) and with its local clock:
 
-- If the server has **less** (its database was restored, or it reset the stream), the missing entries become pending again, as history, and the next `sync` re-sends them.
-- If the server has **more** (the process died between the server's commit and the local marker update), the marker grows, and nothing is re-sent.
-- A `reset: true` response clears the marker: watermark 0, no ranges.
+| Check | Meaning | Action |
+|---|---|---|
+| The server's highest acked version is **above the local `sync_clock.v`** | **`state.db` went back in time**: a Time Machine restore, a VM snapshot, or `~/.driveagent` copied from a backup. The restored DB still has the old stream id but a lower clock, so its next versions would collide with ranges the server already covers, and be skipped as duplicates | **New stream**: mint a new `sync_stream_id`, clear the marker, and `PUT` again. The server wipes the drive, and the whole drive is re-uploaded |
+| The server's ranges **don't cover everything the local marker covered** | **The server went back in time** (a database restore). Rows could simply be re-sent, but deletions couldn't: synced tombstones were pruned locally, so the server would keep files that no longer exist | **New stream**, as above |
+| The server covers **more** than the local marker, but nothing above the local clock | The process died between the server's commit and the local marker update | Adopt the server's ranges; nothing is re-sent |
+| Same ranges | Normal | Nothing |
+| `reset: true` | The server started a new stream (for example, for the new stream id sent above) | Clear the marker: watermark 0, no ranges |
+
+After a new stream, everything is history: `scan` still uploads only what it writes, and `sync` re-uploads the rest. The legitimate "server has more" case always stays at or below the local clock, so it can't be confused with a rewound `state.db`.
 
 ### Resuming
 
-`sync` and `scan` both resume without any extra state: the marker already records every acknowledged batch. An interrupted run (network loss, Ctrl-C, crash) leaves everything after the last acknowledged batch pending, and the next run reconciles with the server and continues from there. At most the one batch that was in flight is sent again, and the server ignores it as already covered (see [below](#why-a-lost-response-cant-duplicate-data)).
+`sync` and `scan` both resume without any extra state: the marker already records every acknowledged batch. An interrupted run (network loss, Ctrl-C, crash) leaves everything after the last acknowledged batch pending, and the next run reconciles with the server and continues from there. At most the one batch that was in flight is sent again (the exact same bytes, see [Batches](#batches)), and the server ignores it as already covered (see [below](#why-a-lost-response-cant-duplicate-data)).
 
 ### Inspection views
 
@@ -300,7 +349,7 @@ FROM (
   UNION ALL SELECT drive_id, kind, 'delete', row_version, relative_path, child_name FROM sync_tombstones
 ) f JOIN drives d USING (drive_id);
 
--- per-drive summary, used by remote-status, sync and scan's startup hint
+-- per-drive summary, used by remote-status (not by scan's startup hint, see below)
 CREATE VIEW sync_summary AS
 SELECT d.drive_id, d.synced_version, d.synced_at,
        (SELECT count(*) FROM sync_ranges r WHERE r.drive_id = d.drive_id) AS ranges,
@@ -308,7 +357,9 @@ SELECT d.drive_id, d.synced_version, d.synced_at,
 FROM drives d;
 ```
 
-The uploader doesn't read through these views. It uses the explicit range query below, which uses the `(drive_id, row_version)` indexes.
+The uploader doesn't read through these views; it uses the explicit range query below, which uses the `(drive_id, row_version)` indexes.
+
+`sync_summary` is expensive: a `UNION` over four tables with a correlated `EXISTS` per row, which takes seconds on a multi-million-row drive. So `scan`'s startup hint ("history is pending") doesn't use it. Instead, it runs one `EXISTS … row_version > a AND row_version <= b LIMIT 1` per gap on the feed indexes, which is instant.
 
 ## Reading the feed
 
@@ -338,7 +389,7 @@ While uploading a drive, an uploader holds an exclusive `flock` on `<state-dir>/
 - **`scan`** takes its drive's lock before preflight and holds it until the scan and its drain end. If the lock is busy because a `sync` is uploading that drive's history, the scan waits for it and prints `waiting for "driveagent sync" to finish uploading <drive>`. This wait doesn't count toward `--remote-timeout`, and `sync` releases each drive as soon as that drive is done.
 - **`sync`** tries each drive's lock without waiting, and skips a drive whose lock is held.
 
-Correctness doesn't depend on the lock. Batches can be applied in any order, and the server ignores anything it has already covered. The lock just keeps a scan and a `sync` from interleaving writes to the same drive's marker.
+Correctness of the uploaded data doesn't depend on the lock: batches can be applied in any order, and the server ignores anything it has already covered. The lock keeps a scan and a `sync` from interleaving writes to the same drive's marker, and reconciling happens only under it.
 
 ### State machine
 
@@ -364,14 +415,15 @@ stateDiagram-v2
 A session starts at `from` (for a `scan`, as described in [Upload during `scan`](#upload-during-scan); for `sync`, the gap's lower end) and keeps a `cursor`, initially `from`:
 
 1. Read a page of entries in `(cursor, upper]`, up to `min(1000, limits.max_changes_per_batch)` entries, and stop adding once the encoded JSON would exceed `limits.max_batch_bytes`.
-2. Set `from_version = cursor`. `to_version` is the last entry's version. For a `sync` session, when this page reaches the end of the gap, `to_version` is the gap's upper end instead. An empty page at the end of a gap still produces an (empty) batch, so the gap closes on the server.
+2. Set `from_version = cursor`. `to_version` is the last entry's version. For a `sync` session, when this page reaches the end of the gap, `to_version` is the gap's upper end instead. An empty page at the end of a gap still produces an (empty) batch, so the gap closes on the server, unless that would give `from_version = to_version`, in which case nothing is sent.
 3. `Idempotency-Key = hex(sha256(agent_id | drive_id | stream_id | from_version | to_version))`. It is the same for every retry of the same batch, including after a process restart.
-4. `POST` the batch, gzip-compressed. On success, [record the acknowledgement](#recording-an-acknowledgement) and set `cursor = to_version`.
-5. Responses that need resyncing:
+4. Encode and gzip the batch **once**, and keep those bytes until the batch is acknowledged. Every retry within the process sends **exactly the same bytes**. Re-reading the page on retry could, with the byte limit, give the same `(from, to]` with different contents, which the server would reject as a reused key. After a restart the page is re-read; that's safe because the server checks range coverage before the key (see the [server spec](remote-sync-server.md#apply-algorithm)).
+5. `POST` the batch. On success, [record the acknowledgement](#recording-an-acknowledgement) and set `cursor = to_version`.
+6. Responses that need resyncing:
    - `409 STREAM_MISMATCH` or `404 DRIVE_NOT_OPEN`: `PUT` the drive again and reconcile. A `scan` session keeps its `from`; a `sync` recomputes its gaps.
-   - `413`: halve the page size (minimum 1) and retry.
+   - `413`: halve the page size (minimum 1), re-encode and retry. The agent classifies responses **by HTTP status code**, never only by the JSON `code` field: nginx's own `413` (and `502`/`504`) have an HTML body.
    - `401 TOKEN_EXPIRED`: refresh once, then retry.
-6. Everything else follows the classification in the [server spec](remote-sync-server.md#status-and-error-codes).
+7. Everything else follows the classification in the [server spec](remote-sync-server.md#status-and-error-codes).
 
 Each batch claims to cover `(from_version, to_version]`: every pending entry of the drive in that interval is in the batch. The claim is true because the page is a snapshot and versions commit in order. Later writes to the drive only add entries above the clock head at that point. They never add entries inside an interval already read; they can only move an entry out of it by superseding it with a higher version.
 
@@ -380,6 +432,12 @@ Each batch claims to cover `(from_version, to_version]`: every pending entry of 
 **Progress.** The existing progress line gains `uploaded N / pending M`, or `remote: retrying (1m10s left)`.
 
 **A slow remote never slows the scan.** The feed lives in SQLite, not in memory, so there's no in-memory queue to fill up. The only thing that can stop the scan is running out of the give-up budget, or a permanent failure.
+
+### Rejected entries
+
+A few entries can fail on the server every time: for example, an entry that breaks a server-side limit. Retrying such an entry forever would block the whole drive. So the server validates **per entry**. It acknowledges the batch's range, skips the bad entries, and lists them in the response as `rejected: [{"v": 18241, "reason": "…"}]`.
+
+The agent records each one in `sync_rejected`, and `remote-status` lists them per drive. A rejected entry counts as synced for the marker. If the file changes later, its new version is uploaded (and validated) again like any other change. The server spec has the [details](remote-sync-server.md#apply-algorithm).
 
 ### Why a lost response can't duplicate data
 
@@ -408,11 +466,18 @@ All of these run against a fake `agentsync` (`httptest.Server`) built on the sha
 - **Remote required** (`scan`): remote down at start → exit 3, `state.db` untouched; not logged in → exit 3 before scanning; remote dies mid-scan → scan interrupted after the budget, checkpoint resumable, and the unsent rows are pending history that `sync` uploads; permanent 426 mid-scan → scan cancelled, exit 4.
 - **`sync`**: uploads every drive's history after a successful handshake and nothing before it; a failed handshake uploads nothing and exits 3 or 4; gaps are closed oldest first, and after them the drive is one watermark with no ranges; an empty gap is closed with an empty batch; an interrupted `sync` (killed between batches, and between the server's commit and the local marker update) resumes and ends with the same server state; a drive locked by a running `scan` is skipped; after the migration, a pre-existing `state.db` uploads in full.
 - **Out-of-order safety**: `scan` deletes (or rehashes) a file whose older version is still pending history; a later `sync` never resurrects or downgrades it on the server. A property test applies random interleavings of the same batches to the fake server and checks the result equals the local state.
-- **Synced marker**: it moves only after an acknowledgement, never on send or on a failed batch; acknowledgements extend ranges and compact correctly; reconciling with a server that has less makes entries pending again, and with a server that has more re-sends nothing; `reset: true` clears it; `sync_summary.pending` matches the feed query.
+- **Synced marker**: it moves only after an acknowledgement, never on send or on a failed batch; after each ack it equals the server's returned ranges; an empty-gap batch merges ranges; a gap whose last entry is at its upper end sends no extra empty batch; `reset: true` clears it; `sync_summary.pending` matches the feed query.
+- **Reconciling**: a `state.db` restored from an older copy (server's highest acked version above the local clock) mints a new stream and re-uploads; a server restored from backup (missing coverage the marker had, including lost deletions) mints a new stream and re-uploads, and afterwards the server has no deleted files; a server ahead of the marker but at or below the local clock is adopted without re-sending; `sync` and `remote-status` never reconcile a drive whose upload lock a scan holds.
+- **Replace-root ordering**: with `--replace-root`, `ClearDrive` (one transaction) and the new stream id happen before the first `PUT`, so no row of the new root is uploaded on the old stream, and the server has none of the old root's files afterwards.
+- **Retries**: a retried batch sends byte-identical content; after a restart, a re-read page with the same range is accepted as a duplicate.
+- **Rejected entries**: a batch with one entry the server rejects is acknowledged; the entry is recorded in `sync_rejected` and shown by `remote-status`; the drive keeps syncing.
+- **Ctrl-C**: the first interrupt drains and exits 130; a second aborts the drain and exits 130; a remote failure still exits 3 (the cancel cause tells them apart).
+- **SQLite**: two processes writing to the feed concurrently never fail with `SQLITE_BUSY_SNAPSHOT` (immediate transactions); the backfill on a large fixture prints progress.
 - **Idempotency**: the fake server drops the response after applying; the retry gets a duplicate; the final server state equals the local state.
 - **Resync**: `STREAM_MISMATCH`, `DRIVE_NOT_OPEN`, `413` batch halving.
-- **Credentials**: a concurrent refresh from two processes ends with one rotation and no `REFRESH_REUSED`; file modes are `0600`; `--password` doesn't exist.
-- **Drive identity**: detection from fixture `mountinfo`, `/dev/disk/by-uuid` and udev files (Linux) and `diskutil`/`ioreg` output (macOS), including a missing filesystem ID and a missing serial; normalisation; the wrong-drive guard refuses a mismatch, records a first identity, keeps the stored one when detection fails, and `--accept-identity-change` updates it.
+- **Credentials**: a concurrent refresh from two processes ends with one rotation and no `REFRESH_REUSED`; a lost refresh response followed by a replay within 30 s gets a fresh pair, with no re-login; file modes are `0600`; `--password` and a password environment variable don't exist, and `--password-stdin` works.
+- **Drive identity**: detection from fixture `mountinfo`, `/dev/disk/by-uuid` and udev files (Linux) and `diskutil`/`ioreg` output (macOS), including a missing filesystem ID, a missing serial and a denylisted generic serial; the mount lookup by `st_dev` works through a symlinked root and a bind mount, and `/media/x` doesn't match `/media/xy`; normalisation; the wrong-drive guard refuses a filesystem-ID mismatch, only warns on a serial-only change, records a first identity, keeps the stored one when detection fails, and `--accept-identity-change` updates it.
 - **LAN address**: with a fake TLS server for `sm.jkurapati.com` (test CA): `lan_addr` reachable → used; nothing listening at `lan_addr` → falls back to DNS within about 1 s; a server at `lan_addr` with a certificate for another name → falls back, and no request (so no token) reaches it; after a failure, `lan_addr` isn't retried for 5 minutes; without `lan_addr`, only DNS is used.
-- **Paths**: non-UTF-8 file and directory names round-trip through `path_b64` / `child_b64`, and the server stores the raw bytes. Valid UTF-8 is never sent as `_b64`.
+- **Paths**: non-UTF-8 file and directory names round-trip through `path_b64` / `child_b64`, and the server stores the raw bytes. Valid UTF-8 is never sent as `_b64`. A path near Linux's 4 KB limit uploads without error.
+- **Status classification**: an HTML `413` from nginx is handled like the JSON one (batch halved); HTML `502`/`504` are transient.
 - **End-to-end** (manual, per release): run `agentsync` locally with Postgres in Docker; `driveagent login --remote-url http://localhost:8091`; scan a folder, kill the remote mid-scan, restore it, re-scan, and check only the re-scan's changes reached Postgres; run `sync` and check Postgres matches `state.db`; then check a normal scan uploads everything it writes.

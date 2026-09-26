@@ -4,7 +4,7 @@
 
 This feature lets the local Linux agent (`driveagent`, see [`drive-comparison-agent.md`](drive-comparison-agent.md)) upload its scan data to the Bhandaar server at `sm.jkurapati.com`, so a drive's contents are known centrally and not only in one machine's `~/.driveagent/state.db`.
 
-The design is split across three documents:
+The design is split across four documents:
 
 | Document | Covers |
 |---|---|
@@ -76,7 +76,7 @@ To leave room for a later switch: all wire types live in one small, standard-lib
 | `path VARCHAR(2000)`, absolute path on the scanning host | Path relative to a stable `drive_root`, no length limit |
 | No drive identity; directories carry aggregated size and count | Drive identity (`drive_id`, `drive_root`, `backup_root`); directory structure as parent→child listings |
 
-Reusing it would mean re-uploading every file on every scan. The server instead keeps `agent_files`, `agent_dir_listings` and `agent_scan_runs`, which mirror the agent's SQLite tables. The schema is in [`remote-sync-server.md`](remote-sync-server.md#database-schema).
+Reusing it would mean re-uploading every file on every scan. The server instead keeps `agent_files`, `agent_dir_listings` and `agent_scan_runs`, which mirror the agent's SQLite tables. Their rows are keyed on a SHA-256 of the raw path bytes rather than the path text. That keeps paths free of Postgres's index-size limit (about 2.7 KB, less than Linux's ~4 KB paths), and makes the key exact even for names that aren't valid UTF-8. The schema is in [`remote-sync-server.md`](remote-sync-server.md#database-schema).
 
 
 ### D4. Sync model: a versioned change feed, uploaded as ranges in any order
@@ -88,7 +88,9 @@ The agent does not stream records out of the scan pipeline. Instead:
 - **`scan` uploads only its own interval.** Before scanning, it reads the version clock `S`; everything of that drive above `S` was written by this scan. Its session covers `(S, …)`, or continues the drive's watermark when no history is pending. History below `S` is left alone.
 - **`sync` fills the gaps.** It uploads the pending history between acked ranges, oldest first. Once a drive is fully synced, its ranges merge into a single watermark from 0.
 - **Why any order is safe:** on the server, a key's higher version always wins, and the server keeps its own tombstones. A stale history upsert can't overwrite, or bring back, a file that a later scan changed or deleted. The server also skips entries inside ranges it has already acked, so replays are harmless. Tombstones below the watermark are garbage-collected.
-- **Synced marker.** Locally, each drive has a **watermark** (`drives.synced_version`: everything at or below it is synced) plus a small **`sync_ranges`** table of synced intervals above it, typically one per scan uploaded while history was pending. An entry is synced if it falls at or below the watermark or inside a range, and pending otherwise. The marker moves **only after the server acknowledges a batch**: never when a batch is sent, and not for a batch that fails. After each acknowledgement it is extended and compacted: ranges fold into the watermark once no pending entry separates them. Whenever a drive is opened, the marker is replaced by the server's ranges, since the server is the source of truth. Views in `state.db` expose a per-row `synced` column and per-drive pending counts for inspection. See [agent spec](remote-sync-agent.md#synced-marker).
+- **Synced marker.** Locally, each drive has a **watermark** (`drives.synced_version`: everything at or below it is synced) plus a small **`sync_ranges`** table of synced intervals above it, typically one per scan uploaded while history was pending. An entry is synced if it falls at or below the watermark or inside a range, and pending otherwise. The marker moves **only after the server acknowledges a batch**: never when a batch is sent, and not for a batch that fails. After each acknowledgement, the local marker is set to the server's returned ranges: it's always a copy of the server's view. Ranges merge on the server, and `sync` closes gaps that have no pending entries with an empty batch. Views in `state.db` expose a per-row `synced` column and per-drive pending counts for inspection. See [agent spec](remote-sync-agent.md#synced-marker).
+- **Either side going back in time.** When a drive is opened, the agent compares the server's ranges with its copy and with its local clock. If the server has acked beyond the local clock, `state.db` was restored from an older copy. If the server lacks coverage the agent had seen, the server was restored. Either way, the agent mints a new `stream_id`, and the whole drive is re-uploaded. That's the only way to also restore deletions, whose tombstones are pruned locally once synced. The legitimate "server has more" case (a crash between the server's commit and the local update) always stays at or below the local clock.
+- **One bad entry can't block a drive.** The server validates per entry, acknowledges the batch's range, and returns the entries it couldn't store as `rejected`. The agent records them locally, and `remote-status` shows them.
 - **Resume** needs no extra state: an interrupted `sync` or `scan` leaves everything after the last acknowledged batch pending, and the next run continues from there.
 
 A per-row `synced` column was considered, twice, and rejected, most recently on 2026-09-25. Every acknowledgement would rewrite up to 1000 rows while a scan writes to the same tables. The per-drive watermark, updated once per acknowledged batch, was preferred.
@@ -113,9 +115,10 @@ The trade-off of skipping history: until `sync` runs, the server's copy of a dri
 ### D6. Auth: short-lived JWT access token + rotating opaque refresh token
 
 - `POST /agent/v1/auth/login` with username + password returns an access token (JWT, HS256, 15 min) and a refresh token (random 256-bit, 30 days, stored hashed on the server).
-- Refresh rotates the refresh token. Reusing a rotated token outside a short grace window revokes the whole token family (theft detection).
+- Refresh rotates the refresh token. Within a 30 s grace window, the server accepts the just-rotated token once more and issues a fresh pair, so a lost refresh response doesn't force a re-login. Reuse beyond that revokes the whole token family (theft detection).
+- Failed logins lock out per (username, client IP), not per username alone, so knowing the username isn't enough to lock the owner out.
 - Passwords are hashed with argon2id. Users are created with `agentsync user add` on the server.
-- The agent stores tokens in `<state-dir>/credentials.json` (mode 0600). The password is never stored and never taken as a command-line flag.
+- The agent stores tokens in `<state-dir>/credentials.json` (mode 0600). The password is never stored, and never taken from a command-line flag or an environment variable; for scripts there's `--password-stdin`.
 
 ### D7. nginx: an exempt `/agent/` path
 
@@ -127,14 +130,14 @@ From inside the home LAN, the public name only works through NAT hairpinning, wh
 ### D8. Drive identity: filesystem ID + hardware serial, read-only
 
 `--drive-id` is just a label, so on its own it can't tell that two machines scanned the same portable drive. At the start of each scan, the agent reads two identifiers from the drive holding `--drive-root`, without writing anything to it and without root access:
-- the **filesystem ID**: a UUID, or the volume serial for NTFS/exFAT. It travels with the drive, but a clone copies it.
+- the **filesystem ID**: a UUID, or the volume serial for NTFS/exFAT/FAT. It travels with the drive, but a clone copies it. For ext4, APFS and HFS+, Linux and macOS report the same ID. For FAT, exFAT and NTFS they don't (macOS synthesizes one, and the raw serial needs root), so those drives are linked only between agents on the same OS.
 - the **hardware serial** reported through the USB enclosure. This tells a clone from its original, but some enclosures don't report one.
 
 The server links a user's drive rows (from any agent) into one **physical drive** when:
 - the filesystem IDs match and the serials match, or
 - the filesystem IDs match and either side has no serial.
 
-Matching filesystem IDs with *different* serials is recorded as a clone. Copies stay separate and are only linked. Locally, the same identity powers a guard: `scan` refuses to run when the drive under a `--drive-id` has different identifiers than last time (the wrong drive plugged in), unless `--accept-identity-change` is given.
+Matching filesystem IDs with *different* serials is recorded as a clone. Copies stay separate and are only linked. Locally, the same identity powers a guard: `scan` refuses to run when the drive under a `--drive-id` has a different filesystem ID than last time (the wrong drive plugged in), unless `--accept-identity-change` is given. A changed serial alone only warns, because many USB docks report their own serial, and moving a disk to another dock changes it.
 
 A marker file written to the drive was considered and rejected, because the agent never writes to drives. Details: [agent](remote-sync-agent.md#drive-identity), [server](remote-sync-server.md#matching-physical-drives).
 
@@ -188,7 +191,7 @@ The first `driveagent login` (interactive, prompts for the password) does health
 
 1. **Server skeleton**: `agentsync` with health, handshake, the users CLI, login/refresh/logout, schema migrations, the Dockerfile and the `agentsync-docker-image.yml` workflow. Deploy it and add the nginx `/agent/` block.
 2. **Agent identity**: a `version` package, `driveagent version`, `login`, `logout`, `remote-status`, and the `driveagent.yml` workflow (test, version check, Linux/macOS builds, automatic release). Merging this step cuts the first release, `driveagent/v0.1.0`.
-3. **Agent change feed and drive identity**: the `state.db` migration (`row_version`, tombstones, `stream_id`, the synced marker, `sync_ranges` and views, identity columns, backfill of existing rows), plus identity detection and the wrong-drive guard in `scan`. The guard is the only behaviour change. First, check on real drives that Linux and macOS report the same filesystem ID (see [agent spec](remote-sync-agent.md#drive-identity)).
+3. **Agent change feed and drive identity**: the `state.db` migration (`row_version`, tombstones, `stream_id`, the synced marker, `sync_ranges` and views, identity columns, backfill of existing rows), plus identity detection and the wrong-drive guard in `scan`. The guard is the only behaviour change. A quick look at the real drives (`lsblk` on Linux, `diskutil info` on a Mac) confirms their filesystems, which decides whether cross-OS linking applies to them (see [agent spec](remote-sync-agent.md#drive-identity)).
 4. **Upload**: the server's drive and changes endpoints, with acked ranges, tombstones and physical-drive matching.
 5. **`driveagent sync`**: uploads history.
 6. **Upload in `scan`**. From this step on, every `driveagent scan` needs the remote and a prior `driveagent login`; there is no way to scan locally only. Until it ships, scans stay local-only, so existing workflows keep working through steps 1–5.
@@ -206,7 +209,7 @@ That is out of scope for v1, and the v1 design doesn't depend on it. But two thi
 
 Decided 2026-09-25:
 
-1. **Paths that aren't valid UTF-8** are uploaded, not rejected. Linux filenames are bytes, but JSON strings and Postgres `TEXT` require UTF-8. So the wire carries `path_b64` / `child_b64` for such names, and the server stores a readable escaped form (used as the key) plus the original bytes (see [server spec](remote-sync-server.md#paths-that-arent-valid-utf-8)).
-2. **Drive identity across machines.** The same drive scanned from two machines is stored as two copies, **linked** as one physical drive using the filesystem ID and hardware serial (D8). A missing serial on either side still counts as the same drive. Copies aren't merged in v1.
+1. **Paths that aren't valid UTF-8** are uploaded, not rejected. Linux filenames are bytes, but JSON strings and Postgres `TEXT` require UTF-8. So the wire carries `path_b64` / `child_b64` for such names, and the server stores a readable escaped form plus the original bytes, keyed on a hash of the raw bytes (see [server spec](remote-sync-server.md#paths-that-arent-valid-utf-8)).
+2. **Drive identity across machines.** The same drive scanned from two machines is stored as two copies, **linked** as one physical drive using the filesystem ID and hardware serial (D8). A missing serial on either side still counts as the same drive. For FAT, exFAT and NTFS, only copies from the same OS are linked (decided 2026-09-25). Copies aren't merged in v1.
 
 There are no open questions.

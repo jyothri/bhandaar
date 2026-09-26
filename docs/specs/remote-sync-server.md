@@ -67,7 +67,8 @@ Common request headers:
 | Header | When |
 |---|---|
 | `Authorization: Bearer <access_token>` | Every endpoint except health, handshake, login, refresh |
-| `X-Agent-Version: 0.3.1` | Every request. The server returns `426` if it is below the minimum |
+| `X-Agent-Version: 0.3.1` | Every request. On every endpoint **except** `GET /agent/health` and `POST /agent/v1/handshake`, the server returns `426` if it is below the minimum. Those two stay reachable to any version: health so any agent can probe the server, and the handshake so an old agent gets its `200 {decision: upgrade_required, download_url}` instead of a bare `426` |
+| `X-Agent-Protocol: 1` | Every request after the handshake: the protocol it negotiated. Protocols are additive changes inside `/agent/v1` (see D1), so the path alone doesn't say which one an agent uses. A breaking change gets a new path (`/agent/v2`) instead. A missing header means protocol 1; an unsupported value gets `426` |
 | `X-Agent-Id: <uuid>` | Every request. Must match the token's `agent_id` claim on authenticated endpoints |
 | `Idempotency-Key: <string ≤ 128 chars>` | Required on mutating `POST`s (login, refresh and logout excepted) |
 | `Content-Encoding: gzip` | Optional on `/changes` (the agent always sends it) |
@@ -131,7 +132,7 @@ Response `200`:
 {"token_type": "Bearer", "access_token": "eyJ…", "access_expires_in": 900, "refresh_token": "rt_…", "refresh_expires_in": 2592000, "user": "jyothri"}
 ```
 - `401 INVALID_CREDENTIALS` for an unknown user, a wrong password or a disabled user. The message is identical in all three cases, and the server spends constant time: it verifies against a dummy hash when the user doesn't exist.
-- `429 TOO_MANY_ATTEMPTS` after 10 failures for a username within 15 minutes, with `Retry-After`. nginx also rate-limits by IP (see [Deployment](#deployment)).
+- `429 TOO_MANY_ATTEMPTS` after 10 failures for the same **username from the same client IP** within 15 minutes, with `Retry-After`. Keying on the IP too matters because usernames aren't secret (`jyothri` is in this spec): a lockout per username alone would let anyone lock the owner out indefinitely with 10 bad attempts every 15 minutes, well under the nginx rate limit. The client IP comes from `X-Real-IP`, set by nginx (see [Deployment](#deployment)). nginx also rate-limits by IP.
 - On success, the server upserts the `agent_agents` row (`agent_id`, user, hostname) and starts a new refresh-token family.
 - An `agent_id` already bound to a different user gets `403 AGENT_OWNED_BY_OTHER_USER`.
 
@@ -141,7 +142,7 @@ Access-token JWT claims: `sub` (user id), `aid` (agent id), `iat`, `exp`, `jti`.
 
 Request `{"refresh_token": "rt_…"}`. Response: same shape as login, with a **new** refresh token. The old one is marked `rotated`. The token's row is locked (`FOR UPDATE`) during the exchange, so two simultaneous requests with the same token are handled one after the other: the first rotates it, and the second sees it as just rotated (below).
 
-- Presenting a rotated token **within 30 s** of its rotation returns `409 REFRESH_RACE`. The family is not revoked. This covers two agent processes refreshing at once; the agent reloads the credentials file (see the agent spec).
+- Presenting a rotated token **within 30 s** of its rotation is accepted **once more**: the server issues a fresh pair and revokes the successor it issued before, which the agent never received. The usual cause is a lost refresh response, or an agent that crashed before saving the new token. Returning an error there instead would leave the agent retrying until the window ran out, then revoke the family, forcing an interactive `driveagent login` for every scan and cron `sync`. A token replayed a second time within the window is treated as reuse (below).
 - Presenting a rotated token after that window revokes the **whole family** and returns `401 REFRESH_REUSED`. The agent must log in again.
 - An expired or revoked token returns `401 INVALID_REFRESH_TOKEN`.
 
@@ -160,7 +161,7 @@ Opens (or re-opens) a drive's stream, and returns which parts of the drive's fee
 Request:
 ```json
 {"stream_id": "c1f5…", "drive_root": "/mnt/seagate2", "backup_root": "Jyo/Backup",
- "identity": {"fs_uuid": "ABCD1234", "fs_type": "exfat", "hw_serial": "NA8F2K1X"}}
+ "identity": {"fs_uuid": "ABCD1234", "fs_type": "exfat", "fs_uuid_source": "linux", "hw_serial": "NA8F2K1X"}}
 ```
 Every `identity` field is optional (see [drive identity](remote-sync-agent.md#drive-identity) in the agent spec).
 
@@ -172,7 +173,7 @@ Response `200`:
 ```
 `physical_drive` is `null` when the drive couldn't be matched (no filesystem ID). `linked` lists this user's *other* drive rows, from other agents, matched to the same physical drive.
 
-`acked_ranges` lists the version intervals `(from, to]` the server has fully applied, sorted and non-overlapping. Everything in the drive's feed inside them is on the server. A drive is synced contiguously from 0 up to its **watermark**, the end of the range starting at 0 (`acked_version` in the table below). Ranges above the watermark come from scans that uploaded their own data while older history was still pending on the agent (see the [agent spec](remote-sync-agent.md#what-each-command-uploads)).
+`acked_ranges` lists the version intervals `(from, to]` the server has fully applied, sorted and non-overlapping. The agent keeps a copy of them and compares it with the next response, to notice if either side went back in time (see [Reconciling](remote-sync-agent.md#reconciling) in the agent spec). Everything in the drive's feed inside them is on the server. A drive is synced contiguously from 0 up to its **watermark**, the end of the range starting at 0 (`acked_version` in the table below). Ranges above the watermark come from scans that uploaded their own data while older history was still pending on the agent (see the [agent spec](remote-sync-agent.md#what-each-command-uploads)).
 
 In one transaction, with the drive row locked (`FOR UPDATE`):
 - **No row**: create it, with no ranges.
@@ -186,7 +187,7 @@ In one transaction, with the drive row locked (`FOR UPDATE`):
 
 A drive row belongs to one agent (`agent_id`, `drive_id`), and its uploaded data stays there. Copies uploaded from different machines are **linked, not merged**: the server records that they are the same physical drive, so a UI or a server-side compare can treat them as one. Merging them into a single copy would need multi-writer sync and is out of scope for v1.
 
-Matching runs within one user's drives, in the `PUT` transaction. It first locks the user's row (`SELECT … FROM agent_users WHERE id = $1 FOR UPDATE`), so two agents of the same user opening a new drive at the same moment can't both create a physical drive for it. Locking `agent_physical_drives` rows wouldn't be enough: when the drive is new, there are no rows yet to lock. The candidates are the user's physical drives with the same (normalised) `fs_uuid`:
+Matching runs within one user's drives, in the `PUT` transaction. It first locks the user's row (`SELECT … FROM agent_users WHERE id = $1 FOR UPDATE`), so two agents of the same user opening a new drive at the same moment can't both create a physical drive for it. Locking `agent_physical_drives` rows wouldn't be enough: when the drive is new, there are no rows yet to lock. The candidates are the user's physical drives with the same (normalised) `fs_uuid`. For FAT, exFAT and NTFS, they must also have the same `fs_uuid_source` (`linux` or `macos`), because the two operating systems report different IDs for those filesystems (see [drive identity](remote-sync-agent.md#drive-identity)). A Linux copy and a Mac copy of such a drive therefore stay unlinked in v1. For ext4, APFS and HFS+ the source doesn't matter.
 
 | Situation | Result |
 |---|---|
@@ -234,26 +235,32 @@ Semantics:
 
 Header `Idempotency-Key` is required. Response `200`:
 ```json
-{"acked_ranges": [[0, 19233], [20011, 20510]], "applied": 998, "skipped": 2, "duplicate": false}
+{"acked_ranges": [[0, 19233], [20011, 20510]], "applied": 997, "skipped": 2, "duplicate": false,
+ "rejected": [{"v": 18241, "reason": "mtime out of range"}]}
 ```
+
+`rejected` lists entries the server couldn't store. The batch's range is still acknowledged, so a single bad entry can't block the drive. The agent records them and shows them in `remote-status` (see [Rejected entries](remote-sync-agent.md#rejected-entries)).
 
 #### Apply algorithm
 
 In one transaction:
 
-1. **Idempotency lookup.** If `(user_id, key)` exists with the same request hash, return the stored response. If it exists with a different hash, return `422 IDEMPOTENCY_KEY_REUSED`.
-2. Lock the drive row with `FOR UPDATE`. A missing drive returns `404 DRIVE_NOT_OPEN`, and the agent then calls `PUT`.
-3. If `stream_id` differs from the stored one, return `409 STREAM_MISMATCH` with `details.stream_id`. The agent re-opens the stream.
-4. If `(from_version, to_version]` lies entirely inside one acked range, the batch is a full duplicate: return `200` with `duplicate: true` and the current ranges.
-5. Otherwise apply every change whose `v` is **not** inside an acked range (the rest are counted as `skipped`; they were applied, or superseded, when that range was acked). For each key, compare `v` with the key's current version on the server, which is the version of its row or of its tombstone, whichever exists:
+1. Lock the drive row with `FOR UPDATE`. A missing drive returns `404 DRIVE_NOT_OPEN`, and the agent then calls `PUT`.
+2. If `stream_id` differs from the stored one, return `409 STREAM_MISMATCH` with `details.stream_id`. The agent re-opens the stream.
+3. **Coverage check.** If `(from_version, to_version]` lies entirely inside one acked range, the batch is a full duplicate: return `200` with `duplicate: true` and the current ranges. This comes **before** the key lookup. An agent restarted after a lost response re-reads the page, and may send the same range with slightly different contents (a byte-limited page can be cut differently). That must count as a duplicate, not as a reused key.
+4. **Idempotency lookup.** If `(user_id, key)` exists with the same request hash, return the stored response. If it exists with a different hash, return `422 IDEMPOTENCY_KEY_REUSED`.
+5. **Validate each entry** against the server's rules (valid `_b64`, no NUL bytes, sizes and timestamps in range, known `kind`/`op`). Entries that fail are left out and listed in `rejected` with a reason; the rest continue.
+6. Apply every remaining change whose `v` is **not** inside an acked range (the rest are counted as `skipped`; they were applied, or superseded, when that range was acked). For each key, compare `v` with the key's current version on the server, which is the version of its row or of its tombstone, whichever exists:
    - **upsert** (file, dir_child): apply only if `v` is higher. Write the row with `row_version = v` and delete the key's tombstone.
    - **delete** (file, dir_child): apply only if `v` is higher. Delete the row and write a tombstone with `row_version = v`.
    - **scan_run upsert**: upsert keyed by `(drive_pk, run_id)` if `v` is higher. Scan runs are never deleted individually.
 
    In SQL this is one `unnest` statement per table and op. For example, a file upsert is `INSERT … ON CONFLICT … DO UPDATE … WHERE agent_files.row_version < EXCLUDED.row_version`, filtered with `NOT EXISTS` against a tombstone with a higher version.
-6. Add `(from_version, to_version]` to `agent_sync_ranges`, merging it with every range it overlaps or touches. Set `acked_version` to the end of the range that starts at 0, if there is one, and `last_synced_at = now()`.
-7. Store the idempotency record (key, request hash, status, response body).
-8. Commit.
+
+   **If a bulk statement fails** on data (a constraint, a value Postgres rejects), the server falls back to applying that batch **entry by entry**, each under a `SAVEPOINT`. Entries that still fail are rolled back to their savepoint and added to `rejected` with the database error as the reason. The fast path stays one statement per table, and one unexpected bad entry costs a slower batch, not a stuck drive. Only failures unrelated to the data, such as a lost connection, return `500`.
+7. Add `(from_version, to_version]` to `agent_sync_ranges`, merging it with every range it overlaps or touches. Set `acked_version` to the end of the range that starts at 0, if there is one, and `last_synced_at = now()`.
+8. Store the idempotency record (key, request hash, status, response body).
+9. Commit.
 
 Why this is safe in any order:
 - Each key appears once in the agent's feed, and on the server the higher version of a key always wins. Tombstones make that include deletions: a stale upsert that arrives after a newer delete loses to the tombstone, rather than bringing the file back.
@@ -261,7 +268,7 @@ Why this is safe in any order:
 
 There is no cursor to fall out of step with, so there is no "gap" error.
 
-A batch that fails validation (unknown `kind`/`op`, unsorted or duplicate `v`, `v` outside `(from_version, to_version]`, missing fields) gets `400 INVALID_BATCH` and is not applied. This means a client bug, and the agent does not retry it.
+A batch whose **envelope** is invalid (unsorted or duplicate `v`, `v` outside `(from_version, to_version]`, `from_version ≥ to_version`, a missing `stream_id`) gets `400 INVALID_BATCH` and is not applied. This means a client bug, and the agent does not retry it. Problems with individual entries don't fail the batch; they go in `rejected`.
 
 ### Status and error codes
 
@@ -272,12 +279,14 @@ A batch that fails validation (unknown `kind`/`op`, unsorted or duplicate `v`, `
 | 401 | `INVALID_CREDENTIALS`, `INVALID_REFRESH_TOKEN`, `REFRESH_REUSED` | Re-login needed; permanent for this run |
 | 403 | `AGENT_OWNED_BY_OTHER_USER`, `AGENT_MISMATCH` | Permanent |
 | 404 | `DRIVE_NOT_OPEN` | `PUT` the drive, then retry |
-| 409 | `STREAM_MISMATCH`, `REFRESH_RACE` | Resync as described above |
-| 413 | `PAYLOAD_TOO_LARGE` | Halve the batch size and retry |
+| 409 | `STREAM_MISMATCH` | Resync as described above |
+| 413 | `PAYLOAD_TOO_LARGE`, or nginx's own `413` (HTML body) | Halve the batch size and retry |
 | 422 | `IDEMPOTENCY_KEY_REUSED` | Permanent (bug) |
 | 426 | `UPGRADE_REQUIRED` | Permanent; same as a handshake `upgrade_required` |
 | 429 | `RATE_LIMITED`, `TOO_MANY_ATTEMPTS` | Transient; honour `Retry-After` |
-| 500, 502, 503, 504 | any | Transient; back off and retry |
+| 500, 502, 503, 504 | any (nginx's `502`/`504` have an HTML body) | Transient; back off and retry |
+
+The agent classifies responses **by HTTP status code**. The JSON `code` only refines it, because nginx answers some statuses itself with an HTML body.
 
 ## Database schema
 
@@ -292,11 +301,12 @@ CREATE TABLE agent_users (
   disabled_at    TIMESTAMPTZ
 );
 
-CREATE TABLE agent_login_failures (         -- per-username lockout window
+CREATE TABLE agent_login_failures (         -- lockout window per (username, client IP)
   username   TEXT NOT NULL,
+  client_ip  INET NOT NULL,
   failed_at  TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON agent_login_failures (username, failed_at);
+CREATE INDEX ON agent_login_failures (username, client_ip, failed_at);
 CREATE INDEX ON agent_login_failures (failed_at);          -- housekeeping
 
 CREATE TABLE agent_agents (
@@ -329,6 +339,7 @@ CREATE TABLE agent_physical_drives (       -- one per real drive, across all of 
   user_id         BIGINT NOT NULL REFERENCES agent_users(id),
   fs_uuid         TEXT NOT NULL,             -- normalised: uppercase, no dashes
   fs_type         TEXT,
+  fs_uuid_source  TEXT,                      -- 'linux' | 'macos'; part of the match for FAT/exFAT/NTFS
   hw_serial       TEXT,                      -- NULL if never reported
   clone_of        BIGINT REFERENCES agent_physical_drives(id),
   first_seen_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -343,6 +354,7 @@ CREATE TABLE agent_drives (
   physical_drive_id BIGINT REFERENCES agent_physical_drives(id),  -- NULL if not matched
   fs_uuid         TEXT,                      -- identity as last reported by the agent
   fs_type         TEXT,
+  fs_uuid_source  TEXT,
   hw_serial       TEXT,
   stream_id       UUID NOT NULL,
   acked_version   BIGINT NOT NULL DEFAULT 0, -- watermark: end of the acked range starting at 0 (cached from agent_sync_ranges)
@@ -355,7 +367,8 @@ CREATE TABLE agent_drives (
 
 CREATE TABLE agent_files (
   drive_pk        BIGINT NOT NULL REFERENCES agent_drives(id) ON DELETE CASCADE,
-  relative_path   TEXT NOT NULL,
+  path_key        BYTEA NOT NULL,            -- sha256(raw path bytes): the key (see "Keys")
+  relative_path   TEXT NOT NULL,             -- readable form, not unique by itself
   raw_path        BYTEA,                     -- only set when the path isn't valid UTF-8
   size            BIGINT NOT NULL,
   mtime           TIMESTAMPTZ NOT NULL,
@@ -366,12 +379,14 @@ CREATE TABLE agent_files (
   error_message   TEXT,
   scanned_at      TIMESTAMPTZ NOT NULL,
   row_version     BIGINT NOT NULL,
-  PRIMARY KEY (drive_pk, relative_path)
+  PRIMARY KEY (drive_pk, path_key)
 );
 CREATE INDEX ON agent_files (drive_pk, content_hash);
 
 CREATE TABLE agent_dir_listings (
   drive_pk        BIGINT NOT NULL REFERENCES agent_drives(id) ON DELETE CASCADE,
+  entry_key       BYTEA NOT NULL,            -- sha256(raw parent bytes || 0x00 || raw child bytes)
+  parent_key      BYTEA NOT NULL,            -- sha256(raw parent bytes), to list a directory's children
   relative_path   TEXT NOT NULL,             -- parent directory ('' = drive_root)
   child_name      TEXT NOT NULL,
   raw_path        BYTEA,                     -- only set when the parent path isn't valid UTF-8
@@ -379,8 +394,9 @@ CREATE TABLE agent_dir_listings (
   is_dir          BOOLEAN NOT NULL,
   first_seen_at   TIMESTAMPTZ NOT NULL,
   row_version     BIGINT NOT NULL,
-  PRIMARY KEY (drive_pk, relative_path, child_name)
+  PRIMARY KEY (drive_pk, entry_key)
 );
+CREATE INDEX ON agent_dir_listings (drive_pk, parent_key);
 
 CREATE TABLE agent_scan_runs (
   drive_pk        BIGINT NOT NULL REFERENCES agent_drives(id) ON DELETE CASCADE,
@@ -397,10 +413,9 @@ CREATE TABLE agent_scan_runs (
 CREATE TABLE agent_tombstones (             -- deletions, kept so an older upsert can't resurrect a key
   drive_pk        BIGINT NOT NULL REFERENCES agent_drives(id) ON DELETE CASCADE,
   kind            TEXT NOT NULL,             -- 'file' | 'dir_child'
-  relative_path   TEXT NOT NULL,
-  child_name      TEXT NOT NULL DEFAULT '',
+  key             BYTEA NOT NULL,            -- path_key or entry_key of the deleted row
   row_version     BIGINT NOT NULL,
-  PRIMARY KEY (drive_pk, kind, relative_path, child_name)
+  PRIMARY KEY (drive_pk, kind, key)
 );
 
 CREATE TABLE agent_sync_ranges (            -- acked version intervals (from, to], merged, non-overlapping
@@ -427,14 +442,23 @@ Housekeeping (deleting rows that are no longer needed) is described in [Housekee
 
 `quick_sig` and the agent's comparison columns are not uploaded (see non-goals).
 
+### Keys
+
+Rows are keyed on a **SHA-256 of the raw path bytes** (32-byte `BYTEA`), not on the path text:
+- `agent_files`: `path_key = sha256(path)`.
+- `agent_dir_listings`: `entry_key = sha256(parent || 0x00 || child)`, with `parent_key = sha256(parent)` indexed for listing a directory.
+- `agent_tombstones`: the deleted row's key.
+
+The paths themselves are ordinary, unindexed-for-uniqueness columns. That's for two reasons:
+- **Length.** A Postgres B-tree entry is capped at about 2.7 KB after compression, while Linux allows relative paths near 4 KB, and a directory-listing key is parent plus child. Keying on the text would bring back a length limit, and an unpredictable one, since it depends on how well the path compresses. A 32-byte hash has no such limit, so "no length limit" in D3 holds.
+- **Exactness.** The hash is over the raw bytes, so two different names can never share a key, even when their readable forms look alike (next section).
+
 ### Paths that aren't valid UTF-8
 
 Such names are uploaded, not rejected (decided 2026-09-25). Linux filenames are arbitrary bytes. On the wire, a change carries either `path` (valid UTF-8) or `path_b64` (standard base64 of the raw bytes), never both; the same applies to `child` / `child_b64`. When the server gets a `_b64` form:
-- `relative_path` / `child_name` store a readable display form in which each invalid byte becomes `\xHH`. This form is the key, in the primary keys and in `agent_tombstones`, so an upsert and a later delete of the same name meet on the same row.
+- `relative_path` / `child_name` store a readable display form in which each invalid byte becomes `\xHH`. It's for display only; the [key](#keys) is the hash of the raw bytes, so a file literally named `\xHH` can't collide with it.
 - The raw columns store the original bytes: `raw_path` in `agent_files`, and `raw_path` (parent) and `raw_child_name` in `agent_dir_listings`. They stay `NULL` for valid UTF-8, which is nearly every row.
-- The server rejects the batch with `400 INVALID_BATCH` if a `_b64` value decodes to valid UTF-8 (the agent must send it as plain `path`/`child`) or contains a NUL byte, which Linux doesn't allow in names.
-
-A collision between an escaped name and a real file literally named `\xHH` is possible in theory. v1 accepts that risk; if it happens, the later write wins, according to `row_version`.
+- An entry whose `_b64` value decodes to valid UTF-8 (the agent must send it as plain `path`/`child`), or contains a NUL byte (which Linux doesn't allow in names), goes in `rejected`.
 
 ## Housekeeping
 
@@ -503,24 +527,25 @@ Passwords must be at least 12 characters. They never appear in argv, logs or err
       client_max_body_size 2m;
       proxy_read_timeout 90s;
       proxy_pass http://<agentsync host>:8091;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Real-IP $remote_addr;
       proxy_set_header X-Forwarded-Proto $scheme;
   }
   location /agent/v1/auth/ {
       auth_basic off;
       limit_req zone=agent_auth burst=5 nodelay;
       proxy_pass http://<agentsync host>:8091;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-Proto $scheme;
   }
   ```
 
   Mirror the same blocks in `dev.sm.jkurapati.com`, pointing at the dev box, for testing.
-- The service trusts `X-Forwarded-For` only from the nginx address, and uses it for logging and the lockout audit trail.
+- The service takes the client IP from `X-Real-IP`, which nginx sets to `$remote_addr`, and only when the request comes from the nginx address. It uses it for the login lockout and for logging. `X-Forwarded-For` isn't used: `$proxy_add_x_forwarded_for` appends to whatever the client sent, so its first entry can be spoofed.
 
 ## Testing
 
 - **Housekeeping**: each task deletes only rows past its cutoff, and leaves rows just inside it; a table with more than 5,000 expired rows is emptied over several batches; tombstones at or below the watermark go, those above it stay; one failing task doesn't stop the others.
-- **Unit**: batch validation (including empty batches and `to_version` above the last `v`); the apply algorithm (full duplicate, partial overlap, out-of-order ranges, range merging and watermark advance, stream reset, stale upsert after a newer delete loses to the tombstone, delete older than a live row ignored, tombstone GC below the watermark); physical-drive matching for every row of the matching table, including the clone case, a serial filled in later, and ambiguous candidates; a property test that applies random permutations of the same batches and gets identical tables; semver decisions; refresh rotation, race window and reuse revocation; idempotency replay and conflict; the gzip size cap.
+- **Unit**: batch validation (including empty batches and `to_version` above the last `v`; `from_version = to_version` is `400`); per-entry validation puts bad entries in `rejected` and still acks the range; a bulk failure falls back to per-entry savepoints and rejects only the bad entry; a path near 4 KB (and a listing of a near-4 KB parent plus child) stores fine; a replayed range with different contents is a duplicate, not `422`; the apply algorithm (full duplicate, partial overlap, out-of-order ranges, range merging and watermark advance, stream reset, stale upsert after a newer delete loses to the tombstone, delete older than a live row ignored, tombstone GC below the watermark); physical-drive matching for every row of the matching table, including the clone case, a serial filled in later, and ambiguous candidates; a property test that applies random permutations of the same batches and gets identical tables; semver decisions; refresh rotation, a replay within 30 s getting a fresh pair (and the orphaned successor revoked), a second replay and a replay after 30 s revoking the family; the login lockout per (username, IP), so failures from one IP don't lock out another; `426` on normal endpoints but not on health or handshake; `X-Agent-Protocol` checked; idempotency replay and conflict; the gzip size cap.
 - **Store tests** against a real Postgres (a CI service container locally; skipped when `AGENTSYNC_TEST_DB` is unset), each test in its own schema.
 - **HTTP tests** with `httptest.Server`: full login → open drive → changes → duplicate replay flows.
 - **Contract**: golden JSON fixtures in `agentsync/wire/testdata/`, used by both the server tests and the driveagent client tests, so the two sides can't drift.
