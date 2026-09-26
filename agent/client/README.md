@@ -109,15 +109,30 @@ by its own `driveagent`. See the remote-sync overview's
 ## The remote server
 
 `driveagent` can log in to the Bhandaar server (`agentserver`, see
-[`docs/specs/remote-sync.md`](../../docs/specs/remote-sync.md)), so that later
-releases can upload scans. For now, scans stay local; logging in only prepares
-for that.
+[`docs/specs/remote-sync.md`](../../docs/specs/remote-sync.md)) and upload its
+scan data there with `driveagent sync`. For now, `scan` itself stays local;
+from 0.4.0 on, every scan will upload what it writes.
 
 ```bash
 driveagent login --username jyothri          # prompts for the password (no echo)
-driveagent remote-status                     # reachability, the path used, handshake, login
+driveagent sync                              # upload every drive's pending scan data
+driveagent sync --drive-id seagate1,seagate2 # only these drives
+driveagent remote-status                     # reachability, handshake, login, and each drive's sync state
 driveagent logout
 ```
+
+`sync` never touches a drive, so it works with every drive unplugged, and it
+suits a cron job or systemd timer. It uploads what's pending when it starts
+and prints one line per drive (`seagate2: uploaded 18,532 changes, fully
+synced`). If the server stops answering, it retries for `--remote-timeout`
+(default `2m`), then exits 3; what was acknowledged stays uploaded, and the
+next `sync` carries on from there. A drive whose upload lock another
+`driveagent` holds is skipped. The first `sync` after upgrading uploads every
+existing checkpoint, which takes a while for a large drive.
+
+`remote-status` shows, per drive, its identity, the other machines' copies of
+the same physical drive, the synced marker (watermark, ranges above it, last
+sync), the count of pending entries, and any entries the server rejected.
 
 For scripts, `--password-stdin` reads the password from standard input (as
 `docker login` does). There's deliberately no `--password` flag and no password
@@ -143,7 +158,7 @@ A state dir logs in to, and will sync with, exactly one server. To try another
 server, use a copy of the state dir (`--state-dir`).
 
 Exit codes: 0 ok, 1 local error (including a drive that went away
-mid-scan), 2 usage, 3 server unreachable or login needed, 4 this
+mid-scan), 2 usage, 3 server unreachable, login needed or upload failed, 4 this
 `driveagent` is too old for the server (upgrade), 130 interrupted by Ctrl-C,
 143 stopped by SIGTERM. An interrupted scan keeps what it recorded; re-run it
 to resume.

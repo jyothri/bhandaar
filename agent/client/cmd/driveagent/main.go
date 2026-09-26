@@ -10,6 +10,10 @@
 //	scan    walks and hashes one drive's files.
 //	compare computes and persists comparison status for scoped paths.
 //	report  renders already-computed status — no drive access, no compute.
+//
+// And the remote ones (docs/specs/remote-sync-agent.md): login, logout,
+// remote-status, and sync, which uploads the drives' scan data to
+// agentserver.
 package main
 
 import (
@@ -45,6 +49,8 @@ func main() {
 		err = runLogin(ctx, os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
 	case "logout":
 		err = runLogout(ctx, os.Args[2:], os.Stdout, os.Stderr)
+	case "sync":
+		err = runSync(ctx, os.Args[2:], os.Stdout, os.Stderr)
 	case "remote-status":
 		err = runRemoteStatus(ctx, os.Args[2:], os.Stdout, os.Stderr)
 	case "scan":
@@ -86,6 +92,7 @@ Usage:
   driveagent report  --drives <id,id,...> [--type text,json,html] [--report-out <dir>] [--include-mac-metadata] [--state-dir <dir>]
   driveagent login         [--username <name>] [--password-stdin] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
   driveagent logout        [--state-dir <dir>]
+  driveagent sync          [--drive-id <id,id,...>] [--remote-timeout 2m] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
   driveagent remote-status [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
   driveagent version
 
