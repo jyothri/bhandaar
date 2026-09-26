@@ -1,0 +1,25 @@
+{
+  "stream_id": "c1f5a9e0-6f0b-4a8e-9a53-2d1c0b9e7f31",
+  "from_version": 18234,
+  "to_version": 19233,
+  "changes": [
+    {"v": 18240, "kind": "file", "op": "upsert", "path": "Jyo/Backup/a.jpg",
+     "size": 482113, "mtime_unix": 1726000000, "mode": 420,
+     "content_hash": "9f2c4be1d0a7a95c1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d", "hash_algo": "blake3", "status": "hashed",
+     "scanned_at": "2026-09-24T09:58:01Z"},
+    {"v": 18241, "kind": "file", "op": "upsert", "path": "Jyo/Backup/b.mov",
+     "size": 0, "mtime_unix": 1726000100, "mode": 420, "status": "error", "error_message": "read: input/output error",
+     "scanned_at": "2026-09-24T09:58:02Z"},
+    {"v": 18250, "kind": "file", "op": "upsert", "path_b64": "SnlvL2NhZuk=",
+     "size": 3, "mtime_unix": 1726000200, "mode": 420, "content_hash": "abc", "hash_algo": "blake3", "status": "hashed",
+     "scanned_at": "2026-09-24T09:58:03Z"},
+    {"v": 18302, "kind": "file", "op": "delete", "path": "Jyo/Backup/old.txt"},
+    {"v": 18400, "kind": "dir_child", "op": "upsert", "path": "Jyo/Backup", "child": "photos", "is_dir": true,
+     "first_seen_at": "2026-09-24T09:50:00Z"},
+    {"v": 18401, "kind": "dir_child", "op": "upsert", "path": "", "child": "Jyo", "is_dir": true,
+     "first_seen_at": "2026-09-24T09:50:00Z"},
+    {"v": 18402, "kind": "dir_child", "op": "delete", "path": "Jyo/Backup", "child": "tmp"},
+    {"v": 19233, "kind": "scan_run", "op": "upsert", "run_id": 42, "started_at": "2026-09-24T09:49:00Z",
+     "files_seen": 0, "bytes_hashed": 0}
+  ]
+}

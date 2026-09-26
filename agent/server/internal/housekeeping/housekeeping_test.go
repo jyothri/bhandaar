@@ -119,3 +119,21 @@ func TestFailingTaskDoesNotStopOthers(t *testing.T) {
 		t.Errorf("ran %v, want both tasks", ran)
 	}
 }
+
+func TestTombstonesAtOrBelowTheWatermark(t *testing.T) {
+	pool := testdb.New(t).Pool
+	seed(t, pool)
+	exec(t, pool, `INSERT INTO agent_drives (id, agent_id, drive_id, stream_id, drive_root, acked_version) VALUES
+		(1, '00000000-0000-4000-8000-000000000001', 'd1', gen_random_uuid(), '/d1', 100),
+		(2, '00000000-0000-4000-8000-000000000001', 'd2', gen_random_uuid(), '/d2', 0)`)
+	exec(t, pool, `INSERT INTO agent_tombstones (drive_pk, kind, key, row_version) VALUES
+		(1, 'file', '\x01', 50), (1, 'file', '\x02', 100), (1, 'dir_child', '\x03', 101),
+		(2, 'file', '\x01', 1)`)
+	n, err := task(t, pool, "tombstones").Run(context.Background())
+	if err != nil || n != 2 {
+		t.Fatalf("deleted %d, %v; want 2", n, err)
+	}
+	if left := count(t, pool, `SELECT count(*) FROM agent_tombstones`); left != 2 {
+		t.Errorf("%d left, want 2 (one above the watermark, one on a drive with none)", left)
+	}
+}

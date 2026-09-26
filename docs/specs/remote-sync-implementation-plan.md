@@ -1,6 +1,6 @@
 # Remote Sync: Implementation Plan
 
-**Status:** M1 (PR 1, #22), M2 (PR 2, #23) and M3 (PR 3) implemented; the rest not started. Written 2026-09-25; revised 2026-09-26 to six PRs, one per milestone.
+**Status:** M1 (PR 1, #22), M2 (PR 2, #23), M3 (PR 3, #25) and M4 (PR 4) implemented; the rest not started. Written 2026-09-25; revised 2026-09-26 to six PRs, one per milestone.
 
 This plan turns the four remote-sync specs into six pull requests, one per milestone:
 - [`remote-sync.md`](remote-sync.md) (overview and decisions)

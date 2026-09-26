@@ -1,0 +1,2 @@
+{"acked_ranges": [[0, 19233], [20011, 20510]], "applied": 7, "skipped": 0, "duplicate": false,
+ "rejected": [{"v": 18241, "reason": "mtime out of range"}]}
