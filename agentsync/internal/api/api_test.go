@@ -110,7 +110,7 @@ func TestHealth(t *testing.T) {
 		status int
 		want   string
 	}{{nil, 200, wire.HealthOK}, {errors.New("down"), 503, wire.HealthUnavailable}} {
-		srv := New(cfg, nil, fakeDB{c.db})
+		srv := New(cfg, nil, nil, fakeDB{c.db})
 		cl := newClient(t, srv)
 		cl.version = "" // health needs no headers at all
 		cl.agentID = ""
@@ -135,12 +135,12 @@ func TestHealth(t *testing.T) {
 }
 
 func TestUnknownPath(t *testing.T) {
-	srv := New(testConfig(t, nil), nil, fakeDB{})
+	srv := New(testConfig(t, nil), nil, nil, fakeDB{})
 	wantStatus(t, newClient(t, srv).do("GET", "/agent/v1/nope", nil), 404, wire.CodeNotFound)
 }
 
 func TestClientIP(t *testing.T) {
-	srv := New(testConfig(t, map[string]string{"AGENTSYNC_TRUSTED_PROXIES": "192.168.1.118"}), nil, fakeDB{})
+	srv := New(testConfig(t, map[string]string{"AGENTSYNC_TRUSTED_PROXIES": "192.168.1.118"}), nil, nil, fakeDB{})
 	var got string
 	h := srv.withClientIP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = clientIP(r).String() }))
 	for _, c := range []struct{ remote, realIP, want string }{

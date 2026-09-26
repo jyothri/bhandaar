@@ -57,7 +57,7 @@ func TestMigrateAppliesOnceAndIsIdempotent(t *testing.T) {
 			t.Fatalf("versions = %v, want 1..n once each", vs)
 		}
 	}
-	for _, table := range []string{"agentsync_schema_migrations"} {
+	for _, table := range []string{"agent_users", "agent_login_failures", "agent_agents", "agent_refresh_tokens", "agent_idempotency_keys"} {
 		if !tableExists(t, pool, table) {
 			t.Errorf("table %s missing", table)
 		}

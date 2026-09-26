@@ -2,6 +2,10 @@
 //
 //	agentsync [serve]                      run the server (the default)
 //	agentsync housekeeping                 delete expired rows once, then exit
+//	agentsync user add --username NAME     add a user (prompts for the password)
+//	agentsync user passwd --username NAME  change a user's password
+//	agentsync user disable --username NAME disable a user and revoke their tokens
+//	agentsync user list                    list users
 package main
 
 import (
@@ -17,6 +21,7 @@ import (
 	"time"
 
 	"github.com/jyothri/bhandaar/agentsync/internal/api"
+	"github.com/jyothri/bhandaar/agentsync/internal/auth"
 	"github.com/jyothri/bhandaar/agentsync/internal/config"
 	"github.com/jyothri/bhandaar/agentsync/internal/store"
 )
@@ -24,6 +29,10 @@ import (
 const usage = `usage:
   agentsync [serve]                      run the server
   agentsync housekeeping                 delete expired rows once, then exit
+  agentsync user add --username NAME     add a user (prompts for the password twice)
+  agentsync user passwd --username NAME  change a user's password
+  agentsync user disable --username NAME disable a user and revoke their refresh tokens
+  agentsync user list                    list users
 `
 
 func main() {
@@ -47,6 +56,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		err = withStore(ctx, func(*store.Store) error {
 			slog.Info("housekeeping: no tasks yet")
 			return nil
+		})
+	case "user":
+		err = withStore(ctx, func(st *store.Store) error {
+			return userCmd(ctx, st, args, terminalPasswords(stdin, stderr), stdout)
 		})
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
@@ -102,9 +115,10 @@ func serve(ctx context.Context) error {
 		return err
 	}
 
+	tokens := &auth.Tokens{Pool: st.Pool, Secret: cfg.JWTSecret, AccessTTL: cfg.AccessTTL, RefreshTTL: cfg.RefreshTTL}
 	srv := &http.Server{
 		Addr:         cfg.Listen,
-		Handler:      api.New(cfg, st, nil).Handler(),
+		Handler:      api.New(cfg, st, tokens, nil).Handler(),
 		ReadTimeout:  60 * time.Second,
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,
