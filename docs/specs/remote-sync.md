@@ -9,8 +9,8 @@ The design is split across four documents, plus an implementation plan:
 | Document | Covers |
 |---|---|
 | this file | Goals, operational rules, key decisions (protocol, language, service placement, data model), the end-to-end flow, rollout |
-| [`remote-sync-server.md`](remote-sync-server.md) | The new `agentsync` service: API reference, auth, Postgres schema, how change batches are applied, deployment |
-| [`remote-sync-ci.md`](remote-sync-ci.md) | CI for both: the `agentsync` Docker image (Docker Hub, like `be`/`ui`) and automatic `driveagent` releases (GitHub Release per version tag, Linux + macOS binaries) |
+| [`remote-sync-server.md`](remote-sync-server.md) | The new `agentserver` service: API reference, auth, Postgres schema, how change batches are applied, deployment |
+| [`remote-sync-ci.md`](remote-sync-ci.md) | CI for both: the `agentserver` Docker image (Docker Hub, like `be`/`ui`) and automatic `driveagent` releases (GitHub Release per version tag, Linux + macOS binaries) |
 | [`remote-sync-agent.md`](remote-sync-agent.md) | `driveagent` changes: what it uploads (a scan always does), config, new commands, the local change feed and synced marker (per-drive watermark), resume, the uploader state machine |
 | [`remote-sync-implementation-plan.md`](remote-sync-implementation-plan.md) | How it gets built: six PRs, one per milestone (M1–M6), each split into reviewable parts, with files, tests and the user's prod-box steps |
 
@@ -62,15 +62,15 @@ Options evaluated:
 
 Why: the traffic is bulk, append-mostly and latency-insensitive. Batched request/response gets nearly all of streaming's throughput and makes idempotency and resume simple, because each batch is one atomic unit with one key and one version interval. The size advantage of protobuf is small once gzip is on, because the bulk of each row is paths and hashes.
 
-To leave room for a later switch: all wire types live in one small, standard-library-only Go module (`agentsync/wire`, shared by the agent and the server), and the server checks `Content-Type`. Adding `application/x-protobuf` later is an additive change inside `/agent/v1`. A breaking change goes to `/agent/v2`.
+To leave room for a later switch: all wire types live in one small, standard-library-only Go module (`agent/wire`, shared by the agent and the server), and the server checks `Content-Type`. Adding `application/x-protobuf` later is an additive change inside `/agent/v1`. A breaking change goes to `/agent/v2`.
 
-### D2. Language and placement: a new Go service, `agentsync`
+### D2. Language and placement: a new Go service, `agentserver`
 
 - **Go**, not Java. Both the existing backend and `driveagent` are Go, so the wire types are shared Go structs instead of a second schema definition. It is also one toolchain in CI, and a small static binary fits the home-server box better than a JVM.
-- **Separate service** (`agentsync/` at the repo root, its own module, image and container), not new routes in `be/`:
+- **Separate service** (`agent/server/` at the repo root, its own module, image and container), not new routes in `be/`:
   - `be` has a 10 s read/write timeout and a 512 KB body limit, both wrong for bulk upload.
   - Upload traffic and deploys are isolated from the web UI's backend.
-  - The two auth models stay separate: `be` sits behind nginx basic auth, and `agentsync` authenticates in the app.
+  - The two auth models stay separate: `be` sits behind nginx basic auth, and `agentserver` authenticates in the app.
 - It uses the **same Postgres database** as `be`, with its own tables (prefixed `agent_`) and its own migrations. It never writes to `be`'s tables.
 
 ### D3. Data model: new tables, not `scandata`
@@ -125,12 +125,12 @@ The trade-off of skipping history: until `sync` runs, the server's copy of a dri
 - `POST /agent/v1/auth/login` with username + password returns an access token (JWT, HS256, 15 min) and a refresh token (random 256-bit, 30 days, stored hashed on the server).
 - Refresh rotates the refresh token. Within a 30 s grace window, the server accepts the just-rotated token once more and issues a fresh pair, so a lost refresh response doesn't force a re-login. Reuse beyond that revokes the whole token family (theft detection). The successor that a grace replay revokes is marked as such, and presenting it later also revokes the family, so a thief who replays a stolen token within the window is cut off at the owner's next refresh.
 - Failed logins lock out per (username, client IP), not per username alone, so knowing the username isn't enough to lock the owner out.
-- Passwords are hashed with argon2id. Users are created with `agentsync user add` on the server.
+- Passwords are hashed with argon2id. Users are created with `agentserver user add` on the server.
 - The agent stores tokens in `<state-dir>/credentials.json` (mode 0600). The password is never stored, and never taken from a command-line flag or an environment variable; for scripts there's `--password-stdin`.
 
 ### D7. nginx: an exempt `/agent/` path
 
-`sm.jkurapati.com` is behind nginx basic auth, and basic auth and bearer tokens both use the `Authorization` header. A new `location /agent/` proxies to `agentsync` **without** basic auth. App login, tokens and nginx rate limiting on the auth endpoints protect it instead. The prod nginx config change is listed in [`remote-sync-server.md`](remote-sync-server.md#deployment); the user applies it on the prod box.
+`sm.jkurapati.com` is behind nginx basic auth, and basic auth and bearer tokens both use the `Authorization` header. A new `location /agent/` proxies to `agentserver` **without** basic auth. App login, tokens and nginx rate limiting on the auth endpoints protect it instead. The prod nginx config change is listed in [`remote-sync-server.md`](remote-sync-server.md#deployment); the user applies it on the prod box.
 
 From inside the home LAN, the public name only works through NAT hairpinning, which is unreliable: 4 of 7 requests from the dev box timed out on 2026-09-25, while 7 of 7 to the LAN address succeeded with a valid certificate. The LAN's DNS is the AT&T gateway, not Pi-hole, so the name can't simply be overridden locally. Decided 2026-09-25: the agent handles this itself. With `lan_addr` set (e.g. `192.168.1.118:443`), it tries that address first, still verifying the `sm.jkurapati.com` certificate, and falls back to DNS when it's not at home. No network change is needed. See [agent spec](remote-sync-agent.md#reaching-the-server-from-the-lan).
 
@@ -155,7 +155,7 @@ A marker file written to the drive was considered and rejected, because the agen
 sequenceDiagram
     participant A as driveagent scan
     participant L as state.db (SQLite)
-    participant S as agentsync
+    participant S as agentserver
     participant P as Postgres
 
     A->>L: S = sync_clock (start version of this scan)
@@ -197,7 +197,7 @@ The first `driveagent login` (interactive, prompts for the password) does health
 
 ## Rollout
 
-1. **Server skeleton**: `agentsync` with health, handshake, the users CLI, login/refresh/logout, schema migrations, the Dockerfile and the `agentsync-docker-image.yml` workflow. Deploy it and add the nginx `/agent/` block.
+1. **Server skeleton**: `agentserver` with health, handshake, the users CLI, login/refresh/logout, schema migrations, the Dockerfile and the `agentserver-docker-image.yml` workflow. Deploy it and add the nginx `/agent/` block.
 2. **Agent identity**: a `version` package, `driveagent version`, `login`, `logout`, `remote-status`, and the `driveagent.yml` workflow (test, version check, Linux/macOS builds, automatic release). Merging this step cuts the first release, `driveagent/v0.1.0`.
 3. **Agent change feed and drive identity**: the `state.db` migration (`row_version`, tombstones, `stream_id`, the synced marker, `sync_ranges` and views, identity columns, backfill of existing rows), plus identity detection and the wrong-drive guard in `scan`. Nothing is uploaded yet. The visible behaviour changes are the guard, and an interrupted `scan` exiting 130 (143 for `SIGTERM`) instead of 0; the drive checks also move from `scan.Run` into `cmd/driveagent`, with the same results. The drives on the dev box were checked on 2026-09-26: both Seagate backup drives are NTFS, so cross-OS linking doesn't apply to them (see [agent spec](remote-sync-agent.md#drive-identity)).
 4. **Upload**: the server's drive and changes endpoints, with acked ranges, tombstones and physical-drive matching.

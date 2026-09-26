@@ -1,6 +1,6 @@
 # Drive Comparison Agent
 
-A standalone Go CLI (`agent/linux/`, binary `driveagent`) that tracks and compares two drives for divergence: which files are identical, which have changed, which moved, which are missing from one side — and, per folder, how much of the drive has even been looked at. It never writes to either drive.
+A standalone Go CLI (`agent/client/`, binary `driveagent`) that tracks and compares two drives for divergence: which files are identical, which have changed, which moved, which are missing from one side — and, per folder, how much of the drive has even been looked at. It never writes to either drive.
 
 For the full design-decision history (alternatives considered, why they were rejected), see [`../archive/drive-comparison-agent-history.md`](../archive/drive-comparison-agent-history.md). This document describes only the current implementation.
 

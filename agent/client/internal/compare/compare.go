@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jyothri/bhandaar/agent/linux/internal/store"
+	"github.com/jyothri/bhandaar/agent/client/internal/store"
 )
 
 // Options scopes a compare run. PathsA/PathsB are backup-root-relative

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jyothri/bhandaar/agent/linux/internal/store"
+	"github.com/jyothri/bhandaar/agent/client/internal/store"
 )
 
 // TreeNode is one row of the recursive folder view rendered in the HTML

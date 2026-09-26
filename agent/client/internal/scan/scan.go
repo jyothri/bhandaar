@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jyothri/bhandaar/agent/linux/internal/store"
+	"github.com/jyothri/bhandaar/agent/client/internal/store"
 	"lukechampine.com/blake3"
 )
 

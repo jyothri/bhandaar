@@ -1,6 +1,6 @@
 # Remote Sync: Implementation Plan
 
-**Status:** plan, not started. Written 2026-09-25; revised 2026-09-26 to six PRs, one per milestone.
+**Status:** M1 (PR 1, #22) implemented; the rest not started. Written 2026-09-25; revised 2026-09-26 to six PRs, one per milestone.
 
 This plan turns the four remote-sync specs into six pull requests, one per milestone:
 - [`remote-sync.md`](remote-sync.md) (overview and decisions)
@@ -15,8 +15,8 @@ The specs say *what* to build; this says *in what order*, *in which files*, *how
 - **Every PR is mergeable on its own and keeps `main` working.** A plain `driveagent scan` stays local only, with no login, until M6. Before that, only PR 3 changes what a user sees: the wrong-drive guard, and an interrupted scan exiting 130 (143 for `SIGTERM`) instead of 0. Server endpoints that aren't used yet are harmless.
 - **One PR per milestone: six in total.** Each PR is split into **parts**, and each part is its own commit. The parts are in the order to review them, so a large PR can be read one commit at a time. Part sizes: S (a few hundred lines), M (up to ~1,000), L (more, usually because of tests).
 - **Tests come with the code**, in the same part. The agent has **no tests today**, so PR 2 starts by adding a test harness.
-- **Docs move with the code.** When a behaviour ships, [`drive-comparison-agent.md`](drive-comparison-agent.md), `agent/linux/README.md`, [`architecture.md`](../architecture.md) and `CLAUDE.md` are updated in the same PR. The remote-sync specs change status from "proposed" to "implemented" section by section.
-- **Go isn't installed on the dev box.** Build and test in containers that match each module's `go.mod`: `golang:1.27.1` for the agent, and whatever `agentsync/go.mod` pins, e.g. `docker run --rm -v "$PWD":/src -w /src golang:<ver> go test -race ./...`. CI uses `actions/setup-go` with the same `go.mod`.
+- **Docs move with the code.** When a behaviour ships, [`drive-comparison-agent.md`](drive-comparison-agent.md), `agent/client/README.md`, [`architecture.md`](../architecture.md) and `CLAUDE.md` are updated in the same PR. The remote-sync specs change status from "proposed" to "implemented" section by section.
+- **Go isn't installed on the dev box.** Build and test in containers that match each module's `go.mod`: `golang:1.27.1` for the agent, and whatever `agent/server/go.mod` pins, e.g. `docker run --rm -v "$PWD":/src -w /src golang:<ver> go test -race ./...`. CI uses `actions/setup-go` with the same `go.mod`.
 - **The user applies anything on the prod box** (compose, `.env`, nginx, users). Each milestone lists those steps separately, under "User steps".
 
 ## Overview
@@ -24,28 +24,28 @@ The specs say *what* to build; this says *in what order*, *in which files*, *how
 | Milestone | Rollout step | PR | Ships | User steps |
 |---|---|---|---|---|
 | **M0** Pre-work | – | – | Real-drive check on the dev box (done 2026-09-26); test fixtures for PR 3 | – |
-| **M1** Server skeleton | 1 | PR 1 | `agentsync` with health, handshake, users, login/refresh/logout, housekeeping; image on Docker Hub | Secret, compose service, nginx `/agent/`, create user |
+| **M1** Server skeleton | 1 | PR 1 | `agentserver` with health, handshake, users, login/refresh/logout, housekeeping; image on Docker Hub | Secret, compose service, nginx `/agent/`, create user |
 | **M2** Agent foundation | 2 | PR 2 | Agent test harness, `driveagent version`, release pipeline, `login`/`logout`/`remote-status`, `lan_addr` | Log in once per machine |
 | **M3** Change feed + drive identity | 3 | PR 3 | `state.db` migration, restructured scan preflight, Ctrl-C exit code, drive identity and guard | – |
-| **M4** Server upload endpoints | 4 | PR 4 | `PUT /drives`, `POST /changes`, physical-drive matching | Redeploy `agentsync` |
+| **M4** Server upload endpoints | 4 | PR 4 | `PUT /drives`, `POST /changes`, physical-drive matching | Redeploy `agentserver` |
 | **M5** `driveagent sync` | 5 | PR 5 | The uploader, and `sync` for history | First `sync` of existing data |
 | **M6** Upload in `scan` | 6 | PR 6 | Every scan uploads; remote required | Every machine must be logged in |
-| **M7** Rollout and follow-ups | 7 | – | End-to-end verification; later: UI, server-side compare | Set `AGENTSYNC_LATEST_AGENT_VERSION` per release |
+| **M7** Rollout and follow-ups | 7 | – | End-to-end verification; later: UI, server-side compare | Set `AGENTSERVER_LATEST_AGENT_VERSION` per release |
 
 ### Agent versions
 
-`version-check` (CI spec) demands a bump in every PR that touches release-relevant files, which includes `agentsync/wire`. The sequence, decided up front:
+`version-check` (CI spec) demands a bump in every PR that touches release-relevant files, which includes `agent/wire`. The sequence, decided up front:
 
 | PR | Agent version | Why |
 |---|---|---|
-| PR 1 | – | Adds `agentsync/wire`, but the `driveagent` workflow doesn't exist yet, so nothing checks or releases it |
+| PR 1 | – | Adds `agent/wire`, but the `driveagent` workflow doesn't exist yet, so nothing checks or releases it |
 | PR 2 | `0.1.0` | First release: `version`, `login`, `logout`, `remote-status` |
 | PR 3 | `0.2.0` | The `state.db` migration, the guard, exit codes |
 | PR 4 | `0.2.1` | Only the new `wire` types for drives and changes; the agent's behaviour is unchanged. A patch release is the price of keeping `wire` in one module |
 | PR 5 | `0.3.0` | `driveagent sync` |
 | PR 6 | `0.4.0` | Every `scan` uploads (the behaviour change) |
 
-After each release, the user raises `AGENTSYNC_LATEST_AGENT_VERSION` in the prod `.env` (M7). `AGENTSYNC_MIN_AGENT_VERSION` only needs raising when a release is required.
+After each release, the user raises `AGENTSERVER_LATEST_AGENT_VERSION` in the prod `.env` (M7). `AGENTSERVER_MIN_AGENT_VERSION` only needs raising when a release is required.
 
 **Critical path:** M1 → M4 → M5 → M6 on the server side, and M2 → M3 → M5 → M6 on the agent side. M2 and M3 can run in parallel with M1 and M4, because they don't need upload endpoints. M3 needs M2 for the test harness, the `version` package and agent CI.
 
@@ -83,7 +83,7 @@ What it changed in the spec (agent spec, [Drive identity](remote-sync-agent.md#d
 - **Filesystem type comes from udev, not `mountinfo`.** `mountinfo` reports the *driver* (`ntfs3` for one drive, `fuseblk` for the other), which would give the same kind of drive different `fs_type` values. That would break the FAT/exFAT/NTFS same-OS rule, which needs to know the drive is NTFS. udev's `ID_FS_TYPE` says `ntfs` for both.
 - **One udev record gives everything.** The *partition's* record, `/run/udev/data/b<major>:<minor>` for the device number from `stat`, holds `ID_FS_UUID`, `ID_FS_TYPE` and `ID_SERIAL_SHORT`. There's no need to walk `/dev/disk/by-uuid` or the parent disk. `mountinfo` is only a fallback, for the filesystem type when udev has no record (for example, inside a container).
 
-**Fixtures for PR 3:** that PR saves these outputs (`lsblk`, the `mountinfo` lines, the three udev records), with the same masking, under `agent/linux/internal/identity/testdata/linux/`. The macOS parser (`diskutil`/`ioreg` plists) is tested against **hand-written fixtures** that follow Apple's documented plist format. They are unverified against a real Mac, and the macOS code path stays marked as such in the agent spec until someone runs `driveagent` on a Mac.
+**Fixtures for PR 3:** that PR saves these outputs (`lsblk`, the `mountinfo` lines, the three udev records), with the same masking, under `agent/client/internal/identity/testdata/linux/`. The macOS parser (`diskutil`/`ioreg` plists) is tested against **hand-written fixtures** that follow Apple's documented plist format. They are unverified against a real Mac, and the macOS code path stays marked as such in the agent spec until someone runs `driveagent` on a Mac.
 
 ---
 
@@ -92,19 +92,19 @@ What it changed in the spec (agent spec, [Drive identity](remote-sync-agent.md#d
 ### Part 1 · Module layout, health, migrations, image and CI (M)
 
 **Files**
-- `agentsync/wire/go.mod`: `module github.com/jyothri/bhandaar/agentsync/wire`, `go 1.22`, no `require`.
-- `agentsync/wire/`: `health.go` (`HealthResponse`), `errors.go` (`ErrorResponse`, code constants), `wire_test.go` (fails if `go.mod` gains a `require`).
-- `agentsync/go.mod`: requires `wire` with `replace => ./wire`; dependencies `pgx/v5`.
-- `agentsync/cmd/agentsync/main.go`: subcommands `serve` (default) and `housekeeping` (stub for now).
-- `agentsync/internal/config/`: reads the env vars in the server spec's Configuration table (including `AGENTSYNC_TRUSTED_PROXIES`), and refuses to start without `AGENTSYNC_JWT_SECRET` (≥ 32 bytes).
-- `agentsync/internal/store/`: pgx pool from `DB_*`, and a migration runner. Migrations are numbered SQL files embedded with `embed.FS`, applied in order inside one transaction each, and recorded in `agentsync_schema_migrations`. Migration 1 creates only that table.
-- `agentsync/internal/api/`: `ServeMux` routes; `GET /agent/health` (DB ping, 1 s timeout; `200` or `503`); a JSON error helper matching `be`'s shape; middleware for the request body limit (16 KiB default), request logging and `X-Real-IP` (trusted only from the nginx address).
-- `agentsync/build/Dockerfile` and `agentsync/build/Dockerfile.dockerignore`, as in the CI spec.
-- `.github/workflows/agentsync-docker-image.yml`, as in the CI spec (Postgres service, two test steps, BuildKit).
+- `agent/wire/go.mod`: `module github.com/jyothri/bhandaar/agent/wire`, `go 1.22`, no `require`.
+- `agent/wire/`: `health.go` (`HealthResponse`), `errors.go` (`ErrorResponse`, code constants), `wire_test.go` (fails if `go.mod` gains a `require`).
+- `agent/server/go.mod`: requires `wire` with `replace => ../wire`; dependencies `pgx/v5`.
+- `agent/server/cmd/agentserver/main.go`: subcommands `serve` (default) and `housekeeping` (stub for now).
+- `agent/server/internal/config/`: reads the env vars in the server spec's Configuration table (including `AGENTSERVER_TRUSTED_PROXIES`), and refuses to start without `AGENTSERVER_JWT_SECRET` (≥ 32 bytes).
+- `agent/server/internal/store/`: pgx pool from `DB_*`, and a migration runner. Migrations are numbered SQL files embedded with `embed.FS`, applied in order inside one transaction each, and recorded in `agentserver_schema_migrations`. Migration 1 creates only that table.
+- `agent/server/internal/api/`: `ServeMux` routes; `GET /agent/health` (DB ping, 1 s timeout; `200` or `503`); a JSON error helper matching `be`'s shape; middleware for the request body limit (16 KiB default), request logging and `X-Real-IP` (trusted only from the nginx address).
+- `agent/server/build/Dockerfile` and `agent/server/build/Dockerfile.dockerignore`, as in the CI spec.
+- `.github/workflows/agentserver-docker-image.yml`, as in the CI spec (Postgres service, two test steps, BuildKit).
 
-**Tests:** config validation; the migration runner (applies once, is idempotent across restarts, and a failed migration rolls back), run against Postgres via `AGENTSYNC_TEST_DB` and skipped when it's unset; health `200` and `503` (DB down); the wire module having no dependencies.
+**Tests:** config validation; the migration runner (applies once, is idempotent across restarts, and a failed migration rolls back), run against Postgres via `AGENTSERVER_TEST_DB` and skipped when it's unset; health `200` and `503` (DB down); the wire module having no dependencies.
 
-**Done when** CI is green and `docker build . -f agentsync/build/Dockerfile` works from the repo root. (Merging PR 1 pushes the image; the user steps below deploy it.)
+**Done when** CI is green and `docker build . -f agent/server/build/Dockerfile` works from the repo root. (Merging PR 1 pushes the image; the user steps below deploy it.)
 
 ### Part 2 · Users, auth and the request pipeline (L)
 
@@ -121,7 +121,7 @@ What it changed in the spec (agent spec, [Drive identity](remote-sync-agent.md#d
   3. `X-Agent-Protocol` check;
   4. bearer auth, with `X-Agent-Id` matching the `aid` claim;
   5. `Idempotency-Key` presence on mutating `POST`s (the storage comes in PR 4).
-- `cmd/agentsync`: `user add | passwd | disable | list`. Passwords are prompted twice with no echo, at least 12 characters, and never logged. `disable` revokes all of the user's refresh tokens.
+- `cmd/agentserver`: `user add | passwd | disable | list`. Passwords are prompted twice with no echo, at least 12 characters, and never logged. `disable` revokes all of the user's refresh tokens.
 - `wire/`: `LoginRequest`, `TokenResponse`, `RefreshRequest`.
 
 **Tests:** password round trip; constant-time path for an unknown user; JWT expiry and tampering; refresh rotation, grace replay, second replay revoking the family, replay after 30 s giving `REFRESH_REUSED`, the grace-revoked successor presented later revoking the family (theft by a replay within the window); two simultaneous refreshes serialised by the row lock; lockout per (username, IP) with a second IP unaffected; `426` everywhere except health and handshake; the admin CLI against Postgres.
@@ -129,17 +129,17 @@ What it changed in the spec (agent spec, [Drive identity](remote-sync-agent.md#d
 ### Part 3 · Handshake and housekeeping (S)
 
 - `POST /agent/v1/handshake`: semver comparison (a small in-house parser, to avoid a dependency); decisions `ok`, `upgrade_recommended`, `upgrade_required`, `unsupported_protocol`; returns `limits` and `download_url` (default `https://github.com/jyothri/bhandaar/releases/latest`).
-- `internal/housekeeping/`: the hourly goroutine (first run 5 min after start) and `agentsync housekeeping` for a one-off run. Tasks: idempotency keys, login failures, refresh tokens. The tombstones task is added in PR 4, once that table exists. Batched `ctid` deletes of 5,000 rows, one `slog` line per task.
+- `internal/housekeeping/`: the hourly goroutine (first run 5 min after start) and `agentserver housekeeping` for a one-off run. Tasks: idempotency keys, login failures, refresh tokens. The tombstones task is added in PR 4, once that table exists. Batched `ctid` deletes of 5,000 rows, one `slog` line per task.
 - `wire/`: `HandshakeRequest`, `HandshakeResponse`.
 
 **Tests:** every decision branch, including an agent newer than the server; each housekeeping task's cutoff boundary and batching; one failing task not stopping the others.
 
 ### User steps for M1
 
-1. Generate the JWT secret: `openssl rand -base64 48`. Add it as `AGENTSYNC_JWT_SECRET` to the prod `.env` in `~/jyothri-apps/apps/storagemanager`.
-2. Add the `agentsync` compose service: image `jyothri/bhandaar-agentsync:latest`, same network as `hdd_db`, `DB_*` as for `be` (`HDD_DB_PASS`), port 8091 exposed to nginx only.
+1. Generate the JWT secret: `openssl rand -base64 48`. Add it as `AGENTSERVER_JWT_SECRET` to the prod `.env` in `~/jyothri-apps/apps/storagemanager`.
+2. Add the `agentserver` compose service: image `jyothri/bhandaar-agentserver:latest`, same network as `hdd_db`, `DB_*` as for `be` (`HDD_DB_PASS`), port 8091 exposed to nginx only.
 3. Add the nginx `location /agent/` and `/agent/v1/auth/` blocks (server spec, Deployment) to both `sm.jkurapati.com` and `dev.sm.jkurapati.com`; `nginx -t`, then reload.
-4. Create the user: `docker exec -it <agentsync> agentsync user add --username jyothri`.
+4. Create the user: `docker exec -it <agentserver> agentserver user add --username jyothri`.
 5. Smoke test from the prod box: `curl --resolve sm.jkurapati.com:443:127.0.0.1 https://sm.jkurapati.com/agent/health` should give `200 {"status":"ok"}`; `/agent/` must not ask for basic auth, and the rest of the site still must.
 
 ---
@@ -158,11 +158,11 @@ Part 2 adds the agent CI workflow, which runs these from then on.
 
 ### Part 2 · Version, release pipeline, install docs (S)
 
-- `agent/linux/internal/version/version.go`: `const Version = "0.1.0"`, `var Commit = "unknown"`, `var Protocols = []int{1}`.
+- `agent/client/internal/version/version.go`: `const Version = "0.1.0"`, `var Commit = "unknown"`, `var Protocols = []int{1}`.
 - `driveagent version` subcommand.
-- `agent/linux/scripts/version-check.sh`: the rules table in the CI spec. Test it locally against a scratch repo with tags.
+- `agent/client/scripts/version-check.sh`: the rules table in the CI spec. Test it locally against a scratch repo with tags.
 - `.github/workflows/driveagent.yml`: `test`, `version-check`, the `build` matrix (linux/amd64, darwin/amd64, darwin/arm64) and `release`.
-- `agent/linux/README.md`: an install section (`curl`, `SHA256SUMS`, macOS `xattr` note), and the rule that a state dir belongs to one machine and syncs to one remote: never copy `~/.driveagent` to another machine and keep using both (overview, [Operational rules](remote-sync.md#operational-rules)).
+- `agent/client/README.md`: an install section (`curl`, `SHA256SUMS`, macOS `xattr` note), and the rule that a state dir belongs to one machine and syncs to one remote: never copy `~/.driveagent` to another machine and keep using both (overview, [Operational rules](remote-sync.md#operational-rules)).
 - Branch protection (user, after the first green run): require `test`, `version-check` and `build`.
 
 **Done when** merging PR 2 cuts `driveagent/v0.1.0` with three tarballs and `SHA256SUMS`, and `driveagent version` from a downloaded tarball prints `0.1.0 (<sha>)`.
@@ -170,7 +170,7 @@ Part 2 adds the agent CI workflow, which runs these from then on.
 ### Part 3 · Remote client, credentials, login/logout/remote-status (L)
 
 **Code**
-- `agent/linux/go.mod`: require `github.com/jyothri/bhandaar/agentsync/wire` with `replace => ../../agentsync/wire`; add `golang.org/x/term` and `github.com/gofrs/flock`.
+- `agent/client/go.mod`: require `github.com/jyothri/bhandaar/agent/wire` with `replace => ../wire`; add `golang.org/x/term` and `github.com/gofrs/flock`.
 - `internal/remote/transport.go`: an `http.Transport` with a custom `DialTLSContext`:
   - with `lan_addr` set, dial it first (1 s timeout), then TLS with `ServerName` = the remote host;
   - on any failure, dial through DNS;
@@ -313,7 +313,7 @@ Bump the agent to `0.2.1` (see [Agent versions](#agent-versions)): the new `wire
 
 ### User steps for M4
 
-Redeploy (pull `:latest`, restart `agentsync`). Migration 3 runs at startup. `docker exec <agentsync> agentsync housekeeping` should log the four tasks.
+Redeploy (pull `:latest`, restart `agentserver`). Migration 3 runs at startup. `docker exec <agentserver> agentserver housekeeping` should log the four tasks.
 
 ---
 
@@ -337,7 +337,7 @@ Redeploy (pull `:latest`, restart `agentsync`). Migration 3 runs at startup. `do
   - the deterministic idempotency key.
 - `uploader.go`: the state machine (preflight → streaming ↔ backoff → done/failed); exponential backoff with jitter under `--remote-timeout`; response handling (`409` and `404` re-open, `413` halving and re-encoding, `401` refresh once); the upload lock (`flock`), blocking for `scan` and try-lock for `sync`.
 
-**Tests** (against a fake `agentsync` built on the `wire` fixtures):
+**Tests** (against a fake `agentserver` built on the `wire` fixtures):
 - marker replacement;
 - all four reconcile rules, including a `state.db` copied from an older snapshot and a server restored from an older snapshot, both ending in a new stream and a server with no deleted files;
 - a server restored mid-session: the next ack's ranges don't cover the old marker, which is kept, and the session ends in a new stream;
@@ -388,7 +388,7 @@ A state dir syncs to exactly one remote (stream ids and the marker are per drive
 - **Progress line:** `uploaded N / pending M`, or `remote: retrying (… left)`.
 - **Startup hint:** one `EXISTS` per gap, printing `N drives have history not yet uploaded; run "driveagent sync"`.
 - **Failure message:** points at `driveagent sync`.
-- **Docs:** `drive-comparison-agent.md` (`scan` now requires the remote and a login), `agent/linux/README.md` (login first; `sync` for backlog; `lan_addr`), `architecture.md` (agent → `agentsync` → Postgres), `CLAUDE.md`. Bump `Version` to `0.4.0` (a minor release: the behaviour change).
+- **Docs:** `drive-comparison-agent.md` (`scan` now requires the remote and a login), `agent/client/README.md` (login first; `sync` for backlog; `lan_addr`), `architecture.md` (agent → `agentserver` → Postgres), `CLAUDE.md`. Bump `Version` to `0.4.0` (a minor release: the behaviour change).
 
 **Tests:**
 - history is skipped (only rows above `S` are uploaded; a superseded history row is uploaded at its new version);
@@ -418,7 +418,7 @@ Before updating the agent on a machine, make sure it's logged in (`driveagent re
 6. Plug the same ext4 or APFS drive into Linux and the Mac → `remote-status` shows `linked`. An exFAT drive → not linked (expected in v1).
 7. Housekeeping log lines appear hourly.
 
-**After each agent release:** set `AGENTSYNC_LATEST_AGENT_VERSION`, and `AGENTSYNC_MIN_AGENT_VERSION` only when a release is required, in the prod `.env`, then restart `agentsync`.
+**After each agent release:** set `AGENTSERVER_LATEST_AGENT_VERSION`, and `AGENTSERVER_MIN_AGENT_VERSION` only when a release is required, in the prod `.env`, then restart `agentserver`.
 
 **Follow-ups** (separate specs, not part of this plan): a web UI for agent drives and linked copies (in `be`/`ui`, reading the `agent_*` tables); server-side compare; the thinner agent (overview, Future direction).
 

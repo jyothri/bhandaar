@@ -13,6 +13,10 @@ Bhandaar is a storage analyzer application that scans and analyzes data across m
 The application consists of:
 - **Backend (be/)**: Go server with REST API, OAuth integration, and data collection services
 - **Frontend (ui/)**: React + TypeScript SPA using Vite, TanStack Router, and TanStack Query
+- **Agent (agent/)**: three sibling Go modules for local drive tracking and remote sync:
+  - `agent/client/`: `driveagent`, the CLI that scans and compares drives (`docs/specs/drive-comparison-agent.md`)
+  - `agent/server/`: `agentserver`, the hosted service that receives `driveagent` uploads (health, handshake, login/refresh so far; `docs/specs/remote-sync-server.md`)
+  - `agent/wire/`: the request/response types both sides share; standard library only
 
 ## Architecture
 
@@ -86,6 +90,27 @@ docker build . -f ./build/Dockerfile -t jyothri/hdd-go-build
 #   - Set OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, FRONTEND_URL in build/docker-compose.yml
 docker compose -f build/docker-compose.yml up
 ```
+
+### Agent server (Go)
+
+Go isn't installed on the dev box, so run these in the container matching `agent/server/go.mod`. Mount the repo root, not just `agent/server/`, so the `../wire` replace resolves:
+
+```bash
+# Tests; the Postgres ones skip unless AGENTSERVER_TEST_DB is set (each test gets its own schema)
+docker run --rm --network host -v "$(git rev-parse --show-toplevel)":/src -w /src/agent/server \
+  -e AGENTSERVER_TEST_DB='postgres://postgres:postgres@localhost:5432/agentserver_test?sslmode=disable' \
+  golang:1.27.1 sh -c 'go test -race ./... && cd ../wire && go test -race ./...'
+
+# Image (from the repository root)
+docker build . -f agent/server/build/Dockerfile -t jyothri/bhandaar-agentserver
+
+# Admin, inside the container: add a user (prompts for the password), list, run housekeeping once
+agentserver user add --username NAME
+agentserver user list
+agentserver housekeeping
+```
+
+`agentserver serve` needs `AGENTSERVER_JWT_SECRET` (`openssl rand -base64 48`) and the same `DB_*` variables as the backend; it listens on `:8091`. CI (`agentserver-docker-image.yml`) tests against a Postgres service container and pushes `jyothri/bhandaar-agentserver` on merge to `main`.
 
 ### Frontend (React/Vite)
 
@@ -194,7 +219,7 @@ For Cloud Storage access, set `GOOGLE_APPLICATION_CREDENTIALS` to service accoun
 - **Backend tests**: A few, per package: `be/notification/hub_test.go`, `be/collect/gmail_test.go` (fake Gmail API via `httptest`), `be/web/oauth_test.go` (account linking against a fake token endpoint, via the `tokenEndpoint` var), `be/web/cors_test.go` and `be/constants/constants_test.go`. Tests that change package-level config (`constants.FrontendUrl`, `tokenEndpoint`) restore it with `t.Cleanup` and don't run in parallel. Run `go test ./...` from `be/`; add `-race` where cgo/gcc is available, e.g. `docker run --rm -v "$PWD":/src -w /src golang:1.23.5 go test -race ./...` (match the `toolchain` in `be/go.mod`). `flag.Parse()` runs in `main`, so tests use flag defaults; read flag values lazily, never from another package's `init()`. CI runs `go test -race ./...` (backend workflow `test` job) before building the image.
 - **Database connection**: Configured via environment variables (see Database Setup section). Defaults: host `hdd_db`, port `5432`, user `hddb`, password empty, database `hdd_db`. For local development, set `DB_HOST=localhost` and configure credentials to match your PostgreSQL instance.
 - **Backend API URL**: Read from `VITE_BACKEND_URL` via `ui/src/config.ts` (with `VITE_GOOGLE_CLIENT_ID`). `ui/.env.development` points at `http://localhost:8090`, `ui/.env.production` at `https://sm.jkurapati.com`; put local overrides in the gitignored `ui/.env.development.local`
-- **Docs**: `docs/architecture.md` describes the system (components, API, data flow). `docs/codebase-review.md` lists open review items only; completed and won't-fix items, with the change log, are in `docs/archive/codebase-review-history.md` under the same numbers. When an item is done, move it to the archive and add a change-log row there. Local machine setup is in `docs/local-dev.md`. Design specs live in `docs/specs/`: the drive comparison agent in `agent/linux/` (implemented) and remote sync, in which the agent uploads scan data to a new `agentsync` service (proposed; start at `remote-sync.md`). Their design history is in `docs/archive/`. `docs/archive/be/` holds the backend's earlier issue plans and status notes (December 2025), plus its old `debug.md` and `roadmap.md` (March 2025), kept as written: paths inside the plans still say `be/docs/`.
+- **Docs**: `docs/architecture.md` describes the system (components, API, data flow). `docs/codebase-review.md` lists open review items only; completed and won't-fix items, with the change log, are in `docs/archive/codebase-review-history.md` under the same numbers. When an item is done, move it to the archive and add a change-log row there. Local machine setup is in `docs/local-dev.md`. Design specs live in `docs/specs/`: the drive comparison agent in `agent/client/` (implemented) and remote sync, in which the agent uploads scan data to the new `agentserver` service (in progress: the server skeleton is built; start at `remote-sync.md`, and `remote-sync-implementation-plan.md` for status). Their design history is in `docs/archive/`. `docs/archive/be/` holds the backend's earlier issue plans and status notes (December 2025), plus its old `debug.md` and `roadmap.md` (March 2025), kept as written: paths inside the plans still say `be/docs/`.
 - **Known issue**: Directory size calculation differs between local scans (recursive) and cloud scans (directory-level only) - see be/README.md "Kinks" section
 - **CORS**: Backend configured to allow requests from frontend origin
 

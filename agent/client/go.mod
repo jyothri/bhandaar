@@ -1,4 +1,4 @@
-module github.com/jyothri/bhandaar/agent/linux
+module github.com/jyothri/bhandaar/agent/client
 
 go 1.27.1
 

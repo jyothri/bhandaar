@@ -1,0 +1,6 @@
+# The build context is the repo root; send only the server and the shared
+# wire module (not agent/client, be/, ui/ or .git).
+*
+!agent/server/
+!agent/wire/
+agent/server/build/

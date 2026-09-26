@@ -23,10 +23,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jyothri/bhandaar/agent/linux/internal/compare"
-	"github.com/jyothri/bhandaar/agent/linux/internal/report"
-	"github.com/jyothri/bhandaar/agent/linux/internal/scan"
-	"github.com/jyothri/bhandaar/agent/linux/internal/store"
+	"github.com/jyothri/bhandaar/agent/client/internal/compare"
+	"github.com/jyothri/bhandaar/agent/client/internal/report"
+	"github.com/jyothri/bhandaar/agent/client/internal/scan"
+	"github.com/jyothri/bhandaar/agent/client/internal/store"
 )
 
 func main() {

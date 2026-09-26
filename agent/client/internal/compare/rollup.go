@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jyothri/bhandaar/agent/linux/internal/store"
+	"github.com/jyothri/bhandaar/agent/client/internal/store"
 )
 
 // precedence gives the worst-status-wins ordering for folder rollups
