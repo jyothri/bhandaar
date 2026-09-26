@@ -1,0 +1,108 @@
+name: driveagent CI and release
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "agent/client/**"
+      - "!agent/client/**.md"
+      - "agent/wire/**"
+      - ".github/workflows/driveagent.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "agent/client/**"
+      - "!agent/client/**.md"
+      - "agent/wire/**"
+      - ".github/workflows/driveagent.yml"
+  workflow_dispatch: {}          # re-run a failed release for the current main
+
+concurrency:
+  group: driveagent-${{ github.ref }}
+  cancel-in-progress: false      # never cancel a release half way
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/client/go.mod
+          cache-dependency-path: agent/client/go.sum
+      - run: go vet ./...
+        working-directory: agent/client
+      - name: Test (with race detector)
+        run: go test -race ./...
+        working-directory: agent/client
+      - name: Test version-check.sh
+        run: ./agent/client/scripts/version-check_test.sh
+
+  version-check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }             # tags and history
+      - id: v
+        run: ./agent/client/scripts/version-check.sh
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
+  build:
+    needs: [test, version-check]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [linux/amd64, darwin/amd64, darwin/arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/client/go.mod
+          cache-dependency-path: agent/client/go.sum
+      - name: Build
+        working-directory: agent/client
+        run: |
+          os=${{ matrix.target }}; os=${os%/*}; arch=${{ matrix.target }}; arch=${arch#*/}
+          mkdir -p dist/pkg
+          GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-s -w -X github.com/jyothri/bhandaar/agent/client/internal/version.Commit=${GITHUB_SHA::7}" \
+            -o dist/pkg/driveagent ./cmd/driveagent
+          cp README.md dist/pkg/
+          tar -C dist/pkg -czf "dist/driveagent_${os}_${arch}.tar.gz" .
+      - name: Smoke test (linux/amd64)
+        if: matrix.target == 'linux/amd64'
+        working-directory: agent/client
+        run: dist/pkg/driveagent version | tee /dev/stderr | grep -q "(${GITHUB_SHA::7})"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: driveagent-${{ strategy.job-index }}
+          path: agent/client/dist/*.tar.gz
+
+  release:
+    # Only on main, only when version-check says this commit should be released.
+    if: github.event_name != 'pull_request' && needs.version-check.outputs.release == 'true'
+    needs: [build, version-check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write                         # create the tag and the release
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - name: Checksums
+        run: cd dist && sha256sum -- *.tar.gz > SHA256SUMS
+      - name: Create tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ needs.version-check.outputs.version }}
+        run: |
+          prev=$(git tag --list 'driveagent/v*' --sort=-v:refname | head -1)
+          notes=$(git log --no-merges --format='- %s (%h)' ${prev:+$prev..}HEAD -- agent/client agent/wire)
+          gh release create "driveagent/v$V" dist/*.tar.gz dist/SHA256SUMS \
+            --target "$GITHUB_SHA" --title "driveagent v$V" --notes "$notes" --latest

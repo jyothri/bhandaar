@@ -27,6 +27,7 @@ import (
 	"github.com/jyothri/bhandaar/agent/client/internal/report"
 	"github.com/jyothri/bhandaar/agent/client/internal/scan"
 	"github.com/jyothri/bhandaar/agent/client/internal/store"
+	"github.com/jyothri/bhandaar/agent/client/internal/version"
 )
 
 func main() {
@@ -46,6 +47,9 @@ func main() {
 		err = runCompare(os.Args[2:])
 	case "report":
 		err = runReport(os.Args[2:])
+	case "version", "--version":
+		fmt.Println(version.String())
+		return
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -67,6 +71,7 @@ Usage:
   driveagent scan    --drive-id <id> --path <folder> [--drive-root <dir>] [--backup-root <rel-path>] [--state-dir <dir>] [--workers N] [--replace-root]
   driveagent compare --drive-a <id> --drive-b <id> [--drive-a-paths <rel,rel,...>] [--drive-b-paths <rel,rel,...>] [--state-dir <dir>]
   driveagent report  --drives <id,id,...> [--type text,json,html] [--report-out <dir>] [--include-mac-metadata] [--state-dir <dir>]
+  driveagent version
 
 Examples:
   driveagent scan    --drive-id seagate2 --drive-root /mnt/seagate2 --backup-root Jyo/Backup --path "/mnt/seagate2/Jyo/Backup/interview"
