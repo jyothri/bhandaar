@@ -4,7 +4,7 @@
 
 This feature lets the local Linux agent (`driveagent`, see [`drive-comparison-agent.md`](drive-comparison-agent.md)) upload its scan data to the Bhandaar server at `sm.jkurapati.com`, so a drive's contents are known centrally and not only in one machine's `~/.driveagent/state.db`.
 
-The design is split across four documents:
+The design is split across four documents, plus an implementation plan:
 
 | Document | Covers |
 |---|---|
@@ -12,6 +12,7 @@ The design is split across four documents:
 | [`remote-sync-server.md`](remote-sync-server.md) | The new `agentsync` service: API reference, auth, Postgres schema, how change batches are applied, deployment |
 | [`remote-sync-ci.md`](remote-sync-ci.md) | CI for both: the `agentsync` Docker image (Docker Hub, like `be`/`ui`) and automatic `driveagent` releases (GitHub Release per version tag, Linux + macOS binaries) |
 | [`remote-sync-agent.md`](remote-sync-agent.md) | `driveagent` changes: what it uploads (a scan always does), config, new commands, the local change feed and synced marker (per-drive watermark), resume, the uploader state machine |
+| [`remote-sync-implementation-plan.md`](remote-sync-implementation-plan.md) | How it gets built: six PRs, one per milestone (M1–M6), each split into reviewable parts, with files, tests and the user's prod-box steps |
 
 ## Goals
 
@@ -191,7 +192,7 @@ The first `driveagent login` (interactive, prompts for the password) does health
 
 1. **Server skeleton**: `agentsync` with health, handshake, the users CLI, login/refresh/logout, schema migrations, the Dockerfile and the `agentsync-docker-image.yml` workflow. Deploy it and add the nginx `/agent/` block.
 2. **Agent identity**: a `version` package, `driveagent version`, `login`, `logout`, `remote-status`, and the `driveagent.yml` workflow (test, version check, Linux/macOS builds, automatic release). Merging this step cuts the first release, `driveagent/v0.1.0`.
-3. **Agent change feed and drive identity**: the `state.db` migration (`row_version`, tombstones, `stream_id`, the synced marker, `sync_ranges` and views, identity columns, backfill of existing rows), plus identity detection and the wrong-drive guard in `scan`. The guard is the only behaviour change. A quick look at the real drives (`lsblk` on Linux, `diskutil info` on a Mac) confirms their filesystems, which decides whether cross-OS linking applies to them (see [agent spec](remote-sync-agent.md#drive-identity)).
+3. **Agent change feed and drive identity**: the `state.db` migration (`row_version`, tombstones, `stream_id`, the synced marker, `sync_ranges` and views, identity columns, backfill of existing rows), plus identity detection and the wrong-drive guard in `scan`. The guard is the only behaviour change. The drives on the dev box were checked on 2026-09-26: both Seagate backup drives are NTFS, so cross-OS linking doesn't apply to them (see [agent spec](remote-sync-agent.md#drive-identity)).
 4. **Upload**: the server's drive and changes endpoints, with acked ranges, tombstones and physical-drive matching.
 5. **`driveagent sync`**: uploads history.
 6. **Upload in `scan`**. From this step on, every `driveagent scan` needs the remote and a prior `driveagent login`; there is no way to scan locally only. Until it ships, scans stay local-only, so existing workflows keep working through steps 1–5.
