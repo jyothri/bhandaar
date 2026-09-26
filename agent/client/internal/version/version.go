@@ -7,7 +7,7 @@ import "fmt"
 // agent/wire). CI refuses an unbumped change, and on merge to main releases
 // exactly this version as the tag driveagent/v<Version>
 // (docs/specs/remote-sync-ci.md).
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 // Commit is the short commit SHA, stamped by the release build with
 // -ldflags "-X github.com/jyothri/bhandaar/agent/client/internal/version.Commit=<sha>".

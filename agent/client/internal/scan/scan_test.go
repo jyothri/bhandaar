@@ -39,7 +39,11 @@ func run(t *testing.T, st *store.Store, opts Options) Stats {
 	if opts.DriveID == "" {
 		opts.DriveID = "d1"
 	}
-	stats, err := Run(context.Background(), st, opts)
+	p, err := Prepare(st, opts)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	stats, err := Run(context.Background(), st, p, opts)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -209,7 +213,7 @@ func TestPathOutsideDriveRoot(t *testing.T) {
 	root := t.TempDir()
 	other := t.TempDir()
 	st := open(t)
-	if _, err := Run(context.Background(), st, Options{DriveID: "d1", RootPath: other, DriveRoot: root}); err == nil {
+	if _, err := Prepare(st, Options{DriveID: "d1", RootPath: other, DriveRoot: root}); err == nil {
 		t.Error("a --path outside --drive-root should fail")
 	}
 }
@@ -221,7 +225,7 @@ func TestRootConflict(t *testing.T) {
 	st := open(t)
 	run(t, st, Options{RootPath: rootA})
 
-	_, err := Run(context.Background(), st, Options{DriveID: "d1", RootPath: rootB})
+	_, err := Prepare(st, Options{DriveID: "d1", RootPath: rootB})
 	var conflict *RootConflict
 	if !errors.As(err, &conflict) || conflict.OldRoot != rootA || conflict.NewRoot != rootB {
 		t.Fatalf("err = %v, want RootConflict", err)
@@ -237,6 +241,32 @@ func TestRootConflict(t *testing.T) {
 	}
 	if r, _ := st.DriveRoot("d1"); r != rootB {
 		t.Errorf("drive root = %q", r)
+	}
+}
+
+// --replace-root clears the old root's data in Prepare, before Run walks.
+func TestReplaceRootClearsInPrepare(t *testing.T) {
+	rootA, rootB := t.TempDir(), t.TempDir()
+	testutil.WriteTree(t, rootA, testutil.Tree{"a": "from A"})
+	testutil.WriteTree(t, rootB, testutil.Tree{"b": "from B"})
+	st := open(t)
+	run(t, st, Options{RootPath: rootA})
+
+	p, err := Prepare(st, Options{DriveID: "d1", RootPath: rootB, ReplaceRoot: true})
+	if err != nil || !p.Replaced {
+		t.Fatalf("Prepare: %+v, %v", p, err)
+	}
+	if got := paths(t, st); len(got) != 0 {
+		t.Errorf("old root's files still there after Prepare: %v", got)
+	}
+}
+
+func TestRunNeedsPrepare(t *testing.T) {
+	root := t.TempDir()
+	st := open(t)
+	p := Prepared{DriveID: "d1", ScanPath: root, DriveRoot: root}
+	if _, err := Run(context.Background(), st, p, Options{}); err == nil {
+		t.Error("Run without a recorded drive should fail")
 	}
 }
 
@@ -301,20 +331,24 @@ func TestUnreadableFileIsRecordedAsError(t *testing.T) {
 	}
 }
 
-// A cancel during the walk (Ctrl-C) currently surfaces as the walk's own
-// context.Canceled, not *Interrupted, so main prints "error: context
-// canceled" and exits 1 instead of the resume hint. Only a cancel after the
-// walk gives *Interrupted. PR 3 replaces this with exit code 130; this test
-// pins today's behaviour until then.
-func TestCancelledScan(t *testing.T) {
+// A cancel during the walk (Ctrl-C) is an interruption, not a failure.
+// (Before PR 3 it surfaced as the walk's own context.Canceled, so the CLI
+// printed "error: context canceled" instead of the resume hint.)
+func TestCancelledScanIsInterrupted(t *testing.T) {
 	root := t.TempDir()
 	testutil.WriteTree(t, root, tree)
 	st := open(t)
+	opts := Options{DriveID: "d1", RootPath: root}
+	p, err := Prepare(st, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	s, err := Run(ctx, st, Options{DriveID: "d1", RootPath: root})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want context.Canceled", err)
+	s, err := Run(ctx, st, p, opts)
+	var in *Interrupted
+	if !errors.As(err, &in) {
+		t.Fatalf("err = %v, want *Interrupted", err)
 	}
 	if !s.DeletionsSkipped {
 		t.Error("an interrupted scan must not detect deletions")
@@ -323,7 +357,7 @@ func TestCancelledScan(t *testing.T) {
 
 func TestMissingPathIsInterrupted(t *testing.T) {
 	st := open(t)
-	_, err := Run(context.Background(), st, Options{DriveID: "d1", RootPath: filepath.Join(t.TempDir(), "unplugged")})
+	_, err := Prepare(st, Options{DriveID: "d1", RootPath: filepath.Join(t.TempDir(), "unplugged")})
 	var in *Interrupted
 	if !errors.As(err, &in) {
 		t.Fatalf("err = %v, want Interrupted", err)

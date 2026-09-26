@@ -17,14 +17,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jyothri/bhandaar/agent/client/internal/compare"
+	"github.com/jyothri/bhandaar/agent/client/internal/identity"
 	"github.com/jyothri/bhandaar/agent/client/internal/report"
 	"github.com/jyothri/bhandaar/agent/client/internal/scan"
 	"github.com/jyothri/bhandaar/agent/client/internal/store"
@@ -37,8 +37,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ctx, stop := withSignals(context.Background())
 
 	var err error
 	switch os.Args[1] {
@@ -49,38 +48,40 @@ func main() {
 	case "remote-status":
 		err = runRemoteStatus(ctx, os.Args[2:], os.Stdout, os.Stderr)
 	case "scan":
-		err = runScan(ctx, os.Args[2:])
+		err = runScan(ctx, os.Args[2:], os.Stdout, os.Stderr)
 	case "compare":
 		err = runCompare(os.Args[2:])
 	case "report":
 		err = runReport(os.Args[2:])
 	case "version", "--version":
 		fmt.Println(version.String())
+		stop()
 		return
 	case "-h", "--help", "help":
 		usage()
+		stop()
 		return
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n\n", os.Args[1])
 		usage()
-		os.Exit(2)
+		stop()
+		os.Exit(exitUsage)
 	}
+	code := exitCode(ctx, err)
+	stop()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		code := exitLocal
-		var ee *exitError
-		if errors.As(err, &ee) {
-			code = ee.code
-		}
-		os.Exit(code)
+	} else if cause := context.Cause(ctx); cause != nil && code != exitOK {
+		fmt.Fprintf(os.Stderr, "%v\n", cause)
 	}
+	os.Exit(code)
 }
 
 func usage() {
 	fmt.Fprint(os.Stderr, `driveagent — track and compare two drives for divergence (no writes to either drive)
 
 Usage:
-  driveagent scan    --drive-id <id> --path <folder> [--drive-root <dir>] [--backup-root <rel-path>] [--state-dir <dir>] [--workers N] [--replace-root]
+  driveagent scan    --drive-id <id> --path <folder> [--drive-root <dir>] [--backup-root <rel-path>] [--state-dir <dir>] [--workers N] [--replace-root] [--accept-identity-change]
   driveagent compare --drive-a <id> --drive-b <id> [--drive-a-paths <rel,rel,...>] [--drive-b-paths <rel,rel,...>] [--state-dir <dir>]
   driveagent report  --drives <id,id,...> [--type text,json,html] [--report-out <dir>] [--include-mac-metadata] [--state-dir <dir>]
   driveagent login         [--username <name>] [--password-stdin] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
@@ -120,8 +121,9 @@ func splitList(s string) []string {
 	return out
 }
 
-func runScan(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("scan", flag.ExitOnError)
+func runScan(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	driveID := fs.String("drive-id", "", "label for this drive (required)")
 	path := fs.String("path", "", "the specific folder to walk and hash this invocation (required)")
 	driveRoot := fs.String("drive-root", "", "stable anchor for this drive's relative paths, e.g. its mount point (defaults to --path)")
@@ -129,12 +131,13 @@ func runScan(ctx context.Context, args []string) error {
 	stateDir := fs.String("state-dir", defaultStateDir(), "directory holding the checkpoint database")
 	workers := fs.Int("workers", 2, "concurrent hashing workers (keep low for spinning USB drives)")
 	replaceRoot := fs.Bool("replace-root", false, "allow --drive-id to be repointed at a different --drive-root than it was last scanned at, discarding that drive-id's old checkpoint data first")
+	acceptIdentity := fs.Bool("accept-identity-change", false, "scan even though the drive at --drive-root has a different filesystem ID than --drive-id was last scanned on (e.g. it was reformatted); keeps the checkpoint data")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return usageErr("%v", err)
 	}
 	if *driveID == "" || *path == "" {
 		fs.Usage()
-		return fmt.Errorf("--drive-id and --path are required")
+		return usageErr("--drive-id and --path are required")
 	}
 
 	st, err := store.Open(*stateDir)
@@ -143,9 +146,8 @@ func runScan(ctx context.Context, args []string) error {
 	}
 	defer st.Close()
 
-	fmt.Printf("scanning %q as drive %q (state: %s)\n", *path, *driveID, *stateDir)
-
-	stats, err := scan.Run(ctx, st, scan.Options{
+	fmt.Fprintf(stdout, "scanning %q as drive %q (state: %s)\n", *path, *driveID, *stateDir)
+	opts := scan.Options{
 		DriveID:     *driveID,
 		RootPath:    *path,
 		DriveRoot:   *driveRoot,
@@ -153,26 +155,79 @@ func runScan(ctx context.Context, args []string) error {
 		Workers:     *workers,
 		ReplaceRoot: *replaceRoot,
 		Progress: func(s scan.Stats) {
-			fmt.Printf("  ...seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d\n",
+			fmt.Fprintf(stdout, "  ...seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d\n",
 				s.FilesSeen, s.FilesSkipped, s.FilesHashed, s.FilesErrored, s.BytesHashed)
 		},
-	})
+	}
 
-	if _, ok := err.(*scan.RootConflict); ok {
+	// Drive checks first, before anything is walked: the drive-root check
+	// (with --replace-root, its old data is cleared here) and recording the
+	// drive.
+	prepared, err := scan.Prepare(st, opts)
+	if err != nil {
+		return err
+	}
+	if prepared.Replaced {
+		fmt.Fprintf(stdout, "discarded drive %q's checkpoint data from its previous drive-root (--replace-root)\n", *driveID)
+	}
+	// The wrong-drive guard, before anything is walked.
+	if err := checkDriveIdentity(st, prepared, *acceptIdentity, stderr); err != nil {
 		return err
 	}
 
-	fmt.Printf("done in %s: seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d deleted=%d\n",
+	stats, err := scan.Run(ctx, st, prepared, opts)
+	fmt.Fprintf(stdout, "done in %s: seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d deleted=%d\n",
 		stats.Elapsed.Round(time.Second), stats.FilesSeen, stats.FilesSkipped, stats.FilesHashed, stats.FilesErrored, stats.BytesHashed, stats.FilesDeleted)
 	if stats.DeletionsSkipped {
-		fmt.Println("note: skipped deletion detection because this walk hit an unreadable file/directory — a clean rescan (no warnings above) is needed to detect files removed from disk.")
+		fmt.Fprintln(stdout, "note: skipped deletion detection because this walk hit an unreadable file/directory — a clean rescan (no warnings above) is needed to detect files removed from disk.")
 	}
 
-	if interrupted, ok := err.(*scan.Interrupted); ok {
-		fmt.Printf("scan stopped early: %s\nre-run the same command to resume — already-hashed files will be skipped.\n", interrupted.Reason)
-		return nil
+	var interrupted *scan.Interrupted
+	if errors.As(err, &interrupted) {
+		fmt.Fprintf(stdout, "scan stopped early: %s\nre-run the same command to resume — already-hashed files will be skipped.\n", interrupted.Reason)
+		if cause := context.Cause(ctx); cause != nil {
+			return cause // Ctrl-C or SIGTERM: main exits 130 or 143
+		}
+		// The drive went away mid-scan: incomplete, so not a success.
+		return &exitError{code: exitLocal, err: err}
 	}
 	return err
+}
+
+// detectIdentity is identity.Detect; tests replace it.
+var detectIdentity = identity.Detect
+
+// checkDriveIdentity reads the identity of the drive at the drive root and
+// compares it with what's recorded for the drive id: a different filesystem
+// is refused; anything else is recorded, with a warning where it's notable.
+// After --replace-root the drive starts over, so there's nothing to compare.
+func checkDriveIdentity(st *store.Store, p scan.Prepared, accept bool, stderr io.Writer) error {
+	found, err := detectIdentity(p.DriveRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "warning: couldn't read the identity of the drive at %s: %v\n", p.DriveRoot, err)
+	}
+	rec, err := st.GetDriveIdentity(p.DriveID)
+	if err != nil {
+		return err
+	}
+	stored := identity.Identity{FSUUID: rec.FSUUID, FSType: rec.FSType, Source: rec.FSUUIDSource, HWSerial: rec.HWSerial}
+	if p.Replaced {
+		stored = identity.Identity{}
+	}
+	d := identity.Check(p.DriveID, p.DriveRoot, stored, found, accept)
+	if d.Refusal != "" {
+		return errors.New(d.Refusal)
+	}
+	for _, w := range d.Warnings {
+		fmt.Fprintf(stderr, "warning: %s\n", w)
+	}
+	if !d.Save && !rec.SeenAt.IsZero() {
+		return nil
+	}
+	return st.SetDriveIdentity(p.DriveID, store.DriveIdentity{
+		FSUUID: d.Record.FSUUID, FSType: d.Record.FSType, FSUUIDSource: d.Record.Source, HWSerial: d.Record.HWSerial,
+		SeenAt: time.Now(),
+	})
 }
 
 func runCompare(args []string) error {

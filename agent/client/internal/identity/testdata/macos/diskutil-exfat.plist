@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>BusProtocol</key>
+	<string>USB</string>
+	<key>DeviceIdentifier</key>
+	<string>disk6s1</string>
+	<key>FilesystemName</key>
+	<string>ExFAT</string>
+	<key>FilesystemType</key>
+	<string>exfat</string>
+	<key>MountPoint</key>
+	<string>/Volumes/Seagate1</string>
+	<key>ParentWholeDisk</key>
+	<string>disk6</string>
+	<key>VolumeUUID</key>
+	<string>4F1E0000-0000-3000-9000-0000000077AA</string>
+</dict>
+</plist>

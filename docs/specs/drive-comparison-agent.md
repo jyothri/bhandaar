@@ -26,11 +26,14 @@ All three share one local SQLite checkpoint database (default `~/.driveagent/sta
 ### `scan`
 
 ```
-driveagent scan --drive-id <id> --path <folder> [--drive-root <dir>] [--backup-root <rel-path>] [--workers N] [--replace-root] [--state-dir <dir>]
+driveagent scan --drive-id <id> --path <folder> [--drive-root <dir>] [--backup-root <rel-path>] [--workers N] [--replace-root] [--accept-identity-change] [--state-dir <dir>]
 ```
 
 - `--path` is the specific folder walked *this* invocation; `--drive-root` (defaults to `--path`) is the stable anchor described above. `--backup-root` sets it once and is otherwise left alone on later scans.
 - Resumable: a file is re-hashed only if its size or mtime changed since last recorded; unchanged files are skipped. Safe to re-run after an interruption (Ctrl-C, drive disconnect, crash) with no special recovery step.
+- Order: the drive checks come first, before anything is walked: the `--drive-root` check (and, with `--replace-root`, clearing the drive's old data), then recording the drive (`scan.Prepare`), then the wrong-drive guard. Only then is the folder walked and hashed (`scan.Run`).
+- **Wrong-drive guard** (from 0.2.0): `scan` reads the filesystem ID and disk serial of the drive holding `--drive-root` (on Linux from the partition's udev record; on macOS from `diskutil`/`ioreg`; read only, no root) and compares them with what's recorded for `--drive-id`. A different filesystem ID is refused (exit 1) before anything is walked: pass `--accept-identity-change` if the drive was reformatted, or `--replace-root` to start it over. A changed serial only warns (moving a disk to another USB dock changes it). Details: [`remote-sync-agent.md`](remote-sync-agent.md#drive-identity).
+- Exit codes: 0 when the scan completed; 1 for a local error, including a drive that became inaccessible mid-scan; 2 for a usage error; **130** after Ctrl-C (SIGINT) and **143** after SIGTERM. The first signal stops the walk (and the hashing of the current file) and records what was seen, then prints the resume hint; a second signal ends the process at once. Before 0.2.0 an interrupted scan exited 0, or, for a Ctrl-C during the walk, printed `error: context canceled` and exited 1.
 - Repointing an existing `--drive-id` at a different `--drive-root` is refused by default (it would silently change what every existing relative path means) — pass `--replace-root` to discard that drive's checkpoint data and start over.
 - Records the real directory structure it observes (both from the recursive walk and cheap single-level reads of every ancestor between `--path` and `--drive-root`), so sibling folders that were never scanned still show up as real, named, `unscanned` folders rather than being invisible.
 - **Deletion detection**: after a walk that hit zero unreadable files or directories, `scan` removes checkpoint rows for anything under `--path` that no longer exists on disk (including cascading into an entire deleted subdirectory). If *anything* was unreadable during the walk, deletion detection is skipped for that run entirely — better to leave a stale row than wrongly delete one hidden behind a permission error.

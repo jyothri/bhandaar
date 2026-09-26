@@ -32,8 +32,11 @@ above they run as-is; downloaded through a browser, Gatekeeper blocks them
 until you run `xattr -d com.apple.quarantine driveagent` once.
 
 After upgrading, check `driveagent version` and remove older copies from your
-`PATH`: from the release that adds remote sync's change feed on, an older
-binary must not run against the upgraded `state.db`.
+`PATH`. From 0.2.0 on, the first run upgrades `state.db` in place (one time;
+about 20 s for 3 million rows, with progress), and an older binary must then
+never run against it: its writes wouldn't be recorded for upload, and nothing
+would tell you. A `driveagent` started while another is upgrading gives up
+after a few seconds; just re-run it.
 
 ## Build
 
@@ -62,6 +65,12 @@ drives with different top-level layouts still align for comparison:
 ./driveagent scan --drive-id seagate2 --drive-root /mnt/seagate2 --backup-root Jyo/Backup --path "/mnt/seagate2/Jyo/Backup/interview"
 ./driveagent scan --drive-id seagate1 --drive-root /media/jyothri/Seagate1 --backup-root Jyo --path "/media/jyothri/Seagate1/Jyo/interview"
 ```
+
+Each scan also checks that the drive at `--drive-root` is the one recorded
+for `--drive-id`, by its filesystem ID. A different filesystem is refused
+before anything is walked; pass `--accept-identity-change` if the drive was
+reformatted, or `--replace-root` to start it over. A changed disk serial (a
+new USB dock) only warns.
 
 Then compare the two drives — `--drive-a-paths`/`--drive-b-paths` (both
 backup-root-relative, comma-separated) scope which paths get (re)checked
@@ -133,7 +142,10 @@ which path was used.
 A state dir logs in to, and will sync with, exactly one server. To try another
 server, use a copy of the state dir (`--state-dir`).
 
-Exit codes: 0 ok, 1 local error, 2 usage, 3 server unreachable or login
-needed, 4 this `driveagent` is too old for the server (upgrade).
+Exit codes: 0 ok, 1 local error (including a drive that went away
+mid-scan), 2 usage, 3 server unreachable or login needed, 4 this
+`driveagent` is too old for the server (upgrade), 130 interrupted by Ctrl-C,
+143 stopped by SIGTERM. An interrupted scan keeps what it recorded; re-run it
+to resume.
 
 Run `./driveagent --help` for the full flag list.
