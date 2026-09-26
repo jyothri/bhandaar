@@ -15,7 +15,7 @@ The application consists of:
 - **Frontend (ui/)**: React + TypeScript SPA using Vite, TanStack Router, and TanStack Query
 - **Agent (agent/)**: three sibling Go modules for local drive tracking and remote sync:
   - `agent/client/`: `driveagent`, the CLI that scans and compares drives (`docs/specs/drive-comparison-agent.md`), and logs in to `agentserver` (`login`, `logout`, `remote-status`; `docs/specs/remote-sync-agent.md`)
-  - `agent/server/`: `agentserver`, the hosted service that receives `driveagent` uploads (health, handshake, login/refresh so far; `docs/specs/remote-sync-server.md`)
+  - `agent/server/`: `agentserver`, the hosted service that receives `driveagent` uploads (auth, drives, change batches; `docs/specs/remote-sync-server.md`)
   - `agent/wire/`: the request/response types both sides share; standard library only
 
 ## Architecture

@@ -95,6 +95,8 @@ func (s *Server) routes() {
 	s.handle("POST /agent/v1/auth/logout", s.logout, route{})
 	s.handle("GET /agent/v1/drives", s.listDrives, route{authenticated: true})
 	s.handle("PUT /agent/v1/drives/{drive_id}", s.openDrive, route{authenticated: true})
+	s.handle("POST /agent/v1/drives/{drive_id}/changes", s.postChanges,
+		route{authenticated: true, idempotent: true, maxBody: MaxChangesBody})
 	s.mux.HandleFunc("/agent/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, wire.CodeNotFound, "no such endpoint: "+r.Method+" "+r.URL.Path, nil)
 	})

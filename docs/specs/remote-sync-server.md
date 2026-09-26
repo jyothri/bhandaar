@@ -1,6 +1,6 @@
 # Remote Sync: `agentserver` Server
 
-**Status:** partly implemented. Rollout step 1 (PR 1) implements the layout, configuration, health, handshake, login/refresh/logout, the admin CLI, housekeeping (without the tombstones task) and migrations 1–2. The drive and changes endpoints, and their tables, are still proposed. The overview and decisions are in [`remote-sync.md`](remote-sync.md).
+**Status:** implemented. Rollout step 1 (PR 1, #22) implemented the layout, configuration, health, handshake, login/refresh/logout, the admin CLI, housekeeping and migrations 1–2; step 4 (PR 4) the drive and changes endpoints, physical-drive matching, the tombstones housekeeping task and migration 3. A full 1,000-entry batch applies in about 40–80 ms against a local Postgres. The overview and decisions are in [`remote-sync.md`](remote-sync.md).
 
 `agentserver` is a standalone Go service that receives scan data from `driveagent` and stores it in the Bhandaar Postgres database. It sits next to `be/`, and neither service calls the other.
 
