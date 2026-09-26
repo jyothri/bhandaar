@@ -56,7 +56,7 @@ func (s *Server) Handler() http.Handler {
 // route says which checks an endpoint runs, besides the body limit.
 type route struct {
 	// anyVersion skips the X-Agent-Version and X-Agent-Protocol checks, so
-	// agents of every version can reach the endpoint (health).
+	// agents of every version can reach the endpoint (health, handshake).
 	anyVersion bool
 	// authenticated requires a bearer access token.
 	authenticated bool
@@ -89,6 +89,7 @@ func (s *Server) handle(pattern string, h http.HandlerFunc, o route) {
 
 func (s *Server) routes() {
 	s.handle("GET /agent/health", s.health, route{anyVersion: true})
+	s.handle("POST /agent/v1/handshake", s.handshake, route{anyVersion: true})
 	s.handle("POST /agent/v1/auth/login", s.login, route{})
 	s.handle("POST /agent/v1/auth/refresh", s.refresh, route{})
 	s.handle("POST /agent/v1/auth/logout", s.logout, route{})

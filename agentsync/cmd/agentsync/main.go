@@ -23,6 +23,7 @@ import (
 	"github.com/jyothri/bhandaar/agentsync/internal/api"
 	"github.com/jyothri/bhandaar/agentsync/internal/auth"
 	"github.com/jyothri/bhandaar/agentsync/internal/config"
+	"github.com/jyothri/bhandaar/agentsync/internal/housekeeping"
 	"github.com/jyothri/bhandaar/agentsync/internal/store"
 )
 
@@ -52,9 +53,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "serve":
 		err = serve(ctx)
 	case "housekeeping":
-		// The tasks arrive with the tables they clean up.
-		err = withStore(ctx, func(*store.Store) error {
-			slog.Info("housekeeping: no tasks yet")
+		err = withStore(ctx, func(st *store.Store) error {
+			if failed := housekeeping.RunOnce(ctx, housekeeping.Tasks(st.Pool)); failed > 0 {
+				return fmt.Errorf("%d housekeeping task(s) failed", failed)
+			}
 			return nil
 		})
 	case "user":
@@ -123,6 +125,8 @@ func serve(ctx context.Context) error {
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
+
+	go housekeeping.Loop(ctx, housekeeping.Tasks(st.Pool))
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()

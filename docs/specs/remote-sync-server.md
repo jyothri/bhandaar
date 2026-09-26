@@ -1,6 +1,6 @@
 # Remote Sync: `agentsync` Server
 
-**Status:** proposed (not implemented). The overview and decisions are in [`remote-sync.md`](remote-sync.md).
+**Status:** partly implemented. Rollout step 1 (PR 1) implements the layout, configuration, health, handshake, login/refresh/logout, the admin CLI, housekeeping (without the tombstones task) and migrations 1–2. The drive and changes endpoints, and their tables, are still proposed. The overview and decisions are in [`remote-sync.md`](remote-sync.md).
 
 `agentsync` is a standalone Go service that receives scan data from `driveagent` and stores it in the Bhandaar Postgres database. It sits next to `be/`, and neither service calls the other.
 

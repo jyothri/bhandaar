@@ -1,6 +1,6 @@
 # Remote Sync: Implementation Plan
 
-**Status:** plan, not started. Written 2026-09-25; revised 2026-09-26 to six PRs, one per milestone.
+**Status:** M1 (PR 1) implemented on `feat/agentsync-server`; the rest not started. Written 2026-09-25; revised 2026-09-26 to six PRs, one per milestone.
 
 This plan turns the four remote-sync specs into six pull requests, one per milestone:
 - [`remote-sync.md`](remote-sync.md) (overview and decisions)

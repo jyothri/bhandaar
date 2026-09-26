@@ -221,7 +221,13 @@ privatetokens (OAuth refresh tokens)
 - Migration system with versioning
 - Handles schema updates
 
-### 4. External Services (Google APIs)
+### 4. Agent sync service (`agentsync/`, Go)
+
+A separate service for `driveagent` (the local drive-comparison agent in `agent/linux/`), designed in [`specs/remote-sync.md`](specs/remote-sync.md). It shares the Postgres database but only uses its own `agent_*` tables, created by its own numbered migrations (`agentsync_schema_migrations`); `be` and `agentsync` never call each other. nginx routes `/agent/` to it on port 8091, without basic auth.
+
+Implemented so far (rollout step 1): `GET /agent/health`, `POST /agent/v1/handshake` (version negotiation), username/password login with JWT access tokens and rotating refresh tokens, the `agentsync user` admin commands, and hourly housekeeping. The upload endpoints come in later steps.
+
+### 5. External Services (Google APIs)
 
 **OAuth 2.0:**
 - Authorization code flow
@@ -329,8 +335,10 @@ Services:
 ├── hdd_be (Go Backend)
 │   ├── Port: 8090
 │   └── Volume: ~/keys/gae_creds.json
-└── hdd_ui (React Frontend)
-    └── Port: 80/443
+├── hdd_ui (React Frontend)
+│   └── Port: 80/443
+└── agentsync (driveagent uploads)
+    └── Port: 8091 (nginx only)
 ```
 
 ### Environment Variables
@@ -340,6 +348,8 @@ Services:
 - `OAUTH_CLIENT_SECRET` - Google OAuth client secret
 - `GOOGLE_APPLICATION_CREDENTIALS` - Path to service account JSON
 - `FRONTEND_URL` - UI origin, or a comma-separated list of origins (e.g. `https://sm.jkurapati.com,http://192.168.1.118:5173`). Used for CORS, and as the only origins account linking may return to
+
+**agentsync:** the same `DB_*` variables as the backend, plus `AGENTSYNC_JWT_SECRET` (required) and the optional settings in the [server spec](specs/remote-sync-server.md#configuration).
 
 **Frontend:**
 - Backend API URL configured in `ui/src/api/index.ts`
