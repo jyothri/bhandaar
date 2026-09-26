@@ -73,7 +73,7 @@ jobs:
             -ldflags "-s -w -X github.com/jyothri/bhandaar/agent/client/internal/version.Commit=${GITHUB_SHA::7}" \
             -o dist/pkg/driveagent ./cmd/driveagent
           cp README.md dist/pkg/
-          tar -C dist/pkg -czf "dist/driveagent_${os}_${arch}.tar.gz" .
+          tar -C dist/pkg -czf "dist/driveagent_${os}_${arch}.tar.gz" driveagent README.md
       - name: Smoke test (linux/amd64)
         if: matrix.target == 'linux/amd64'
         working-directory: agent/client

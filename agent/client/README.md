@@ -18,10 +18,12 @@ published as GitHub Releases tagged `driveagent/v<version>`:
 ```bash
 # Linux amd64 (use darwin_arm64 for Apple Silicon, darwin_amd64 for Intel Macs)
 asset=driveagent_linux_amd64.tar.gz
+cd "$(mktemp -d)"
 curl -fsSLO "https://github.com/jyothri/bhandaar/releases/latest/download/$asset"
 curl -fsSLO "https://github.com/jyothri/bhandaar/releases/latest/download/SHA256SUMS"
 sha256sum --check --ignore-missing SHA256SUMS      # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
-tar -xzf "$asset" driveagent && install -m 0755 driveagent ~/.local/bin/
+tar -xzf "$asset"                                  # driveagent and README.md
+mkdir -p ~/.local/bin && install -m 0755 driveagent ~/.local/bin/
 driveagent version
 ```
 
