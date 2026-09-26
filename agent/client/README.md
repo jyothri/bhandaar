@@ -133,7 +133,10 @@ which path was used.
 A state dir logs in to, and will sync with, exactly one server. To try another
 server, use a copy of the state dir (`--state-dir`).
 
-Exit codes: 0 ok, 1 local error, 2 usage, 3 server unreachable or login
-needed, 4 this `driveagent` is too old for the server (upgrade).
+Exit codes: 0 ok, 1 local error (including a drive that went away
+mid-scan), 2 usage, 3 server unreachable or login needed, 4 this
+`driveagent` is too old for the server (upgrade), 130 interrupted by Ctrl-C,
+143 stopped by SIGTERM. An interrupted scan keeps what it recorded; re-run it
+to resume.
 
 Run `./driveagent --help` for the full flag list.

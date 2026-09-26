@@ -17,11 +17,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jyothri/bhandaar/agent/client/internal/compare"
@@ -37,8 +36,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ctx, stop := withSignals(context.Background())
 
 	var err error
 	switch os.Args[1] {
@@ -49,31 +47,33 @@ func main() {
 	case "remote-status":
 		err = runRemoteStatus(ctx, os.Args[2:], os.Stdout, os.Stderr)
 	case "scan":
-		err = runScan(ctx, os.Args[2:])
+		err = runScan(ctx, os.Args[2:], os.Stdout, os.Stderr)
 	case "compare":
 		err = runCompare(os.Args[2:])
 	case "report":
 		err = runReport(os.Args[2:])
 	case "version", "--version":
 		fmt.Println(version.String())
+		stop()
 		return
 	case "-h", "--help", "help":
 		usage()
+		stop()
 		return
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n\n", os.Args[1])
 		usage()
-		os.Exit(2)
+		stop()
+		os.Exit(exitUsage)
 	}
+	code := exitCode(ctx, err)
+	stop()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		code := exitLocal
-		var ee *exitError
-		if errors.As(err, &ee) {
-			code = ee.code
-		}
-		os.Exit(code)
+	} else if cause := context.Cause(ctx); cause != nil && code != exitOK {
+		fmt.Fprintf(os.Stderr, "%v\n", cause)
 	}
+	os.Exit(code)
 }
 
 func usage() {
@@ -120,8 +120,9 @@ func splitList(s string) []string {
 	return out
 }
 
-func runScan(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("scan", flag.ExitOnError)
+func runScan(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	driveID := fs.String("drive-id", "", "label for this drive (required)")
 	path := fs.String("path", "", "the specific folder to walk and hash this invocation (required)")
 	driveRoot := fs.String("drive-root", "", "stable anchor for this drive's relative paths, e.g. its mount point (defaults to --path)")
@@ -130,11 +131,11 @@ func runScan(ctx context.Context, args []string) error {
 	workers := fs.Int("workers", 2, "concurrent hashing workers (keep low for spinning USB drives)")
 	replaceRoot := fs.Bool("replace-root", false, "allow --drive-id to be repointed at a different --drive-root than it was last scanned at, discarding that drive-id's old checkpoint data first")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return usageErr("%v", err)
 	}
 	if *driveID == "" || *path == "" {
 		fs.Usage()
-		return fmt.Errorf("--drive-id and --path are required")
+		return usageErr("--drive-id and --path are required")
 	}
 
 	st, err := store.Open(*stateDir)
@@ -143,9 +144,8 @@ func runScan(ctx context.Context, args []string) error {
 	}
 	defer st.Close()
 
-	fmt.Printf("scanning %q as drive %q (state: %s)\n", *path, *driveID, *stateDir)
-
-	stats, err := scan.Run(ctx, st, scan.Options{
+	fmt.Fprintf(stdout, "scanning %q as drive %q (state: %s)\n", *path, *driveID, *stateDir)
+	opts := scan.Options{
 		DriveID:     *driveID,
 		RootPath:    *path,
 		DriveRoot:   *driveRoot,
@@ -153,24 +153,37 @@ func runScan(ctx context.Context, args []string) error {
 		Workers:     *workers,
 		ReplaceRoot: *replaceRoot,
 		Progress: func(s scan.Stats) {
-			fmt.Printf("  ...seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d\n",
+			fmt.Fprintf(stdout, "  ...seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d\n",
 				s.FilesSeen, s.FilesSkipped, s.FilesHashed, s.FilesErrored, s.BytesHashed)
 		},
-	})
+	}
 
-	if _, ok := err.(*scan.RootConflict); ok {
+	// Drive checks first, before anything is walked: the drive-root check
+	// (with --replace-root, its old data is cleared here) and recording the
+	// drive.
+	prepared, err := scan.Prepare(st, opts)
+	if err != nil {
 		return err
 	}
-
-	fmt.Printf("done in %s: seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d deleted=%d\n",
-		stats.Elapsed.Round(time.Second), stats.FilesSeen, stats.FilesSkipped, stats.FilesHashed, stats.FilesErrored, stats.BytesHashed, stats.FilesDeleted)
-	if stats.DeletionsSkipped {
-		fmt.Println("note: skipped deletion detection because this walk hit an unreadable file/directory — a clean rescan (no warnings above) is needed to detect files removed from disk.")
+	if prepared.Replaced {
+		fmt.Fprintf(stdout, "discarded drive %q's checkpoint data from its previous drive-root (--replace-root)\n", *driveID)
 	}
 
-	if interrupted, ok := err.(*scan.Interrupted); ok {
-		fmt.Printf("scan stopped early: %s\nre-run the same command to resume — already-hashed files will be skipped.\n", interrupted.Reason)
-		return nil
+	stats, err := scan.Run(ctx, st, prepared, opts)
+	fmt.Fprintf(stdout, "done in %s: seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d deleted=%d\n",
+		stats.Elapsed.Round(time.Second), stats.FilesSeen, stats.FilesSkipped, stats.FilesHashed, stats.FilesErrored, stats.BytesHashed, stats.FilesDeleted)
+	if stats.DeletionsSkipped {
+		fmt.Fprintln(stdout, "note: skipped deletion detection because this walk hit an unreadable file/directory — a clean rescan (no warnings above) is needed to detect files removed from disk.")
+	}
+
+	var interrupted *scan.Interrupted
+	if errors.As(err, &interrupted) {
+		fmt.Fprintf(stdout, "scan stopped early: %s\nre-run the same command to resume — already-hashed files will be skipped.\n", interrupted.Reason)
+		if cause := context.Cause(ctx); cause != nil {
+			return cause // Ctrl-C or SIGTERM: main exits 130 or 143
+		}
+		// The drive went away mid-scan: incomplete, so not a success.
+		return &exitError{code: exitLocal, err: err}
 	}
 	return err
 }

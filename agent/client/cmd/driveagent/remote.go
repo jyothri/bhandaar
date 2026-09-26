@@ -20,43 +20,6 @@ import (
 	"github.com/jyothri/bhandaar/agent/wire"
 )
 
-// Exit codes (docs/specs/remote-sync-agent.md, "Exit codes"). PR 3 applies
-// them to scan too.
-const (
-	exitLocal   = 1
-	exitUsage   = 2
-	exitRemote  = 3
-	exitUpgrade = 4
-)
-
-// exitError makes main exit with code.
-type exitError struct {
-	code int
-	err  error
-}
-
-func (e *exitError) Error() string { return e.err.Error() }
-func (e *exitError) Unwrap() error { return e.err }
-
-func usageErr(format string, a ...any) error {
-	return &exitError{code: exitUsage, err: fmt.Errorf(format, a...)}
-}
-
-// remoteErr gives a remote failure its exit code: 4 for an upgrade, else 3.
-func remoteErr(err error) error {
-	if err == nil {
-		return nil
-	}
-	var ee *exitError
-	if errors.As(err, &ee) {
-		return err
-	}
-	if errors.Is(err, remote.ErrUpgrade) {
-		return &exitError{code: exitUpgrade, err: err}
-	}
-	return &exitError{code: exitRemote, err: err}
-}
-
 // remoteFlags are the flags every remote command takes.
 type remoteFlags struct {
 	stateDir, remoteURL, lanAddr *string

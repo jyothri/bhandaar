@@ -48,12 +48,12 @@ type Options struct {
 	Progress func(Stats)
 	// ReplaceRoot, if true, allows DriveID to be repointed at a different
 	// DriveRoot than what's already checkpointed for it, discarding all
-	// of that drive_id's checkpoint data first. Without it, Run refuses
+	// of that drive_id's checkpoint data first. Without it, Prepare refuses
 	// with RootConflict — see that type's doc comment.
 	ReplaceRoot bool
 }
 
-// RootConflict is returned by Run when DriveID was already scanned under a
+// RootConflict is returned by Prepare when DriveID was already scanned under a
 // different DriveRoot and Options.ReplaceRoot wasn't set. Every relative
 // path for a drive_id is computed against its DriveRoot, so silently
 // repointing it would shift the meaning of every existing row.
@@ -91,7 +91,7 @@ type Stats struct {
 	Elapsed          time.Duration
 }
 
-// Interrupted is returned by Run when the scan stopped early because the
+// Interrupted is returned by Prepare or Run when the scan stopped early because the
 // content root disappeared (drive unmounted/disconnected) or the context
 // was cancelled (e.g. Ctrl-C).
 type Interrupted struct {
@@ -120,26 +120,35 @@ type walkState struct {
 	sawSoftError  bool
 }
 
-// Run walks opts.RootPath and hashes files that are new or changed relative
-// to what's already recorded in st for opts.DriveID. It is safe to call
-// repeatedly (including after a prior interrupted run) — already-hashed,
-// unchanged files are skipped.
-func Run(ctx context.Context, st *store.Store, opts Options) (Stats, error) {
-	if opts.Workers <= 0 {
-		opts.Workers = 2
-	}
-	if opts.BatchSize <= 0 {
-		opts.BatchSize = 200
-	}
+// Prepared is a scan whose drive checks have passed and whose drive row is
+// recorded. It is what Prepare hands to Run; the caller can do its own checks
+// in between (the wrong-drive guard, and later the uploader's setup).
+type Prepared struct {
+	DriveID string
+	// ScanPath is the absolute folder to walk.
+	ScanPath string
+	// DriveRoot is the absolute drive root that relative paths are against.
+	DriveRoot string
+	// RelScanPath is ScanPath relative to DriveRoot ("" for the root itself).
+	RelScanPath string
+	// Replaced is true when --replace-root discarded the drive's old data.
+	Replaced bool
+}
 
+// Prepare resolves the paths and does the drive checks, in this order: the
+// scan path must exist and lie under the drive root; a drive_id recorded
+// under another root is refused with RootConflict unless opts.ReplaceRoot,
+// which clears its old data (ClearDrive); then the drive row and backup root
+// are recorded. Nothing is walked yet.
+func Prepare(st *store.Store, opts Options) (Prepared, error) {
 	scanPath, err := filepath.Abs(opts.RootPath)
 	if err != nil {
-		return Stats{}, fmt.Errorf("resolving path: %w", err)
+		return Prepared{}, fmt.Errorf("resolving path: %w", err)
 	}
 	if info, err := os.Stat(scanPath); err != nil {
-		return Stats{}, &Interrupted{Reason: fmt.Sprintf("path %q is not accessible: %v", scanPath, err)}
+		return Prepared{}, &Interrupted{Reason: fmt.Sprintf("path %q is not accessible: %v", scanPath, err)}
 	} else if !info.IsDir() {
-		return Stats{}, fmt.Errorf("path %q is not a directory", scanPath)
+		return Prepared{}, fmt.Errorf("path %q is not a directory", scanPath)
 	}
 
 	driveRootInput := opts.DriveRoot
@@ -148,38 +157,66 @@ func Run(ctx context.Context, st *store.Store, opts Options) (Stats, error) {
 	}
 	driveRoot, err := filepath.Abs(driveRootInput)
 	if err != nil {
-		return Stats{}, fmt.Errorf("resolving drive-root: %w", err)
+		return Prepared{}, fmt.Errorf("resolving drive-root: %w", err)
 	}
 
 	relScanPath, err := filepath.Rel(driveRoot, scanPath)
 	if err != nil || relScanPath == ".." || strings.HasPrefix(relScanPath, "../") {
-		return Stats{}, fmt.Errorf("--path %q is not drive-root %q or a descendant of it", scanPath, driveRoot)
+		return Prepared{}, fmt.Errorf("--path %q is not drive-root %q or a descendant of it", scanPath, driveRoot)
 	}
 	if relScanPath == "." {
 		relScanPath = ""
 	}
 
+	p := Prepared{DriveID: opts.DriveID, ScanPath: scanPath, DriveRoot: driveRoot, RelScanPath: relScanPath}
 	existingRoot, found, err := st.ExistingDriveRoot(opts.DriveID)
 	if err != nil {
-		return Stats{}, fmt.Errorf("checking existing drive record: %w", err)
+		return Prepared{}, fmt.Errorf("checking existing drive record: %w", err)
 	}
 	if found && existingRoot != driveRoot {
 		if !opts.ReplaceRoot {
-			return Stats{}, &RootConflict{DriveID: opts.DriveID, OldRoot: existingRoot, NewRoot: driveRoot}
+			return Prepared{}, &RootConflict{DriveID: opts.DriveID, OldRoot: existingRoot, NewRoot: driveRoot}
 		}
 		if err := st.ClearDrive(opts.DriveID); err != nil {
-			return Stats{}, fmt.Errorf("clearing old checkpoint for drive %q: %w", opts.DriveID, err)
+			return Prepared{}, fmt.Errorf("clearing old checkpoint for drive %q: %w", opts.DriveID, err)
 		}
+		p.Replaced = true
 	}
 
 	if err := st.UpsertDrive(opts.DriveID, driveRoot, opts.BackupRoot); err != nil {
-		return Stats{}, fmt.Errorf("recording drive: %w", err)
+		return Prepared{}, fmt.Errorf("recording drive: %w", err)
 	}
 	if opts.BackupRoot != "" {
 		if err := st.SetBackupRoot(opts.DriveID, opts.BackupRoot); err != nil {
-			return Stats{}, fmt.Errorf("recording backup root: %w", err)
+			return Prepared{}, fmt.Errorf("recording backup root: %w", err)
 		}
 	}
+	return p, nil
+}
+
+// Run walks p.ScanPath and hashes files that are new or changed relative
+// to what's already recorded in st for the drive. It is safe to call
+// repeatedly (including after a prior interrupted run) — already-hashed,
+// unchanged files are skipped. p must come from Prepare.
+//
+// A cancelled ctx (Ctrl-C) stops the walk; Run still records what it saw
+// and returns *Interrupted.
+func Run(ctx context.Context, st *store.Store, p Prepared, opts Options) (Stats, error) {
+	if opts.Workers <= 0 {
+		opts.Workers = 2
+	}
+	if opts.BatchSize <= 0 {
+		opts.BatchSize = 200
+	}
+	// Prepare recorded the drive; make sure nothing changed it since.
+	if root, found, err := st.ExistingDriveRoot(p.DriveID); err != nil {
+		return Stats{}, fmt.Errorf("checking drive record: %w", err)
+	} else if !found || root != p.DriveRoot {
+		return Stats{}, fmt.Errorf("drive %q is not recorded at %q; run scan.Prepare first", p.DriveID, p.DriveRoot)
+	}
+	opts.DriveID = p.DriveID
+	driveRoot, scanPath, relScanPath := p.DriveRoot, p.ScanPath, p.RelScanPath
+
 	runID, err := st.StartScanRun(opts.DriveID)
 	if err != nil {
 		return Stats{}, fmt.Errorf("starting scan run: %w", err)
@@ -207,7 +244,10 @@ func Run(ctx context.Context, st *store.Store, opts Options) (Stats, error) {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				rec := hashFile(opts.DriveID, j)
+				rec, ok := hashFile(ctx, opts.DriveID, j)
+				if !ok {
+					continue // cancelled mid-file: record nothing for it
+				}
 				statsMu.Lock()
 				if rec.Status == store.StatusError {
 					stats.FilesErrored++
@@ -295,11 +335,13 @@ func Run(ctx context.Context, st *store.Store, opts Options) (Stats, error) {
 	if flushErr != nil {
 		return *stats, fmt.Errorf("writing checkpoint db: %w", flushErr)
 	}
+	if ctx.Err() != nil {
+		// A cancel during the walk comes back from WalkDir as ctx.Err();
+		// either way the scan was interrupted, not failed.
+		return *stats, &Interrupted{Reason: "cancelled"}
+	}
 	if walkErr != nil {
 		return *stats, walkErr
-	}
-	if ctx.Err() != nil {
-		return *stats, &Interrupted{Reason: "cancelled"}
 	}
 	return *stats, nil
 }
@@ -488,8 +530,24 @@ func walkAndDispatch(ctx context.Context, st *store.Store, opts Options, driveRo
 	})
 }
 
-func hashFile(driveID string, j job) store.FileRecord {
-	rec := store.FileRecord{
+// ctxReader stops reading once ctx is done, so a cancel doesn't wait for a
+// large file to finish hashing.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
+}
+
+// hashFile hashes one file. ok is false if ctx was cancelled mid-file, in
+// which case there is nothing to record.
+func hashFile(ctx context.Context, driveID string, j job) (rec store.FileRecord, ok bool) {
+	rec = store.FileRecord{
 		DriveID:   driveID,
 		RelPath:   j.relPath,
 		Size:      j.size,
@@ -504,18 +562,21 @@ func hashFile(driveID string, j job) store.FileRecord {
 	if err != nil {
 		rec.Status = store.StatusError
 		rec.ErrorMessage = err.Error()
-		return rec
+		return rec, true
 	}
 	defer f.Close()
 
 	h := blake3.New(32, nil)
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, ctxReader{ctx, f}); err != nil {
+		if ctx.Err() != nil {
+			return rec, false
+		}
 		rec.Status = store.StatusError
 		rec.ErrorMessage = err.Error()
-		return rec
+		return rec, true
 	}
 
 	rec.ContentHash = fmt.Sprintf("%x", h.Sum(nil))
 	rec.Status = store.StatusHashed
-	return rec
+	return rec, true
 }
