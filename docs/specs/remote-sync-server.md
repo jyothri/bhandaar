@@ -1,21 +1,25 @@
-# Remote Sync: `agentsync` Server
+# Remote Sync: `agentserver` Server
 
 **Status:** partly implemented. Rollout step 1 (PR 1) implements the layout, configuration, health, handshake, login/refresh/logout, the admin CLI, housekeeping (without the tombstones task) and migrations 1–2. The drive and changes endpoints, and their tables, are still proposed. The overview and decisions are in [`remote-sync.md`](remote-sync.md).
 
-`agentsync` is a standalone Go service that receives scan data from `driveagent` and stores it in the Bhandaar Postgres database. It sits next to `be/`, and neither service calls the other.
+`agentserver` is a standalone Go service that receives scan data from `driveagent` and stores it in the Bhandaar Postgres database. It sits next to `be/`, and neither service calls the other.
 
 ## Layout
 
+Everything agent-related lives under `agent/`, as three sibling Go modules:
+
 ```
-agentsync/                     module github.com/jyothri/bhandaar/agentsync
-  cmd/agentsync/main.go        `serve` (the server) + `user` and `housekeeping` admin subcommands
-  wire/                        separate module github.com/jyothri/bhandaar/agentsync/wire:
-                               request/response types, standard library only (shared with driveagent)
-  internal/api/                HTTP handlers, middleware (auth, version check, idempotency, gzip, limits)
-  internal/auth/               argon2id, JWT issue/verify, refresh-token rotation
-  internal/store/              Postgres access + migrations
-  internal/housekeeping/       hourly cleanup of expired rows (see Housekeeping)
-  build/Dockerfile
+agent/
+  client/                      driveagent, the CLI (module github.com/jyothri/bhandaar/agent/client)
+  wire/                        request/response types shared by both sides, standard library only
+                               (module github.com/jyothri/bhandaar/agent/wire)
+  server/                      agentserver (module github.com/jyothri/bhandaar/agent/server)
+    cmd/agentserver/main.go    `serve` (the server) + `user` and `housekeeping` admin subcommands
+    internal/api/              HTTP handlers, middleware (auth, version check, idempotency, gzip, limits)
+    internal/auth/             argon2id, JWT issue/verify, refresh-token rotation
+    internal/store/            Postgres access + migrations
+    internal/housekeeping/     hourly cleanup of expired rows (see Housekeeping)
+    build/Dockerfile
 ```
 
 - Router: the standard library `net/http.ServeMux` with method and path patterns (Go ≥ 1.22).
@@ -25,37 +29,37 @@ agentsync/                     module github.com/jyothri/bhandaar/agentsync
 
 ### Shared wire module
 
-The request and response types are defined once, in `agentsync/wire`, so the agent and the server can't drift apart. `wire` is a **separate Go module**, with its own `go.mod`, nested inside `agentsync/`. Go excludes a nested module's directory from its parent module, so `agentsync` imports it like any other module.
+The request and response types are defined once, in `agent/wire`, so the agent and the server can't drift apart. `wire` is a **separate Go module**, with its own `go.mod`, next to the two modules that import it. It belongs to neither side, so the client doesn't depend on the server's code (or the other way round).
 
 ```
-agentsync/wire/go.mod           module github.com/jyothri/bhandaar/agentsync/wire
-                                go 1.22        (no require lines)
-agentsync/go.mod                require github.com/jyothri/bhandaar/agentsync/wire v0.0.0
-                                replace github.com/jyothri/bhandaar/agentsync/wire => ./wire
-agent/linux/go.mod              require github.com/jyothri/bhandaar/agentsync/wire v0.0.0
-                                replace github.com/jyothri/bhandaar/agentsync/wire => ../../agentsync/wire
+agent/wire/go.mod      module github.com/jyothri/bhandaar/agent/wire
+                       go 1.22        (no require lines)
+agent/server/go.mod    require github.com/jyothri/bhandaar/agent/wire v0.0.0
+                       replace github.com/jyothri/bhandaar/agent/wire => ../wire
+agent/client/go.mod    require github.com/jyothri/bhandaar/agent/wire v0.0.0
+                       replace github.com/jyothri/bhandaar/agent/wire => ../wire
 ```
 
 Rules:
 - **Standard library only.** `wire/go.mod` has no `require` lines. A `require` pulls a whole module into the importer's module graph, not just one package, so this keeps the agent's `go.sum` and version selection unaffected by the server's dependencies (pgx, jwt, argon2). A test in `wire` fails if `go.mod` gains a `require`.
 - **`replace`, not tags or `go.work`.** The `replace` lines resolve `wire` from the same checkout, so a wire change and the code using it land in one commit, with no module tags or publishing. They live in `go.mod`, so they also apply in CI and Docker builds. There is no `go.work` file; with `replace` in place it would be redundant. (A developer may create an uncommitted one for editor convenience; it's in `.gitignore`.)
-- **Go version.** The `go` line in `wire/go.mod` stays at the lowest version its code needs (`1.22`), and never above the `go` line of either importer (`agent/linux` is `1.27.1`). Otherwise the older importer fails to build.
-- **Builds need both directories.** Docker builds of `agentsync` already use the repo root as build context, so `wire` is included. Any future agent build (release job, Dockerfile) must also check out or copy `agentsync/wire` alongside `agent/linux`.
-- **CI.** Both workflows watch `wire`: the `agentsync` workflow triggers on `agentsync/**`, and the `driveagent` workflow triggers on `agentsync/wire/**`. A `wire` change is therefore tested on both sides, and it counts as an agent change that needs a version bump. See [`remote-sync-ci.md`](remote-sync-ci.md).
+- **Go version.** The `go` line in `wire/go.mod` stays at the lowest version its code needs (`1.22`), and never above the `go` line of either importer (`agent/client` is `1.27.1`). Otherwise the older importer fails to build.
+- **Builds need both directories.** Docker builds of `agentserver` use the repo root as build context and copy `agent/wire` next to `agent/server`. Any agent build (release job, Dockerfile) must likewise have `agent/wire` alongside `agent/client`.
+- **CI.** Both workflows watch `wire`: the `agentserver` workflow triggers on `agent/server/**` and `agent/wire/**`, and the `driveagent` workflow on `agent/client/**` and `agent/wire/**`. A `wire` change is therefore tested on both sides, and it counts as an agent change that needs a version bump. See [`remote-sync-ci.md`](remote-sync-ci.md).
 
 ## Configuration
 
 | Env var | Default | Notes |
 |---|---|---|
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSL_MODE` | same as `be` | Same database as `be` |
-| `AGENTSYNC_LISTEN` | `:8091` | |
-| `AGENTSYNC_JWT_SECRET` | none (required) | ≥ 32 random bytes, base64. The server refuses to start without it |
-| `AGENTSYNC_ACCESS_TTL` | `15m` | |
-| `AGENTSYNC_REFRESH_TTL` | `720h` | 30 days, sliding (each rotation issues a fresh 30 days) |
-| `AGENTSYNC_MIN_AGENT_VERSION` | `0.1.0` | Below this: `upgrade_required` |
-| `AGENTSYNC_LATEST_AGENT_VERSION` | `0.1.0` | Below this (but ≥ min): `upgrade_recommended` |
-| `AGENTSYNC_TRUSTED_PROXIES` | `127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | Addresses or CIDRs that `X-Real-IP` is accepted from (nginx; see [Deployment](#deployment)). The port is only exposed to nginx, so the private ranges cover a host nginx reaching the container through Docker's network |
-| `AGENTSYNC_AGENT_DOWNLOAD_URL` | `https://github.com/jyothri/bhandaar/releases/latest` | Returned in the handshake with upgrade decisions (see [releases](remote-sync-ci.md#linking-releases-to-the-servers-version-check)) |
+| `AGENTSERVER_LISTEN` | `:8091` | |
+| `AGENTSERVER_JWT_SECRET` | none (required) | ≥ 32 random bytes, base64. The server refuses to start without it |
+| `AGENTSERVER_ACCESS_TTL` | `15m` | |
+| `AGENTSERVER_REFRESH_TTL` | `720h` | 30 days, sliding (each rotation issues a fresh 30 days) |
+| `AGENTSERVER_MIN_AGENT_VERSION` | `0.1.0` | Below this: `upgrade_required` |
+| `AGENTSERVER_LATEST_AGENT_VERSION` | `0.1.0` | Below this (but ≥ min): `upgrade_recommended` |
+| `AGENTSERVER_TRUSTED_PROXIES` | `127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | Addresses or CIDRs that `X-Real-IP` is accepted from (nginx; see [Deployment](#deployment)). The port is only exposed to nginx, so the private ranges cover a host nginx reaching the container through Docker's network |
+| `AGENTSERVER_AGENT_DOWNLOAD_URL` | `https://github.com/jyothri/bhandaar/releases/latest` | Returned in the handshake with upgrade decisions (see [releases](remote-sync-ci.md#linking-releases-to-the-servers-version-check)) |
 
 Server timeouts: read 60 s, write 60 s, idle 120 s. Body limit on `/changes`: 2 MiB compressed, 16 MiB after decompression, enforced while streaming (gzip bomb protection). Other endpoints: 16 KiB.
 
@@ -85,8 +89,8 @@ Errors use the same shape as `be` (`be/web/middleware.go`):
 No auth. Cheap: a DB ping with a 1 s timeout, no other queries.
 
 ```json
-200 {"status": "ok", "service": "agentsync", "server_version": "0.1.0", "api_versions": ["v1"], "time": "2026-09-24T10:00:00Z"}
-503 {"status": "unavailable", "service": "agentsync", "reason": "database", "api_versions": ["v1"], "time": "…"}
+200 {"status": "ok", "service": "agentserver", "server_version": "0.1.0", "api_versions": ["v1"], "time": "2026-09-24T10:00:00Z"}
+503 {"status": "unavailable", "service": "agentserver", "reason": "database", "api_versions": ["v1"], "time": "…"}
 ```
 
 The agent treats anything other than a `200` with `status: ok` (including a connection error or timeout) as "unavailable".
@@ -297,7 +301,7 @@ The agent classifies responses **by HTTP status code**. The JSON `code` only ref
 
 ## Database schema
 
-Tables live in the shared database. The service creates them at startup through numbered migrations, recorded in `agentsync_schema_migrations(version INT PRIMARY KEY, applied_at TIMESTAMPTZ)`. It never alters `be`'s tables.
+Tables live in the shared database. The service creates them at startup through numbered migrations, recorded in `agentserver_schema_migrations(version INT PRIMARY KEY, applied_at TIMESTAMPTZ)`. It never alters `be`'s tables.
 
 ```sql
 CREATE TABLE agent_users (
@@ -473,7 +477,7 @@ Such names are uploaded, not rejected (decided 2026-09-25). Linux filenames are 
 
 ## Housekeeping
 
-A few tables only need recent rows. `agentsync` runs one instance, and it cleans them up itself; there is no separate cron job.
+A few tables only need recent rows. `agentserver` runs one instance, and it cleans them up itself; there is no separate cron job.
 
 | Task | Deletes | Why it's safe |
 |---|---|---|
@@ -482,7 +486,7 @@ A few tables only need recent rows. `agentsync` runs one instance, and it cleans
 | Refresh tokens | `agent_refresh_tokens` with `expires_at` more than 7 days ago | An expired token is rejected anyway. The 7 days keep recent rows around for looking into a reuse alert |
 | Tombstones | `agent_tombstones` with `row_version` at or below their drive's `acked_version` (watermark) | Every version up to the watermark is acked, so any older change for that key is skipped on arrival, and the tombstone protects nothing. `acked_version` only increases, so this is safe while uploads are running |
 
-**How it runs.** It's a goroutine in `internal/housekeeping`, started by `agentsync serve`:
+**How it runs.** It's a goroutine in `internal/housekeeping`, started by `agentserver serve`:
 - The first run is 5 minutes after startup, so it doesn't compete with a restart, then once an hour (`time.Ticker`). It stops with the server's context on shutdown.
 - The four tasks run one after another. A task that fails is logged and tried again next hour; the others still run.
 - Each task deletes in batches of 5,000 rows, each batch in its own short transaction, repeated until a batch deletes fewer than 5,000:
@@ -508,25 +512,25 @@ A few tables only need recent rows. `agentsync` runs one instance, and it cleans
 
 Retention periods and the batch size are constants in the code, not configuration.
 
-**Manual run:** `agentsync housekeeping` runs the four tasks once and exits, logging the same lines. It's useful in tests and for checking the service by hand, e.g. `docker exec <container> agentsync housekeeping`.
+**Manual run:** `agentserver housekeeping` runs the four tasks once and exits, logging the same lines. It's useful in tests and for checking the service by hand, e.g. `docker exec <container> agentserver housekeeping`.
 
 ## Admin CLI
 
 Run on the prod box, inside the container:
 
 ```bash
-docker exec -it <agentsync container> agentsync user add --username jyothri   # prompts for password twice (no echo)
-docker exec -it <agentsync container> agentsync user passwd --username jyothri
-docker exec -it <agentsync container> agentsync user disable --username jyothri # also revokes all refresh tokens
-docker exec -it <agentsync container> agentsync user list
+docker exec -it <agentserver container> agentserver user add --username jyothri  # prompts for password twice (no echo)
+docker exec -it <agentserver container> agentserver user passwd --username jyothri
+docker exec -it <agentserver container> agentserver user disable --username jyothri # also revokes all refresh tokens
+docker exec -it <agentserver container> agentserver user list
 ```
 
 Passwords must be at least 12 characters. They never appear in argv, logs or error messages.
 
 ## Deployment
 
-- **Image and CI**: `jyothri/bhandaar-agentsync:latest`, pushed to Docker Hub on merge to `main` by `.github/workflows/agentsync-docker-image.yml`, the same way as `be` and `ui`. It's a static binary on Alpine, running as non-root. The workflow, the Dockerfile and the test setup (Postgres service container) are in [`remote-sync-ci.md`](remote-sync-ci.md#server-agentsync-docker-imageyml).
-- **Prod compose** (`~/jyothri-apps/apps/storagemanager`, changed by the user): add an `agentsync` service on the same network as `hdd_db`, with the `DB_*` env vars (the password comes from `HDD_DB_PASS`, as for `be`) and `AGENTSYNC_JWT_SECRET`, exposing port 8091 to nginx only.
+- **Image and CI**: `jyothri/bhandaar-agentserver:latest`, pushed to Docker Hub on merge to `main` by `.github/workflows/agentserver-docker-image.yml`, the same way as `be` and `ui`. It's a static binary on Alpine, running as non-root. The workflow, the Dockerfile and the test setup (Postgres service container) are in [`remote-sync-ci.md`](remote-sync-ci.md#server-agentserver-docker-imageyml).
+- **Prod compose** (`~/jyothri-apps/apps/storagemanager`, changed by the user): add an `agentserver` service on the same network as `hdd_db`, with the `DB_*` env vars (the password comes from `HDD_DB_PASS`, as for `be`) and `AGENTSERVER_JWT_SECRET`, exposing port 8091 to nginx only.
 - **nginx** (prod box, changed by the user): in the `sm.jkurapati.com` server block, add
 
   ```nginx
@@ -537,14 +541,14 @@ Passwords must be at least 12 characters. They never appear in argv, logs or err
       auth_basic off;                       # app-level auth instead
       client_max_body_size 2m;
       proxy_read_timeout 90s;
-      proxy_pass http://<agentsync host>:8091;
+      proxy_pass http://<agentserver host>:8091;
       proxy_set_header X-Real-IP $remote_addr;
       proxy_set_header X-Forwarded-Proto $scheme;
   }
   location /agent/v1/auth/ {
       auth_basic off;
       limit_req zone=agent_auth burst=5 nodelay;
-      proxy_pass http://<agentsync host>:8091;
+      proxy_pass http://<agentserver host>:8091;
       proxy_set_header X-Real-IP $remote_addr;
       proxy_set_header X-Forwarded-Proto $scheme;
   }
@@ -557,6 +561,6 @@ Passwords must be at least 12 characters. They never appear in argv, logs or err
 
 - **Housekeeping**: each task deletes only rows past its cutoff, and leaves rows just inside it; a table with more than 5,000 expired rows is emptied over several batches; tombstones at or below the watermark go, those above it stay; one failing task doesn't stop the others.
 - **Unit**: batch validation (including empty batches and `to_version` above the last `v`; `from_version = to_version` is `400`); per-entry validation puts bad entries in `rejected` and still acks the range; a bulk failure (class `23`) rolls back to the statement's savepoint, falls back to per-entry savepoints and rejects only the bad entry, while a non-data error returns `500` with nothing applied; a rejected upsert of a key that has an older row leaves a tombstone, not the old row; a path near 4 KB (and a listing of a near-4 KB parent plus child) stores fine; a replayed range with different contents is a duplicate, not `422`; the apply algorithm (full duplicate, partial overlap, out-of-order ranges, range merging and watermark advance, stream reset, stale upsert after a newer delete loses to the tombstone, delete older than a live row ignored, tombstone GC below the watermark); physical-drive matching for every row of the matching table, including the clone case, a serial filled in later, and ambiguous candidates; a property test that applies random permutations of the same batches and gets identical tables; semver decisions; refresh rotation, a replay within 30 s getting a fresh pair (and the orphaned successor revoked), a second replay, a replay after 30 s, a replay after the successor was used, and a later presentation of the grace-revoked successor all revoking the family; the login lockout per (username, IP), so failures from one IP don't lock out another; `426` on normal endpoints but not on health or handshake; `X-Agent-Protocol` checked; idempotency replay and conflict; the gzip size cap.
-- **Store tests** against a real Postgres (a CI service container locally; skipped when `AGENTSYNC_TEST_DB` is unset), each test in its own schema.
+- **Store tests** against a real Postgres (a CI service container locally; skipped when `AGENTSERVER_TEST_DB` is unset), each test in its own schema.
 - **HTTP tests** with `httptest.Server`: full login → open drive → changes → duplicate replay flows.
-- **Contract**: golden JSON fixtures in `agentsync/wire/testdata/`, used by both the server tests and the driveagent client tests, so the two sides can't drift.
+- **Contract**: golden JSON fixtures in `agent/wire/testdata/`, used by both the server tests and the driveagent client tests, so the two sides can't drift.

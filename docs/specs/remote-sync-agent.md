@@ -2,12 +2,12 @@
 
 **Status:** proposed (not implemented). The overview and decisions are in [`remote-sync.md`](remote-sync.md); the server API is in [`remote-sync-server.md`](remote-sync-server.md).
 
-This covers what changes in `agent/linux/`: what each command uploads, why the remote is required, configuration, new commands, the local change feed in `state.db` and its synced marker, and the uploader that sends the feed to `agentsync`.
+This covers what changes in `agent/client/`: what each command uploads, why the remote is required, configuration, new commands, the local change feed in `state.db` and its synced marker, and the uploader that sends the feed to `agentserver`.
 
 ## New packages
 
 ```
-agent/linux/internal/
+agent/client/internal/
   version/     Version ("0.1.0"), Protocols ([]int{1}); `driveagent version` prints them
   remote/      HTTP client: health, handshake, auth, drives, changes; error classification
   creds/       agent.json + credentials.json load/save, file lock, refresh with race handling
@@ -25,9 +25,7 @@ Releases are built for `linux/amd64`, `darwin/amd64` (Intel Macs) and `darwin/ar
 - External drives mount under `/Volumes/<name>`, so `--drive-root /Volumes/Seagate1`.
 - The binaries are unsigned. They run as-is when downloaded with `curl`; a browser download needs `xattr -d com.apple.quarantine driveagent` once.
 
-The module stays in `agent/linux/` for now.
-
-New dependencies: `golang.org/x/term` (password prompt without echo), `github.com/gofrs/flock` (credentials and upload locks), and `github.com/jyothri/bhandaar/agentsync/wire`, a standard-library-only module resolved from the same checkout with `replace … => ../../agentsync/wire` (see [Shared wire module](remote-sync-server.md#shared-wire-module)).
+New dependencies: `golang.org/x/term` (password prompt without echo), `github.com/gofrs/flock` (credentials and upload locks), and `github.com/jyothri/bhandaar/agent/wire`, a standard-library-only module resolved from the same checkout with `replace … => ../wire` (see [Shared wire module](remote-sync-server.md#shared-wire-module)).
 
 ## What each command uploads
 
@@ -96,7 +94,7 @@ Precedence: flag > environment > `<state-dir>/config.json` > default.
 {"remote_url": "https://sm.jkurapati.com", "lan_addr": "192.168.1.118:443"}
 ```
 
-The agent calls `<remote-url>/agent/health`, `<remote-url>/agent/v1/…`. It refuses `http://` URLs unless the host is `localhost`/`127.0.0.1` (for local dev against `agentsync` on port 8091).
+The agent calls `<remote-url>/agent/health`, `<remote-url>/agent/v1/…`. It refuses `http://` URLs unless the host is `localhost`/`127.0.0.1` (for local dev against `agentserver` on port 8091).
 
 ### Reaching the server from the LAN
 
@@ -460,7 +458,7 @@ Suppose the server applies a batch and commits, but the response is lost (connec
 
 ## Wire mapping
 
-| Local | Wire (`agentsync/wire`) |
+| Local | Wire (`agent/wire`) |
 |---|---|
 | `files` row | `{"kind":"file","op":"upsert","v","path","size","mtime_unix","mode","content_hash","hash_algo","status","error_message","scanned_at"}` |
 | `file` tombstone | `{"kind":"file","op":"delete","v","path"}` |
@@ -472,7 +470,7 @@ Suppose the server applies a batch and commits, but the response is lost (connec
 
 ## Testing
 
-All of these run against a fake `agentsync` (`httptest.Server`) built on the shared `wire` types and golden fixtures.
+All of these run against a fake `agentserver` (`httptest.Server`) built on the shared `wire` types and golden fixtures.
 
 - **Feed**: versions are strictly increasing and unique across `UpsertFiles`, `DeleteFiles` and `SyncDirListings`; a `last_seen_at`-only touch doesn't bump; a comparison update doesn't bump; a key appears at most once (row or tombstone); `ClearDrive` resets the stream and the marker; the migration backfill numbers existing rows. There's also a two-process test: two `scan`s on different drives with the uploader reading concurrently, and no row missed.
 - **History skipped by `scan`**: with pending history on the drive, `scan` uploads only entries above `S` (including superseded history entries at their new version) and leaves the rest pending; with no pending history, the session continues the watermark and no new range appears.
@@ -493,4 +491,4 @@ All of these run against a fake `agentsync` (`httptest.Server`) built on the sha
 - **LAN address**: with a fake TLS server for `sm.jkurapati.com` (test CA): `lan_addr` reachable → used; nothing listening at `lan_addr` → falls back to DNS within about 1 s; a server at `lan_addr` with a certificate for another name → falls back, and no request (so no token) reaches it; after a failure, `lan_addr` isn't retried for 5 minutes; without `lan_addr`, only DNS is used.
 - **Paths**: non-UTF-8 file and directory names round-trip through `path_b64` / `child_b64`, and the server stores the raw bytes. Valid UTF-8 is never sent as `_b64`. A path near Linux's 4 KB limit uploads without error.
 - **Status classification**: an HTML `413` from nginx is handled like the JSON one (batch halved); HTML `502`/`504` are transient.
-- **End-to-end** (manual, per release): run `agentsync` locally with Postgres in Docker; `driveagent login --remote-url http://localhost:8091`; scan a folder, kill the remote mid-scan, restore it, re-scan, and check only the re-scan's changes reached Postgres; run `sync` and check Postgres matches `state.db`; then check a normal scan uploads everything it writes.
+- **End-to-end** (manual, per release): run `agentserver` locally with Postgres in Docker; `driveagent login --remote-url http://localhost:8091`; scan a folder, kill the remote mid-scan, restore it, re-scan, and check only the re-scan's changes reached Postgres; run `sync` and check Postgres matches `state.db`; then check a normal scan uploads everything it writes.
