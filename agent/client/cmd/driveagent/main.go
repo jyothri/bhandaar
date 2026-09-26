@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/jyothri/bhandaar/agent/client/internal/compare"
+	"github.com/jyothri/bhandaar/agent/client/internal/identity"
 	"github.com/jyothri/bhandaar/agent/client/internal/report"
 	"github.com/jyothri/bhandaar/agent/client/internal/scan"
 	"github.com/jyothri/bhandaar/agent/client/internal/store"
@@ -80,7 +81,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `driveagent — track and compare two drives for divergence (no writes to either drive)
 
 Usage:
-  driveagent scan    --drive-id <id> --path <folder> [--drive-root <dir>] [--backup-root <rel-path>] [--state-dir <dir>] [--workers N] [--replace-root]
+  driveagent scan    --drive-id <id> --path <folder> [--drive-root <dir>] [--backup-root <rel-path>] [--state-dir <dir>] [--workers N] [--replace-root] [--accept-identity-change]
   driveagent compare --drive-a <id> --drive-b <id> [--drive-a-paths <rel,rel,...>] [--drive-b-paths <rel,rel,...>] [--state-dir <dir>]
   driveagent report  --drives <id,id,...> [--type text,json,html] [--report-out <dir>] [--include-mac-metadata] [--state-dir <dir>]
   driveagent login         [--username <name>] [--password-stdin] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
@@ -130,6 +131,7 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	stateDir := fs.String("state-dir", defaultStateDir(), "directory holding the checkpoint database")
 	workers := fs.Int("workers", 2, "concurrent hashing workers (keep low for spinning USB drives)")
 	replaceRoot := fs.Bool("replace-root", false, "allow --drive-id to be repointed at a different --drive-root than it was last scanned at, discarding that drive-id's old checkpoint data first")
+	acceptIdentity := fs.Bool("accept-identity-change", false, "scan even though the drive at --drive-root has a different filesystem ID than --drive-id was last scanned on (e.g. it was reformatted); keeps the checkpoint data")
 	if err := fs.Parse(args); err != nil {
 		return usageErr("%v", err)
 	}
@@ -168,6 +170,10 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if prepared.Replaced {
 		fmt.Fprintf(stdout, "discarded drive %q's checkpoint data from its previous drive-root (--replace-root)\n", *driveID)
 	}
+	// The wrong-drive guard, before anything is walked.
+	if err := checkDriveIdentity(st, prepared, *acceptIdentity, stderr); err != nil {
+		return err
+	}
 
 	stats, err := scan.Run(ctx, st, prepared, opts)
 	fmt.Fprintf(stdout, "done in %s: seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d deleted=%d\n",
@@ -186,6 +192,42 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return &exitError{code: exitLocal, err: err}
 	}
 	return err
+}
+
+// detectIdentity is identity.Detect; tests replace it.
+var detectIdentity = identity.Detect
+
+// checkDriveIdentity reads the identity of the drive at the drive root and
+// compares it with what's recorded for the drive id: a different filesystem
+// is refused; anything else is recorded, with a warning where it's notable.
+// After --replace-root the drive starts over, so there's nothing to compare.
+func checkDriveIdentity(st *store.Store, p scan.Prepared, accept bool, stderr io.Writer) error {
+	found, err := detectIdentity(p.DriveRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "warning: couldn't read the identity of the drive at %s: %v\n", p.DriveRoot, err)
+	}
+	rec, err := st.GetDriveIdentity(p.DriveID)
+	if err != nil {
+		return err
+	}
+	stored := identity.Identity{FSUUID: rec.FSUUID, FSType: rec.FSType, Source: rec.FSUUIDSource, HWSerial: rec.HWSerial}
+	if p.Replaced {
+		stored = identity.Identity{}
+	}
+	d := identity.Check(p.DriveID, p.DriveRoot, stored, found, accept)
+	if d.Refusal != "" {
+		return errors.New(d.Refusal)
+	}
+	for _, w := range d.Warnings {
+		fmt.Fprintf(stderr, "warning: %s\n", w)
+	}
+	if !d.Save && !rec.SeenAt.IsZero() {
+		return nil
+	}
+	return st.SetDriveIdentity(p.DriveID, store.DriveIdentity{
+		FSUUID: d.Record.FSUUID, FSType: d.Record.FSType, FSUUIDSource: d.Record.Source, HWSerial: d.Record.HWSerial,
+		SeenAt: time.Now(),
+	})
 }
 
 func runCompare(args []string) error {

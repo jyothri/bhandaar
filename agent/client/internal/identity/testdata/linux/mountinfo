@@ -1,0 +1,7 @@
+24 31 0:22 / /sys rw,nosuid,nodev,noexec,relatime shared:6 - sysfs sysfs rw
+25 31 0:23 / /proc rw,nosuid,nodev,noexec,relatime shared:12 - proc proc rw
+28 31 0:25 / /run rw,nosuid,nodev,noexec,relatime shared:5 - tmpfs tmpfs rw,size=1615720k,mode=755,inode64
+31 1 259:2 / / rw,relatime shared:1 - ext4 /dev/nvme0n1p2 rw,errors=remount-ro
+57 31 8:5 / /mnt/wd1tb rw,relatime shared:91 - ext4 /dev/sda5 rw
+172 31 8:33 / /media/jyothri/Seagate1 rw,nosuid,nodev,relatime shared:388 - ntfs3 /dev/sdc1 rw,uid=1000,gid=1000,iocharset=utf8
+432 31 8:17 / /mnt/seagate2 rw,relatime shared:402 - fuseblk /dev/sdb1 rw,user_id=0,group_id=0,allow_other,blksize=4096

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>APFSContainerReference</key>
+	<string>disk5</string>
+	<key>APFSPhysicalStores</key>
+	<array>
+		<dict>
+			<key>APFSPhysicalStore</key>
+			<string>disk4s2</string>
+		</dict>
+	</array>
+	<key>BusProtocol</key>
+	<string>USB</string>
+	<key>DeviceIdentifier</key>
+	<string>disk5s1</string>
+	<key>FilesystemName</key>
+	<string>APFS</string>
+	<key>FilesystemType</key>
+	<string>apfs</string>
+	<key>Internal</key>
+	<false/>
+	<key>MountPoint</key>
+	<string>/Volumes/Backup</string>
+	<key>ParentWholeDisk</key>
+	<string>disk5</string>
+	<key>Size</key>
+	<integer>2000189177856</integer>
+	<key>VolumeName</key>
+	<string>Backup</string>
+	<key>VolumeUUID</key>
+	<string>1A2B3C4D-0000-4000-8000-00000000ABCD</string>
+</dict>
+</plist>

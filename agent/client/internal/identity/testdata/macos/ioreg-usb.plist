@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<dict>
+		<key>IOObjectClass</key>
+		<string>IOUSBHostDevice</string>
+		<key>USB Product Name</key>
+		<string>Magic Keyboard</string>
+		<key>USB Serial Number</key>
+		<string>KB0000000001</string>
+		<key>idVendor</key>
+		<integer>1452</integer>
+	</dict>
+	<dict>
+		<key>IOObjectClass</key>
+		<string>IOUSBHostDevice</string>
+		<key>USB Product Name</key>
+		<string>BUP Slim BK</string>
+		<key>USB Serial Number</key>
+		<string>na8f2k1x</string>
+		<key>IORegistryEntryChildren</key>
+		<array>
+			<dict>
+				<key>IOObjectClass</key>
+				<string>IOUSBHostInterface</string>
+				<key>IORegistryEntryChildren</key>
+				<array>
+					<dict>
+						<key>IOObjectClass</key>
+						<string>IOMedia</string>
+						<key>BSD Name</key>
+						<string>disk4</string>
+						<key>Whole</key>
+						<true/>
+						<key>Size</key>
+						<integer>2000398934016</integer>
+						<key>Content</key>
+						<string>GUID_partition_scheme</string>
+						<key>IORegistryEntryChildren</key>
+						<array>
+							<dict>
+								<key>BSD Name</key>
+								<string>disk4s2</string>
+								<key>Whole</key>
+								<false/>
+							</dict>
+						</array>
+					</dict>
+				</array>
+			</dict>
+		</array>
+	</dict>
+	<dict>
+		<key>IOObjectClass</key>
+		<string>IOUSBHostDevice</string>
+		<key>USB Product Name</key>
+		<string>USB 3.0 SATA Bridge</string>
+		<key>kUSBSerialNumberString</key>
+		<string>000000000000</string>
+		<key>IORegistryEntryChildren</key>
+		<array>
+			<dict>
+				<key>BSD Name</key>
+				<string>disk6</string>
+				<key>Data</key>
+				<data>
+				AAEC
+				Aw==
+				</data>
+			</dict>
+		</array>
+	</dict>
+</array>
+</plist>

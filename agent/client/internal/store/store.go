@@ -957,3 +957,42 @@ func joinPath(parent, name string) string {
 	}
 	return parent + "/" + name
 }
+
+// DriveIdentity is a drive's recorded identity (see internal/identity).
+// Empty strings mean not known.
+type DriveIdentity struct {
+	FSUUID, FSType, FSUUIDSource, HWSerial string
+	SeenAt                                 time.Time
+}
+
+// GetDriveIdentity returns the identity recorded for driveID (zero if none,
+// or if the drive has no row).
+func (s *Store) GetDriveIdentity(driveID string) (DriveIdentity, error) {
+	var id DriveIdentity
+	var uuid, typ, src, serial sql.NullString
+	var seen sql.NullTime
+	err := s.db.QueryRow(`SELECT fs_uuid, fs_type, fs_uuid_source, hw_serial, identity_seen_at FROM drives WHERE drive_id = ?`, driveID).
+		Scan(&uuid, &typ, &src, &serial, &seen)
+	if err == sql.ErrNoRows {
+		return id, nil
+	}
+	if err != nil {
+		return id, err
+	}
+	return DriveIdentity{FSUUID: uuid.String, FSType: typ.String, FSUUIDSource: src.String, HWSerial: serial.String, SeenAt: seen.Time}, nil
+}
+
+// SetDriveIdentity records a drive's identity. The drive must have a row
+// (scan.Prepare records it first).
+func (s *Store) SetDriveIdentity(driveID string, id DriveIdentity) error {
+	null := func(v string) sql.NullString { return sql.NullString{String: v, Valid: v != ""} }
+	res, err := s.db.Exec(`UPDATE drives SET fs_uuid = ?, fs_type = ?, fs_uuid_source = ?, hw_serial = ?, identity_seen_at = ? WHERE drive_id = ?`,
+		null(id.FSUUID), null(id.FSType), null(id.FSUUIDSource), null(id.HWSerial), id.SeenAt.UTC(), driveID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("no drive %q recorded", driveID)
+	}
+	return nil
+}
