@@ -48,6 +48,7 @@ A consequence: a file that hasn't changed since an earlier scan that never uploa
 
 Every `scan` uploads, and there are no modes: the upload is part of the command's success. If the remote can't be reached or refuses the agent, the command fails. (`compare` and `report` still never contact the remote.)
 
+0. **Take the drive's [upload lock](#upload-lock)**, waiting if a `sync` holds it. The lock comes first: it's the only thing that keeps two scans of one drive apart, and it stops `--replace-root`'s `ClearDrive` (step 2) from running while a `sync` is uploading that drive.
 1. **Preflight, before the drive is touched:** health → handshake → token (refresh, or fail with `not logged in: run "driveagent login"`). Health has a 5 s timeout and 2 retries, 1 s apart. Any failure exits with code 3 (unreachable or auth) or 4 (upgrade required) before the scan starts.
 2. **Local drive checks, before the upload starts.** `cmd/driveagent`, not `scan.Run`, does these, in this order:
    1. The `--drive-root` check (`RootConflict` / `--replace-root`). With `--replace-root`, `ClearDrive` runs here.
@@ -61,10 +62,10 @@ Every `scan` uploads, and there are no modes: the upload is part of the command'
 5. **After the scan**, the uploader drains the rest of the current scan's data (the directory listings, deletions and the scan-run finish are all written at the end of a scan), under the same `--remote-timeout` rule. Exit 0 only once the server has acknowledged all of it.
 
 **Ctrl-C.** Today an interrupted scan returns nil and exits 0. Under the table below, 0 means "everything acknowledged", so that changes:
-- The **first** Ctrl-C (or `SIGTERM`) stops the walk. The uploader then drains what the scan already wrote, under the same `--remote-timeout` rule, and the command exits **130** (the usual code for SIGINT), because the scan is incomplete.
-- A **second** Ctrl-C aborts the drain at once, still exiting 130.
+- The **first** Ctrl-C (or `SIGTERM`) stops the walk. The uploader then drains what the scan already wrote, under the same `--remote-timeout` rule, and the command exits **130** for SIGINT or **143** for SIGTERM (128 + the signal number, as shells report them), because the scan is incomplete.
+- A **second** signal aborts the drain at once, with the same exit code.
 
-The uploader cancels the scan with `context.WithCancelCause`, so `main` can tell a remote failure (exit 3 or 4) from a user interrupt (exit 130).
+The uploader cancels the scan with `context.WithCancelCause`, so `main` can tell a remote failure (exit 3 or 4) from a signal (exit 130 or 143).
 
 Whatever a failed or interrupted scan recorded locally but didn't upload becomes history. A re-run of `scan` doesn't send it, because the re-run skips files it already hashed. `driveagent sync` does. The failure message says so.
 
@@ -77,7 +78,8 @@ Whatever a failed or interrupted scan recorded locally but didn't upload becomes
 | 2 | Usage error, as today |
 | 3 | Remote unavailable, auth failure or upload failure |
 | 4 | Agent upgrade required |
-| 130 | Interrupted by Ctrl-C / `SIGTERM`; what was already written was drained, unless a second Ctrl-C aborted that |
+| 130 | Interrupted by Ctrl-C (`SIGINT`); what was already written was drained, unless a second signal aborted that |
+| 143 | Stopped by `SIGTERM`; otherwise as 130 |
 
 ## Configuration
 
@@ -125,6 +127,10 @@ Both files live in the state dir (default `~/.driveagent/`), created with mode `
 - `credentials.json`: `{"remote_url", "username", "access_token", "access_expires_at", "refresh_token", "refresh_expires_at"}`. It is written atomically (temp file + rename).
 
 Tokens are bound to `remote_url`. If the configured URL differs from the one in `credentials.json`, the agent is treated as not logged in.
+
+**A state dir syncs to exactly one remote.** The stream ids and the synced marker are per drive, not per remote, so pointing one `state.db` at two servers (say `dev.sm` and then prod) makes each server look like it lost coverage to the other: every switch mints new streams and re-uploads every drive, plus a re-login. To try another server, use a copy of the state dir (`--state-dir`) for it.
+
+**Never copy a state dir to another machine and keep using both.** Both copies would share the `agent_id` and the stream ids, and the [reconcile](#reconciling) rules would make them wipe each other's upload on the server, one full re-upload per alternation. Give each machine its own state dir, created by its own `driveagent`. (Detecting a clone, for example by storing `/etc/machine-id` or macOS's `IOPlatformUUID` in `agent.json` and minting a new `agent_id` on a mismatch, is deferred; see the overview's [Operational rules](remote-sync.md#operational-rules).)
 
 The access token is refreshed when it has less than 60 s left, or after a `401 TOKEN_EXPIRED`. Refresh happens under an exclusive `flock` on `<state-dir>/credentials.lock`:
 1. Take the lock, then re-read `credentials.json`. If another process already rotated the token and the new access token is valid, use it and stop.
@@ -271,6 +277,8 @@ CREATE INDEX IF NOT EXISTS idx_tombstones_feed ON sync_tombstones(drive_id, row_
 
 On a large `state.db` the backfill rewrites every row, which can take a while. The agent prints `upgrading state.db (one-time, N rows)…` with progress. Another `driveagent` started meanwhile gives up after its ~5 s busy timeout; that's expected, and it just needs re-running once the migration is done.
 
+**Don't run an older `driveagent` on a migrated `state.db`.** A binary from before the migration still opens the file, but it doesn't bump `row_version`, write tombstones or advance `sync_clock`, so what it writes is never uploaded and nothing reports it. This is easy to hit on a machine where builds are copied around and an older binary sits earlier on `PATH`. After upgrading, check `driveagent version` and remove old copies. (Enforcing this, for example by having the migration move the database to a new file name so that an old binary starts a fresh, obviously empty one, is deferred; see the overview's [Operational rules](remote-sync.md#operational-rules).)
+
 ### Version allocation
 
 - Each version is unique across the whole database. Inside a write transaction, `UPDATE sync_clock SET v = v + ? RETURNING v` reserves a block of `n` versions, and the rows are numbered from that block.
@@ -300,9 +308,10 @@ A feed entry of a drive is **synced** if its version is at or below the drive's 
 
 A batch covers `(from_version, to_version]` (see [batches](#batches)). The marker changes **only after the server has acknowledged the batch**, meaning it committed it and replied. Nothing is written locally when a batch is sent. After the acknowledgement, in one short write transaction:
 
-1. Replace the local marker with the `acked_ranges` in the response: the first range from 0 is the watermark, the rest go in `sync_ranges`. The local marker is always a **copy of the server's ranges**, never merged further locally. That's what lets [reconciling](#reconciling) notice when either side goes back in time.
-2. Record any `rejected` entries from the response in `sync_rejected` (see [Rejected entries](#rejected-entries)).
-3. Set `synced_at`, and prune tombstones that are now synced.
+1. **Check the response still covers the old marker**, plus the batch's own `(from, to]`. If it doesn't, the server went back in time mid-session (a restore while the agent was uploading). Copying its shrunken ranges would erase the evidence, so the marker is left alone, the session stops, and the drive is re-opened and [reconciled](#reconciling), which mints a new stream.
+2. Replace the local marker with the `acked_ranges` in the response: the first range from 0 is the watermark, the rest go in `sync_ranges`. The local marker is always a **copy of the server's ranges**, never merged further locally. That's what lets [reconciling](#reconciling) notice when either side goes back in time.
+3. Record any `rejected` entries from the response in `sync_rejected` (see [Rejected entries](#rejected-entries)).
+4. Set `synced_at`, and prune tombstones that are now synced.
 
 A batch that fails, times out or is interrupted leaves the marker where it was, so its rows are still pending and the next run sends them again.
 
@@ -314,15 +323,15 @@ A **gap** is the interval between the watermark (or the end of one range) and th
 
 ### Reconciling
 
-Whenever a drive is opened (`PUT /drives/{id}` at the start of a `scan` upload, in `sync`, and in `remote-status` under the lock), the server returns `acked_ranges`. The agent compares them with its local marker (its copy of the server's ranges as of the last acknowledgement) and with its local clock:
+Whenever a drive is opened (`PUT /drives/{id}` at the start of a `scan` upload, in `sync`, and in `remote-status` under the lock), the server returns `acked_ranges`. (Every acknowledgement is also checked for lost coverage; see [Recording an acknowledgement](#recording-an-acknowledgement).) The agent compares them with its local marker (its copy of the server's ranges as of the last acknowledgement) and with its local clock:
 
 | Check | Meaning | Action |
 |---|---|---|
-| The server's highest acked version is **above the local `sync_clock.v`** | **`state.db` went back in time**: a Time Machine restore, a VM snapshot, or `~/.driveagent` copied from a backup. The restored DB still has the old stream id but a lower clock, so its next versions would collide with ranges the server already covers, and be skipped as duplicates | **New stream**: mint a new `sync_stream_id`, clear the marker, and `PUT` again. The server wipes the drive, and the whole drive is re-uploaded |
+| The server's highest acked version is **above the local `sync_clock.v`** | **`state.db` went back in time**: a Time Machine restore, a VM snapshot, or `~/.driveagent` copied from a backup. The restored DB still has the old stream id but a lower clock, so its next versions would collide with ranges the server already covers, and be skipped as duplicates | **New stream**: mint a new `sync_stream_id`, clear the marker and `sync_rejected`, and `PUT` again. The server wipes the drive, and the whole drive is re-uploaded |
 | The server's ranges **don't cover everything the local marker covered** | **The server went back in time** (a database restore). Rows could simply be re-sent, but deletions couldn't: synced tombstones were pruned locally, so the server would keep files that no longer exist | **New stream**, as above |
 | The server covers **more** than the local marker, but nothing above the local clock | The process died between the server's commit and the local marker update | Adopt the server's ranges; nothing is re-sent |
 | Same ranges | Normal | Nothing |
-| `reset: true` | The server started a new stream (for example, for the new stream id sent above) | Clear the marker: watermark 0, no ranges |
+| `reset: true` | The server started a new stream (for example, for the new stream id sent above) | Clear the marker (watermark 0, no ranges) and `sync_rejected` |
 
 After a new stream, everything is history: `scan` still uploads only what it writes, and `sync` re-uploads the rest. The legitimate "server has more" case always stays at or below the local clock, so it can't be confused with a rewound `state.db`.
 
@@ -437,7 +446,11 @@ Each batch claims to cover `(from_version, to_version]`: every pending entry of 
 
 A few entries can fail on the server every time: for example, an entry that breaks a server-side limit. Retrying such an entry forever would block the whole drive. So the server validates **per entry**. It acknowledges the batch's range, skips the bad entries, and lists them in the response as `rejected: [{"v": 18241, "reason": "…"}]`.
 
-The agent records each one in `sync_rejected`, and `remote-status` lists them per drive. A rejected entry counts as synced for the marker. If the file changes later, its new version is uploaded (and validated) again like any other change. The server spec has the [details](remote-sync-server.md#apply-algorithm).
+The agent records each one in `sync_rejected`, and `remote-status` lists them per drive. A rejected entry counts as synced for the marker. If the file changes later, its new version is uploaded (and validated) again like any other change. The server doesn't keep the key's older row: it replaces it with a tombstone at the rejected version, so the server shows the file as missing rather than with a stale size and hash. The server spec has the [details](remote-sync-server.md#apply-algorithm).
+
+`sync_rejected` is kept current:
+- When a batch is acknowledged, rows for any key that the batch carried at a newer version (and that wasn't rejected again) are deleted: the key is on the server now.
+- It is cleared whenever the drive gets a new stream (reconcile or `reset: true`), as well as by `ClearDrive`. The whole drive is re-uploaded then, and the same `row_version` may be rejected again; stale rows would otherwise collide on the primary key.
 
 ### Why a lost response can't duplicate data
 
@@ -467,11 +480,11 @@ All of these run against a fake `agentsync` (`httptest.Server`) built on the sha
 - **`sync`**: uploads every drive's history after a successful handshake and nothing before it; a failed handshake uploads nothing and exits 3 or 4; gaps are closed oldest first, and after them the drive is one watermark with no ranges; an empty gap is closed with an empty batch; an interrupted `sync` (killed between batches, and between the server's commit and the local marker update) resumes and ends with the same server state; a drive locked by a running `scan` is skipped; after the migration, a pre-existing `state.db` uploads in full.
 - **Out-of-order safety**: `scan` deletes (or rehashes) a file whose older version is still pending history; a later `sync` never resurrects or downgrades it on the server. A property test applies random interleavings of the same batches to the fake server and checks the result equals the local state.
 - **Synced marker**: it moves only after an acknowledgement, never on send or on a failed batch; after each ack it equals the server's returned ranges; an empty-gap batch merges ranges; a gap whose last entry is at its upper end sends no extra empty batch; `reset: true` clears it; `sync_summary.pending` matches the feed query.
-- **Reconciling**: a `state.db` restored from an older copy (server's highest acked version above the local clock) mints a new stream and re-uploads; a server restored from backup (missing coverage the marker had, including lost deletions) mints a new stream and re-uploads, and afterwards the server has no deleted files; a server ahead of the marker but at or below the local clock is adopted without re-sending; `sync` and `remote-status` never reconcile a drive whose upload lock a scan holds.
+- **Reconciling**: a `state.db` restored from an older copy (server's highest acked version above the local clock) mints a new stream and re-uploads; a server restored from backup (missing coverage the marker had, including lost deletions) mints a new stream and re-uploads, and afterwards the server has no deleted files; a server restored while a session is running (an ack whose ranges no longer cover the old marker) is caught at that ack, not copied into the marker; a server ahead of the marker but at or below the local clock is adopted without re-sending; `sync` and `remote-status` never reconcile a drive whose upload lock a scan holds.
 - **Replace-root ordering**: with `--replace-root`, `ClearDrive` (one transaction) and the new stream id happen before the first `PUT`, so no row of the new root is uploaded on the old stream, and the server has none of the old root's files afterwards.
 - **Retries**: a retried batch sends byte-identical content; after a restart, a re-read page with the same range is accepted as a duplicate.
-- **Rejected entries**: a batch with one entry the server rejects is acknowledged; the entry is recorded in `sync_rejected` and shown by `remote-status`; the drive keeps syncing.
-- **Ctrl-C**: the first interrupt drains and exits 130; a second aborts the drain and exits 130; a remote failure still exits 3 (the cancel cause tells them apart).
+- **Rejected entries**: a batch with one entry the server rejects is acknowledged; the entry is recorded in `sync_rejected` and shown by `remote-status`; the drive keeps syncing; the row goes once a newer version of the key is acked; a new stream clears the table, and re-uploading the same rejected entry doesn't hit its primary key.
+- **Ctrl-C**: the first interrupt drains and exits 130 (143 for `SIGTERM`); a second aborts the drain with the same code; a remote failure still exits 3 (the cancel cause tells them apart).
 - **SQLite**: two processes writing to the feed concurrently never fail with `SQLITE_BUSY_SNAPSHOT` (immediate transactions); the backfill on a large fixture prints progress.
 - **Idempotency**: the fake server drops the response after applying; the retry gets a duplicate; the final server state equals the local state.
 - **Resync**: `STREAM_MISMATCH`, `DRIVE_NOT_OPEN`, `413` batch halving.

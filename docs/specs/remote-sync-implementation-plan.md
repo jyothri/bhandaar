@@ -12,7 +12,7 @@ The specs say *what* to build; this says *in what order*, *in which files*, *how
 
 ## Ground rules
 
-- **Every PR is mergeable on its own and keeps `main` working.** A plain `driveagent scan` stays exactly as today (local only, no login) until M6. Server endpoints that aren't used yet are harmless.
+- **Every PR is mergeable on its own and keeps `main` working.** A plain `driveagent scan` stays local only, with no login, until M6. Before that, only PR 3 changes what a user sees: the wrong-drive guard, and an interrupted scan exiting 130 (143 for `SIGTERM`) instead of 0. Server endpoints that aren't used yet are harmless.
 - **One PR per milestone: six in total.** Each PR is split into **parts**, and each part is its own commit. The parts are in the order to review them, so a large PR can be read one commit at a time. Part sizes: S (a few hundred lines), M (up to ~1,000), L (more, usually because of tests).
 - **Tests come with the code**, in the same part. The agent has **no tests today**, so PR 2 starts by adding a test harness.
 - **Docs move with the code.** When a behaviour ships, [`drive-comparison-agent.md`](drive-comparison-agent.md), `agent/linux/README.md`, [`architecture.md`](../architecture.md) and `CLAUDE.md` are updated in the same PR. The remote-sync specs change status from "proposed" to "implemented" section by section.
@@ -31,6 +31,21 @@ The specs say *what* to build; this says *in what order*, *in which files*, *how
 | **M5** `driveagent sync` | 5 | PR 5 | The uploader, and `sync` for history | First `sync` of existing data |
 | **M6** Upload in `scan` | 6 | PR 6 | Every scan uploads; remote required | Every machine must be logged in |
 | **M7** Rollout and follow-ups | 7 | – | End-to-end verification; later: UI, server-side compare | Set `AGENTSYNC_LATEST_AGENT_VERSION` per release |
+
+### Agent versions
+
+`version-check` (CI spec) demands a bump in every PR that touches release-relevant files, which includes `agentsync/wire`. The sequence, decided up front:
+
+| PR | Agent version | Why |
+|---|---|---|
+| PR 1 | – | Adds `agentsync/wire`, but the `driveagent` workflow doesn't exist yet, so nothing checks or releases it |
+| PR 2 | `0.1.0` | First release: `version`, `login`, `logout`, `remote-status` |
+| PR 3 | `0.2.0` | The `state.db` migration, the guard, exit codes |
+| PR 4 | `0.2.1` | Only the new `wire` types for drives and changes; the agent's behaviour is unchanged. A patch release is the price of keeping `wire` in one module |
+| PR 5 | `0.3.0` | `driveagent sync` |
+| PR 6 | `0.4.0` | Every `scan` uploads (the behaviour change) |
+
+After each release, the user raises `AGENTSYNC_LATEST_AGENT_VERSION` in the prod `.env` (M7). `AGENTSYNC_MIN_AGENT_VERSION` only needs raising when a release is required.
 
 **Critical path:** M1 → M4 → M5 → M6 on the server side, and M2 → M3 → M5 → M6 on the agent side. M2 and M3 can run in parallel with M1 and M4, because they don't need upload endpoints. M3 needs M2 for the test harness, the `version` package and agent CI.
 
@@ -81,7 +96,7 @@ What it changed in the spec (agent spec, [Drive identity](remote-sync-agent.md#d
 - `agentsync/wire/`: `health.go` (`HealthResponse`), `errors.go` (`ErrorResponse`, code constants), `wire_test.go` (fails if `go.mod` gains a `require`).
 - `agentsync/go.mod`: requires `wire` with `replace => ./wire`; dependencies `pgx/v5`.
 - `agentsync/cmd/agentsync/main.go`: subcommands `serve` (default) and `housekeeping` (stub for now).
-- `agentsync/internal/config/`: reads the env vars in the server spec's Configuration table, and refuses to start without `AGENTSYNC_JWT_SECRET` (≥ 32 bytes).
+- `agentsync/internal/config/`: reads the env vars in the server spec's Configuration table (including `AGENTSYNC_TRUSTED_PROXIES`), and refuses to start without `AGENTSYNC_JWT_SECRET` (≥ 32 bytes).
 - `agentsync/internal/store/`: pgx pool from `DB_*`, and a migration runner. Migrations are numbered SQL files embedded with `embed.FS`, applied in order inside one transaction each, and recorded in `agentsync_schema_migrations`. Migration 1 creates only that table.
 - `agentsync/internal/api/`: `ServeMux` routes; `GET /agent/health` (DB ping, 1 s timeout; `200` or `503`); a JSON error helper matching `be`'s shape; middleware for the request body limit (16 KiB default), request logging and `X-Real-IP` (trusted only from the nginx address).
 - `agentsync/build/Dockerfile` and `agentsync/build/Dockerfile.dockerignore`, as in the CI spec.
@@ -93,12 +108,12 @@ What it changed in the spec (agent spec, [Drive identity](remote-sync-agent.md#d
 
 ### Part 2 · Users, auth and the request pipeline (L)
 
-**Migration 2:** `agent_users`, `agent_login_failures` (with `client_ip`), `agent_agents`, `agent_refresh_tokens`, and their indexes.
+**Migration 2:** `agent_users`, `agent_login_failures` (with `client_ip`), `agent_agents`, `agent_refresh_tokens` (with `parent_id`, `grace_used_at` and `revoked_reason`), `agent_idempotency_keys`, and their indexes. The idempotency table is here rather than in migration 3 because part 3's housekeeping cleans it.
 
 **Code**
 - `internal/auth/password.go`: argon2id hash and verify with a PHC string; a dummy hash for constant-time "no such user".
 - `internal/auth/jwt.go`: issue and verify HS256 access tokens (`sub`, `aid`, `iat`, `exp`, `jti`) with `golang-jwt/jwt/v5`.
-- `internal/auth/refresh.go`: 256-bit random tokens (`rt_` prefix), stored as `sha256`; rotation under `SELECT … FOR UPDATE`; the 30 s grace (accept once, issue a fresh pair, revoke the orphaned successor); reuse after that revokes the family.
+- `internal/auth/refresh.go`: 256-bit random tokens (`rt_` prefix), stored as `sha256`; rotation under `SELECT … FOR UPDATE`; the 30 s grace (accept once if the successor is unused, issue a fresh pair, revoke the orphaned successor with `revoked_reason = 'grace'`); reuse after that, or presenting a grace-revoked successor, revokes the family.
 - `internal/api/auth.go`: `POST /agent/v1/auth/login`, `/refresh`, `/logout`. Lockout per (username, `X-Real-IP`): 10 failures in 15 min gives `429` with `Retry-After`.
 - Middleware, in order:
   1. body limit;
@@ -109,7 +124,7 @@ What it changed in the spec (agent spec, [Drive identity](remote-sync-agent.md#d
 - `cmd/agentsync`: `user add | passwd | disable | list`. Passwords are prompted twice with no echo, at least 12 characters, and never logged. `disable` revokes all of the user's refresh tokens.
 - `wire/`: `LoginRequest`, `TokenResponse`, `RefreshRequest`.
 
-**Tests:** password round trip; constant-time path for an unknown user; JWT expiry and tampering; refresh rotation, grace replay, second replay revoking the family, replay after 30 s giving `REFRESH_REUSED`; two simultaneous refreshes serialised by the row lock; lockout per (username, IP) with a second IP unaffected; `426` everywhere except health and handshake; the admin CLI against Postgres.
+**Tests:** password round trip; constant-time path for an unknown user; JWT expiry and tampering; refresh rotation, grace replay, second replay revoking the family, replay after 30 s giving `REFRESH_REUSED`, the grace-revoked successor presented later revoking the family (theft by a replay within the window); two simultaneous refreshes serialised by the row lock; lockout per (username, IP) with a second IP unaffected; `426` everywhere except health and handshake; the admin CLI against Postgres.
 
 ### Part 3 · Handshake and housekeeping (S)
 
@@ -147,7 +162,7 @@ Part 2 adds the agent CI workflow, which runs these from then on.
 - `driveagent version` subcommand.
 - `agent/linux/scripts/version-check.sh`: the rules table in the CI spec. Test it locally against a scratch repo with tags.
 - `.github/workflows/driveagent.yml`: `test`, `version-check`, the `build` matrix (linux/amd64, darwin/amd64, darwin/arm64) and `release`.
-- `agent/linux/README.md`: an install section (`curl`, `SHA256SUMS`, macOS `xattr` note).
+- `agent/linux/README.md`: an install section (`curl`, `SHA256SUMS`, macOS `xattr` note), and the rule that a state dir belongs to one machine and syncs to one remote: never copy `~/.driveagent` to another machine and keep using both (overview, [Operational rules](remote-sync.md#operational-rules)).
 - Branch protection (user, after the first green run): require `test`, `version-check` and `build`.
 
 **Done when** merging PR 2 cuts `driveagent/v0.1.0` with three tarballs and `SHA256SUMS`, and `driveagent version` from a downloaded tarball prints `0.1.0 (<sha>)`.
@@ -218,13 +233,13 @@ Today `scan.Run` does the root check, `ClearDrive`, `UpsertDrive`, `SetBackupRoo
 - **`scan.Run(ctx, st, prepared, opts)`** takes over from there, starting at `StartScanRun`. It keeps an assertion that the drive row matches, rather than repeating the checks.
 - The slot between `Prepare` and `Run` is where part 3's wrong-drive guard goes, and where M6 reads `S` and starts the uploader.
 - **Exit codes** in `main`:
-  - errors carry a code: 1 local, 2 usage, 3 remote, 4 upgrade, 130 interrupt;
-  - `Interrupted` now exits **130**, not 0;
-  - on the first signal, cancel the walk with `context.WithCancelCause(ctx)` and cause `errUserInterrupt`; on a second signal, cancel the drain context. Until M6 there's no drain, so a single Ctrl-C exits 130;
+  - errors carry a code: 1 local, 2 usage, 3 remote, 4 upgrade, 130 `SIGINT`, 143 `SIGTERM`;
+  - `Interrupted` now exits **130** (or **143** for `SIGTERM`), not 0;
+  - on the first signal, cancel the walk with `context.WithCancelCause(ctx)` and cause `errUserInterrupt`; on a second signal, cancel the drain context. Until M6 there's no drain, so a single Ctrl-C exits 130 (143 for `SIGTERM`);
   - `main` maps the cancel cause to the exit code.
-- Update `drive-comparison-agent.md` (preflight order, exit 130) and the README.
+- Update `drive-comparison-agent.md` (preflight order, exit 130/143) and the README. The README also gets the rule not to run older binaries on the migrated `state.db` (overview, [Operational rules](remote-sync.md#operational-rules)).
 
-**Tests:** `Prepare` then `Run` behaves like today's `Run` (PR 2's harness tests pass unchanged, apart from the call signature); `--replace-root` clears data before `Run`; Ctrl-C exits 130; `RootConflict` still exits 1.
+**Tests:** `Prepare` then `Run` behaves like today's `Run` (PR 2's harness tests pass unchanged, apart from the call signature); `--replace-root` clears data before `Run`; Ctrl-C exits 130 and `SIGTERM` 143; `RootConflict` still exits 1.
 
 ### Part 3 · Drive identity and wrong-drive guard (M)
 
@@ -252,7 +267,7 @@ Today `scan.Run` does the root check, `ClearDrive`, `UpsertDrive`, `SetBackupRoo
   - `agent_drives`;
   - `agent_files` (`path_key` primary key);
   - `agent_dir_listings` (`entry_key` primary key, `parent_key` index);
-  - `agent_scan_runs`, `agent_tombstones` (`key`), `agent_sync_ranges`, `agent_idempotency_keys`, and the housekeeping indexes.
+  - `agent_scan_runs`, `agent_tombstones` (`key`), `agent_sync_ranges`, and the housekeeping indexes. (`agent_idempotency_keys` is already in migration 2.)
 - **`PUT /agent/v1/drives/{drive_id}`**, in one transaction with the drive row `FOR UPDATE`:
   - create the row, or update root and identity;
   - a different `stream_id` deletes the drive's rows and ranges and returns `reset: true`;
@@ -274,8 +289,8 @@ Today `scan.Run` does the root check, `ClearDrive`, `UpsertDrive`, `SetBackupRoo
   2. stream check (`409`);
   3. **coverage check** (a duplicate gives `200 duplicate: true`);
   4. **idempotency lookup** (a stored response, or `422`);
-  5. **per-entry validation** (`rejected`);
-  6. **apply**: one `unnest` statement per table and op, with the higher-version-wins condition and the tombstone `NOT EXISTS`, and keys computed as SHA-256 from the decoded raw bytes. On a data error, **fall back** to per-entry `SAVEPOINT`s, adding failures to `rejected`;
+  5. **per-entry validation** (`rejected`); a rejected `file`/`dir_child` entry with a computable key becomes a delete at its version (tombstone), so no stale row survives;
+  6. **apply**: one `unnest` statement per table and op, **each under its own `SAVEPOINT`**, with the higher-version-wins condition and the tombstone `NOT EXISTS`, and keys computed as SHA-256 from the decoded raw bytes. On a data error (SQLSTATE class `22` or `23`), roll back to the statement's savepoint and **fall back** to per-entry `SAVEPOINT`s, adding failures to `rejected` (as tombstones, like step 5). Any other error returns `500`;
   7. merge ranges and update `acked_version`;
   8. store the idempotency record;
   9. commit.
@@ -288,10 +303,13 @@ Today `scan.Run` does the root check, `ClearDrive`, `UpsertDrive`, `SetBackupRoo
 - range merge and watermark advance;
 - empty batches; `from == to` giving `400`;
 - a replayed range with different contents as a duplicate; key reuse with a different body on an uncovered range giving `422`;
-- a bulk failure falling back to savepoints and rejecting one entry;
+- a bulk failure falling back to savepoints and rejecting one entry, and a non-data error (e.g. a forced serialization failure) returning `500` with nothing applied;
+- a rejected upsert of a key with an older stored row leaving a tombstone, not the old row;
 - 4 KB paths;
 - the gzip bomb cap;
 - a **property test**: random permutations of a fixed set of batches produce identical tables.
+
+Bump the agent to `0.2.1` (see [Agent versions](#agent-versions)): the new `wire` types are release-relevant.
 
 ### User steps for M4
 
@@ -307,11 +325,11 @@ Redeploy (pull `:latest`, restart `agentsync`). Migration 3 runs at startup. `do
 - `feed.go`: the read-only `*sql.DB` (`mode=ro`); the page query for `(cursor, upper]` with a `LIMIT`; mapping rows to `wire.Change` (`path_b64`/`child_b64` for invalid UTF-8).
 - `marker.go`:
   - load the watermark and ranges;
-  - `ReplaceWithServer(ranges)` after each ack;
+  - `ReplaceWithServer(ranges)` after each ack, **after checking the new ranges still cover the old marker and the batch** (otherwise stop the session and re-open, which mints a new stream);
   - **reconcile rules**: server's highest acked version above the local clock → new stream; server missing local coverage → new stream; server ahead but at or below the clock → adopt; `reset` → clear;
   - gap computation;
-  - `SetStream(new uuid)`, which also clears the marker;
-  - pruning synced tombstones; recording `rejected` in `sync_rejected`.
+  - `SetStream(new uuid)`, which also clears the marker and `sync_rejected`;
+  - pruning synced tombstones; recording `rejected` in `sync_rejected`, and deleting its rows for keys acked at a newer version.
 - `batch.go`:
   - build the page, respecting the change count and `max_batch_bytes`;
   - `from`/`to`, with the stretched `to` at the end of a gap, and no `from == to` batch;
@@ -322,6 +340,8 @@ Redeploy (pull `:latest`, restart `agentsync`). Migration 3 runs at startup. `do
 **Tests** (against a fake `agentsync` built on the `wire` fixtures):
 - marker replacement;
 - all four reconcile rules, including a `state.db` copied from an older snapshot and a server restored from an older snapshot, both ending in a new stream and a server with no deleted files;
+- a server restored mid-session: the next ack's ranges don't cover the old marker, which is kept, and the session ends in a new stream;
+- `sync_rejected`: a row removed once its key is acked at a newer version; cleared by a new stream, so re-uploading the same rejected entry doesn't collide on its primary key;
 - gap closing, including the `from == to` case;
 - a retry sending byte-identical bodies;
 - a restart re-reading a page with the same range, accepted as a duplicate;
@@ -343,7 +363,7 @@ Redeploy (pull `:latest`, restart `agentsync`). Migration 3 runs at startup. `do
 
 ### User steps for M5
 
-On the dev box, run `driveagent sync` once against `dev.sm.jkurapati.com`, then against prod. The first run uploads every existing checkpoint (the backfill made it all history), so expect it to take a while for large drives. Check the counts: `remote-status` shows `pending 0`, and Postgres row counts per drive (the read-only query recipe) match `state.db`.
+A state dir syncs to exactly one remote (stream ids and the marker are per drive, not per remote), so don't point one state dir at both servers: every switch would mint new streams and re-upload every drive. On the dev box, first run `driveagent sync --state-dir <copy of ~/.driveagent> --remote-url https://dev.sm.jkurapati.com` against a **copy** of the state dir (log in once for that copy), then, when that looks right, run `driveagent sync` with the real state dir against prod. The first run uploads every existing checkpoint (the backfill made it all history), so expect it to take a while for large drives. Check the counts: `remote-status` shows `pending 0`, and Postgres row counts per drive (the read-only query recipe) match `state.db`.
 
 ---
 
@@ -353,22 +373,22 @@ On the dev box, run `driveagent sync` once against `dev.sm.jkurapati.com`, then 
 
 **Code** (`cmd/driveagent` and `internal/scan`)
 - **`runScan` order:**
-  1. preflight (health, handshake, token; exit 3 or 4 before touching the drive);
-  2. `scan.Prepare`;
-  3. the wrong-drive guard;
-  4. read `S`;
-  5. take the upload lock (blocking, printing a waiting message);
+  1. take the upload lock (blocking, printing a waiting message). It comes first: it's the only thing enforcing one scan per drive, so `S` can't be read while another scan of the drive is writing, and it keeps `Prepare`'s `ClearDrive` from running while a `sync` is uploading the drive;
+  2. preflight (health, handshake, token; exit 3 or 4 before touching the drive);
+  3. `scan.Prepare`;
+  4. the wrong-drive guard;
+  5. read `S`;
   6. `PUT` and reconcile;
   7. compute the session `from` (the `e`/`S` rule, one `EXISTS`);
   8. start the uploader;
   9. `scan.Run`;
   10. drain.
 - **`scan.Options.OnFlush func()`:** the batch writer calls it after each flush; the uploader uses it as a non-blocking wakeup channel, alongside a 2 s ticker.
-- **Cancellation:** the uploader cancels the scan with `WithCancelCause(errRemoteFailed)` after `--remote-timeout`, or on a permanent failure. The first Ctrl-C cancels the walk, then drains under `--remote-timeout`; the second cancels the drain. `main` maps causes to exit codes 3, 4 and 130.
+- **Cancellation:** the uploader cancels the scan with `WithCancelCause(errRemoteFailed)` after `--remote-timeout`, or on a permanent failure. The first Ctrl-C cancels the walk, then drains under `--remote-timeout`; the second cancels the drain. `main` maps causes to exit codes 3, 4, 130 and 143.
 - **Progress line:** `uploaded N / pending M`, or `remote: retrying (… left)`.
 - **Startup hint:** one `EXISTS` per gap, printing `N drives have history not yet uploaded; run "driveagent sync"`.
 - **Failure message:** points at `driveagent sync`.
-- **Docs:** `drive-comparison-agent.md` (`scan` now requires the remote and a login), `agent/linux/README.md` (login first; `sync` for backlog; `lan_addr`), `architecture.md` (agent → `agentsync` → Postgres), `CLAUDE.md`. Bump `Version` to `0.2.0` (a minor release: the behaviour change).
+- **Docs:** `drive-comparison-agent.md` (`scan` now requires the remote and a login), `agent/linux/README.md` (login first; `sync` for backlog; `lan_addr`), `architecture.md` (agent → `agentsync` → Postgres), `CLAUDE.md`. Bump `Version` to `0.4.0` (a minor release: the behaviour change).
 
 **Tests:**
 - history is skipped (only rows above `S` are uploaded; a superseded history row is uploaded at its new version);
@@ -376,13 +396,14 @@ On the dev box, run `driveagent sync` once against `dev.sm.jkurapati.com`, then 
 - not logged in → exit 3 before scanning;
 - remote dies mid-scan → exit 3 after the budget, the checkpoint resumable, and `sync` uploading the rest;
 - `426` mid-scan → exit 4;
-- Ctrl-C once → drain, then 130; twice → 130 at once;
+- Ctrl-C once → drain, then 130; twice → 130 at once; `SIGTERM` → 143;
+- a second `scan` of the same drive waits for the first one's lock before its preflight;
 - `--replace-root` → new stream before the first `PUT`, and the server has no files from the old root afterwards;
 - the two-process test (two scans of different drives, both uploading) → no missed rows.
 
 ### User steps for M6
 
-Before updating the agent on a machine, make sure it's logged in (`driveagent remote-status`); from 0.2.0 on, a plain `scan` fails without the remote. The first scan of each drive after the upgrade uploads only what it writes; run `driveagent sync` once to upload the rest. Consider a cron job or systemd timer for `driveagent sync`.
+Before updating the agent on a machine, make sure it's logged in (`driveagent remote-status`); from 0.4.0 on, a plain `scan` fails without the remote. The first scan of each drive after the upgrade uploads only what it writes; run `driveagent sync` once to upload the rest. Consider a cron job or systemd timer for `driveagent sync`.
 
 ---
 
@@ -409,7 +430,8 @@ Before updating the agent on a machine, make sure it's logged in (`driveagent re
 |---|---|
 | Restructuring `scan.Run` (PR 3) changes behaviour by accident | PR 2's test harness pins today's behaviour first; PR 3 must pass it unchanged |
 | The backfill on a large `state.db` is slow or blocks another process | Progress output; documented "re-run the other command"; tested on a large generated fixture in PR 3 |
-| macOS `diskutil`/`ioreg` output differs from what the parser expects | Real outputs captured in M0 become test fixtures; parse plist XML, never human-readable text |
+| macOS `diskutil`/`ioreg` output differs from what the parser expects | **Open until M7 item 6.** M0 was Linux-only, so the Mac fixtures are hand-written from Apple's plist format; the parser reads plist XML, never human-readable text, and the macOS path stays marked unverified until `driveagent` runs on a Mac |
+| A state dir copied to another machine, or an old binary run on a migrated `state.db` | Deferred; documented as [operational rules](remote-sync.md#operational-rules) in the overview and the agent README |
 | Hairpin NAT makes remote-required scans fail at home | `lan_addr` ships in M2, before scans depend on the remote (M6); `remote-status` shows the path |
 | M6 breaks existing workflows (a scan now needs the remote) | It ships last, as a minor version bump, with user steps to log in first; M1–M5 change nothing for a plain `scan` |
 | Bulk `unnest` apply is hard to get right with version guards and tombstones | The property test in PR 4 compares every batch ordering against the expected final state |

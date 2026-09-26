@@ -54,6 +54,7 @@ Rules:
 | `AGENTSYNC_REFRESH_TTL` | `720h` | 30 days, sliding (each rotation issues a fresh 30 days) |
 | `AGENTSYNC_MIN_AGENT_VERSION` | `0.1.0` | Below this: `upgrade_required` |
 | `AGENTSYNC_LATEST_AGENT_VERSION` | `0.1.0` | Below this (but ≥ min): `upgrade_recommended` |
+| `AGENTSYNC_TRUSTED_PROXIES` | `127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | Addresses or CIDRs that `X-Real-IP` is accepted from (nginx; see [Deployment](#deployment)). The port is only exposed to nginx, so the private ranges cover a host nginx reaching the container through Docker's network |
 | `AGENTSYNC_AGENT_DOWNLOAD_URL` | `https://github.com/jyothri/bhandaar/releases/latest` | Returned in the handshake with upgrade decisions (see [releases](remote-sync-ci.md#linking-releases-to-the-servers-version-check)) |
 
 Server timeouts: read 60 s, write 60 s, idle 120 s. Body limit on `/changes`: 2 MiB compressed, 16 MiB after decompression, enforced while streaming (gzip bomb protection). Other endpoints: 16 KiB.
@@ -125,7 +126,7 @@ Response `200`:
 
 Request:
 ```json
-{"username": "jyothri", "password": "…", "agent_id": "7b0e…", "hostname": "optiplex7070"}
+{"username": "jyothri", "password": "…", "agent_id": "7b0e…", "hostname": "optiplex7070", "os": "linux", "arch": "amd64"}
 ```
 Response `200`:
 ```json
@@ -133,7 +134,7 @@ Response `200`:
 ```
 - `401 INVALID_CREDENTIALS` for an unknown user, a wrong password or a disabled user. The message is identical in all three cases, and the server spends constant time: it verifies against a dummy hash when the user doesn't exist.
 - `429 TOO_MANY_ATTEMPTS` after 10 failures for the same **username from the same client IP** within 15 minutes, with `Retry-After`. Keying on the IP too matters because usernames aren't secret (`jyothri` is in this spec): a lockout per username alone would let anyone lock the owner out indefinitely with 10 bad attempts every 15 minutes, well under the nginx rate limit. The client IP comes from `X-Real-IP`, set by nginx (see [Deployment](#deployment)). nginx also rate-limits by IP.
-- On success, the server upserts the `agent_agents` row (`agent_id`, user, hostname) and starts a new refresh-token family.
+- On success, the server upserts the `agent_agents` row (`agent_id`, user, hostname, os, arch, and `last_version` from `X-Agent-Version`), clears the (username, IP) failures, and starts a new refresh-token family. `hostname`, `os` and `arch` are optional.
 - An `agent_id` already bound to a different user gets `403 AGENT_OWNED_BY_OTHER_USER`.
 
 Access-token JWT claims: `sub` (user id), `aid` (agent id), `iat`, `exp`, `jti`.
@@ -142,9 +143,10 @@ Access-token JWT claims: `sub` (user id), `aid` (agent id), `iat`, `exp`, `jti`.
 
 Request `{"refresh_token": "rt_…"}`. Response: same shape as login, with a **new** refresh token. The old one is marked `rotated`. The token's row is locked (`FOR UPDATE`) during the exchange, so two simultaneous requests with the same token are handled one after the other: the first rotates it, and the second sees it as just rotated (below).
 
-- Presenting a rotated token **within 30 s** of its rotation is accepted **once more**: the server issues a fresh pair and revokes the successor it issued before, which the agent never received. The usual cause is a lost refresh response, or an agent that crashed before saving the new token. Returning an error there instead would leave the agent retrying until the window ran out, then revoke the family, forcing an interactive `driveagent login` for every scan and cron `sync`. A token replayed a second time within the window is treated as reuse (below).
-- Presenting a rotated token after that window revokes the **whole family** and returns `401 REFRESH_REUSED`. The agent must log in again.
-- An expired or revoked token returns `401 INVALID_REFRESH_TOKEN`.
+- Presenting a rotated token **within 30 s** of its rotation is accepted **once more**, provided its successor hasn't been used: the server issues a fresh pair and revokes the successor it issued before, which the agent never received, marking it `revoked_reason = 'grace'`. The usual cause is a lost refresh response, or an agent that crashed before saving the new token. Returning an error there instead would leave the agent retrying until the window ran out, then revoke the family, forcing an interactive `driveagent login` for every scan and cron `sync`.
+- Presenting a rotated token **after the window**, a **second time** within it, or after its successor has been used, is reuse: the server revokes the **whole family** and returns `401 REFRESH_REUSED`. The agent must log in again.
+- Presenting a successor that a grace replay revoked (`revoked_reason = 'grace'`) is also reuse, and revokes the family. The server can't tell a lost response from theft at replay time, but it can later: if a thief replays a stolen token within the window, the thief gets the fresh pair, and the owner's next refresh presents the grace-revoked successor. That revokes the thief's pair too. So theft detection still works, delayed by at most one access-token lifetime.
+- An expired token, or one revoked for any other reason (logout, family revocation, a disabled user), returns `401 INVALID_REFRESH_TOKEN`.
 
 ### `POST /agent/v1/auth/logout`
 
@@ -250,6 +252,8 @@ In one transaction:
 3. **Coverage check.** If `(from_version, to_version]` lies entirely inside one acked range, the batch is a full duplicate: return `200` with `duplicate: true` and the current ranges. This comes **before** the key lookup. An agent restarted after a lost response re-reads the page, and may send the same range with slightly different contents (a byte-limited page can be cut differently). That must count as a duplicate, not as a reused key.
 4. **Idempotency lookup.** If `(user_id, key)` exists with the same request hash, return the stored response. If it exists with a different hash, return `422 IDEMPOTENCY_KEY_REUSED`.
 5. **Validate each entry** against the server's rules (valid `_b64`, no NUL bytes, sizes and timestamps in range, known `kind`/`op`). Entries that fail are left out and listed in `rejected` with a reason; the rest continue.
+
+   A rejected `file` or `dir_child` entry whose key can still be computed (its path decodes) is **turned into a delete at its version**: under the same higher-version-wins rule as below, the key's existing row is deleted and a tombstone written at the rejected `v`. Otherwise the server would keep the key's older version, with a stale size and hash, and only the agent's `sync_rejected` would know it's out of date. This way the server's state for that key is "missing", not "wrong". The same applies to entries rejected in step 6's fallback.
 6. Apply every remaining change whose `v` is **not** inside an acked range (the rest are counted as `skipped`; they were applied, or superseded, when that range was acked). For each key, compare `v` with the key's current version on the server, which is the version of its row or of its tombstone, whichever exists:
    - **upsert** (file, dir_child): apply only if `v` is higher. Write the row with `row_version = v` and delete the key's tombstone.
    - **delete** (file, dir_child): apply only if `v` is higher. Delete the row and write a tombstone with `row_version = v`.
@@ -257,7 +261,9 @@ In one transaction:
 
    In SQL this is one `unnest` statement per table and op. For example, a file upsert is `INSERT … ON CONFLICT … DO UPDATE … WHERE agent_files.row_version < EXCLUDED.row_version`, filtered with `NOT EXISTS` against a tombstone with a higher version.
 
-   **If a bulk statement fails** on data (a constraint, a value Postgres rejects), the server falls back to applying that batch **entry by entry**, each under a `SAVEPOINT`. Entries that still fail are rolled back to their savepoint and added to `rejected` with the database error as the reason. The fast path stays one statement per table, and one unexpected bad entry costs a slower batch, not a stuck drive. Only failures unrelated to the data, such as a lost connection, return `500`.
+   Each bulk statement runs under its own `SAVEPOINT`. In Postgres a failing statement aborts the whole transaction, and nothing after it can run until the transaction is rolled back to a savepoint taken before it; without one, the fallback below couldn't run at all.
+
+   **If a bulk statement fails with a data error**, meaning SQLSTATE class `22` (data exception, e.g. a value out of range) or `23` (integrity constraint violation), the server rolls back to that statement's savepoint and applies its entries **one by one**, each under its own `SAVEPOINT`. Entries that still fail with a class `22`/`23` error are rolled back to their savepoint and added to `rejected` with the database error as the reason. The fast path stays one statement per table, and one unexpected bad entry costs a slower batch, not a stuck drive. Any other error (a lost connection, a serialization failure, a timeout) aborts the request with `500`, and the agent retries it.
 7. Add `(from_version, to_version]` to `agent_sync_ranges`, merging it with every range it overlaps or touches. Set `acked_version` to the end of the range that starts at 0, if there is one, and `last_synced_at = now()`.
 8. Store the idempotency record (key, request hash, status, response body).
 9. Commit.
@@ -276,6 +282,7 @@ A batch whose **envelope** is invalid (unsorted or duplicate `v`, `v` outside `(
 |---|---|---|
 | 400 | `INVALID_BATCH`, `INVALID_REQUEST` | Permanent (bug); stop uploading |
 | 401 | `TOKEN_EXPIRED` | Refresh once, then retry |
+| 401 | `INVALID_TOKEN` (missing or bad access token) | Refresh once, then retry; a second one means re-login |
 | 401 | `INVALID_CREDENTIALS`, `INVALID_REFRESH_TOKEN`, `REFRESH_REUSED` | Re-login needed; permanent for this run |
 | 403 | `AGENT_OWNED_BY_OTHER_USER`, `AGENT_MISMATCH` | Permanent |
 | 404 | `DRIVE_NOT_OPEN` | `PUT` the drive, then retry |
@@ -321,17 +328,21 @@ CREATE TABLE agent_agents (
 );
 
 CREATE TABLE agent_refresh_tokens (
-  id            BIGSERIAL PRIMARY KEY,
-  token_hash    BYTEA NOT NULL UNIQUE,       -- sha256(token); raw tokens are never stored
-  family_id     UUID NOT NULL,
-  user_id       BIGINT NOT NULL REFERENCES agent_users(id),
-  agent_id      UUID NOT NULL REFERENCES agent_agents(id),
-  issued_at     TIMESTAMPTZ NOT NULL,
-  expires_at    TIMESTAMPTZ NOT NULL,
-  rotated_at    TIMESTAMPTZ,                 -- set when exchanged for a new one
-  revoked_at    TIMESTAMPTZ
+  id             BIGSERIAL PRIMARY KEY,
+  token_hash     BYTEA NOT NULL UNIQUE,       -- sha256(token); raw tokens are never stored
+  family_id      UUID NOT NULL,
+  parent_id      BIGINT REFERENCES agent_refresh_tokens(id) ON DELETE SET NULL,  -- the token this one replaced
+  user_id        BIGINT NOT NULL REFERENCES agent_users(id),
+  agent_id       UUID NOT NULL REFERENCES agent_agents(id),
+  issued_at      TIMESTAMPTZ NOT NULL,
+  expires_at     TIMESTAMPTZ NOT NULL,
+  rotated_at     TIMESTAMPTZ,                 -- set when exchanged for a new one
+  grace_used_at  TIMESTAMPTZ,                 -- set when replayed within the grace window
+  revoked_at     TIMESTAMPTZ,
+  revoked_reason TEXT                         -- 'grace' | 'reuse' | 'logout' | 'disabled'
 );
 CREATE INDEX ON agent_refresh_tokens (family_id);
+CREATE INDEX ON agent_refresh_tokens (parent_id);
 CREATE INDEX ON agent_refresh_tokens (expires_at);         -- housekeeping
 
 CREATE TABLE agent_physical_drives (       -- one per real drive, across all of a user's agents
@@ -545,7 +556,7 @@ Passwords must be at least 12 characters. They never appear in argv, logs or err
 ## Testing
 
 - **Housekeeping**: each task deletes only rows past its cutoff, and leaves rows just inside it; a table with more than 5,000 expired rows is emptied over several batches; tombstones at or below the watermark go, those above it stay; one failing task doesn't stop the others.
-- **Unit**: batch validation (including empty batches and `to_version` above the last `v`; `from_version = to_version` is `400`); per-entry validation puts bad entries in `rejected` and still acks the range; a bulk failure falls back to per-entry savepoints and rejects only the bad entry; a path near 4 KB (and a listing of a near-4 KB parent plus child) stores fine; a replayed range with different contents is a duplicate, not `422`; the apply algorithm (full duplicate, partial overlap, out-of-order ranges, range merging and watermark advance, stream reset, stale upsert after a newer delete loses to the tombstone, delete older than a live row ignored, tombstone GC below the watermark); physical-drive matching for every row of the matching table, including the clone case, a serial filled in later, and ambiguous candidates; a property test that applies random permutations of the same batches and gets identical tables; semver decisions; refresh rotation, a replay within 30 s getting a fresh pair (and the orphaned successor revoked), a second replay and a replay after 30 s revoking the family; the login lockout per (username, IP), so failures from one IP don't lock out another; `426` on normal endpoints but not on health or handshake; `X-Agent-Protocol` checked; idempotency replay and conflict; the gzip size cap.
+- **Unit**: batch validation (including empty batches and `to_version` above the last `v`; `from_version = to_version` is `400`); per-entry validation puts bad entries in `rejected` and still acks the range; a bulk failure (class `23`) rolls back to the statement's savepoint, falls back to per-entry savepoints and rejects only the bad entry, while a non-data error returns `500` with nothing applied; a rejected upsert of a key that has an older row leaves a tombstone, not the old row; a path near 4 KB (and a listing of a near-4 KB parent plus child) stores fine; a replayed range with different contents is a duplicate, not `422`; the apply algorithm (full duplicate, partial overlap, out-of-order ranges, range merging and watermark advance, stream reset, stale upsert after a newer delete loses to the tombstone, delete older than a live row ignored, tombstone GC below the watermark); physical-drive matching for every row of the matching table, including the clone case, a serial filled in later, and ambiguous candidates; a property test that applies random permutations of the same batches and gets identical tables; semver decisions; refresh rotation, a replay within 30 s getting a fresh pair (and the orphaned successor revoked), a second replay, a replay after 30 s, a replay after the successor was used, and a later presentation of the grace-revoked successor all revoking the family; the login lockout per (username, IP), so failures from one IP don't lock out another; `426` on normal endpoints but not on health or handshake; `X-Agent-Protocol` checked; idempotency replay and conflict; the gzip size cap.
 - **Store tests** against a real Postgres (a CI service container locally; skipped when `AGENTSYNC_TEST_DB` is unset), each test in its own schema.
 - **HTTP tests** with `httptest.Server`: full login → open drive → changes → duplicate replay flows.
 - **Contract**: golden JSON fixtures in `agentsync/wire/testdata/`, used by both the server tests and the driveagent client tests, so the two sides can't drift.

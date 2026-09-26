@@ -8,7 +8,7 @@ The design is split across four documents, plus an implementation plan:
 
 | Document | Covers |
 |---|---|
-| this file | Goals, key decisions (protocol, language, service placement, data model), the end-to-end flow, rollout |
+| this file | Goals, operational rules, key decisions (protocol, language, service placement, data model), the end-to-end flow, rollout |
 | [`remote-sync-server.md`](remote-sync-server.md) | The new `agentsync` service: API reference, auth, Postgres schema, how change batches are applied, deployment |
 | [`remote-sync-ci.md`](remote-sync-ci.md) | CI for both: the `agentsync` Docker image (Docker Hub, like `be`/`ui`) and automatic `driveagent` releases (GitHub Release per version tag, Linux + macOS binaries) |
 | [`remote-sync-agent.md`](remote-sync-agent.md) | `driveagent` changes: what it uploads (a scan always does), config, new commands, the local change feed and synced marker (per-drive watermark), resume, the uploader state machine |
@@ -37,6 +37,13 @@ The design is split across four documents, plus an implementation plan:
 - Removing the embedded SQLite, `compare` and `report` from the agent. That's a possible later version (see [Future direction](#future-direction-a-thinner-agent)).
 - Merging copies of the same physical drive. A drive scanned from two machines is uploaded as two copies, which the server **links** as the same physical drive (D8) but doesn't merge. Merging would need multi-writer sync.
 - Signing or notarizing the macOS binaries. Decided 2026-09-25: installing with `curl`, or running `xattr -d com.apple.quarantine` once after a browser download, is acceptable for v1 (see [`remote-sync-ci.md`](remote-sync-ci.md#installing-a-release)).
+
+## Operational rules
+
+Two ways of running the agent are unsupported in v1. The agent doesn't detect them yet; the fixes are deferred (review of PR 21, 2026-09-26), so they are rules for now:
+
+1. **Never copy a state dir (`~/.driveagent`) to another machine and keep using both** (Migration Assistant, `rsync` to a new box, a cloned VM). The copies share the `agent_id` and every stream id, and the reconcile rules make them wipe each other's upload on the server, one full re-upload per alternation. Each machine gets its own state dir, created by its own `driveagent`, and a state dir syncs to exactly one remote. *Deferred fix:* store `/etc/machine-id` (Linux) or `IOPlatformUUID` (macOS) in `agent.json`, and mint a new `agent_id` on a mismatch, so a clone becomes a separate agent with its own drive rows.
+2. **Never run a `driveagent` older than the `state.db` migration (rollout step 3) against a migrated `state.db`.** The old binary doesn't version its writes, so they're never uploaded, and nothing reports it. Check `driveagent version` after upgrading and remove old binaries from `PATH`. *Deferred fix:* have the migration move the database to a new file name (e.g. `state.v1.db`), so an old binary finds no `state.db` and starts a fresh one: slow and obvious, but it can't corrupt the migrated feed.
 
 ## Decisions
 
@@ -116,7 +123,7 @@ The trade-off of skipping history: until `sync` runs, the server's copy of a dri
 ### D6. Auth: short-lived JWT access token + rotating opaque refresh token
 
 - `POST /agent/v1/auth/login` with username + password returns an access token (JWT, HS256, 15 min) and a refresh token (random 256-bit, 30 days, stored hashed on the server).
-- Refresh rotates the refresh token. Within a 30 s grace window, the server accepts the just-rotated token once more and issues a fresh pair, so a lost refresh response doesn't force a re-login. Reuse beyond that revokes the whole token family (theft detection).
+- Refresh rotates the refresh token. Within a 30 s grace window, the server accepts the just-rotated token once more and issues a fresh pair, so a lost refresh response doesn't force a re-login. Reuse beyond that revokes the whole token family (theft detection). The successor that a grace replay revokes is marked as such, and presenting it later also revokes the family, so a thief who replays a stolen token within the window is cut off at the owner's next refresh.
 - Failed logins lock out per (username, client IP), not per username alone, so knowing the username isn't enough to lock the owner out.
 - Passwords are hashed with argon2id. Users are created with `agentsync user add` on the server.
 - The agent stores tokens in `<state-dir>/credentials.json` (mode 0600). The password is never stored, and never taken from a command-line flag or an environment variable; for scripts there's `--password-stdin`.
@@ -192,7 +199,7 @@ The first `driveagent login` (interactive, prompts for the password) does health
 
 1. **Server skeleton**: `agentsync` with health, handshake, the users CLI, login/refresh/logout, schema migrations, the Dockerfile and the `agentsync-docker-image.yml` workflow. Deploy it and add the nginx `/agent/` block.
 2. **Agent identity**: a `version` package, `driveagent version`, `login`, `logout`, `remote-status`, and the `driveagent.yml` workflow (test, version check, Linux/macOS builds, automatic release). Merging this step cuts the first release, `driveagent/v0.1.0`.
-3. **Agent change feed and drive identity**: the `state.db` migration (`row_version`, tombstones, `stream_id`, the synced marker, `sync_ranges` and views, identity columns, backfill of existing rows), plus identity detection and the wrong-drive guard in `scan`. The guard is the only behaviour change. The drives on the dev box were checked on 2026-09-26: both Seagate backup drives are NTFS, so cross-OS linking doesn't apply to them (see [agent spec](remote-sync-agent.md#drive-identity)).
+3. **Agent change feed and drive identity**: the `state.db` migration (`row_version`, tombstones, `stream_id`, the synced marker, `sync_ranges` and views, identity columns, backfill of existing rows), plus identity detection and the wrong-drive guard in `scan`. Nothing is uploaded yet. The visible behaviour changes are the guard, and an interrupted `scan` exiting 130 (143 for `SIGTERM`) instead of 0; the drive checks also move from `scan.Run` into `cmd/driveagent`, with the same results. The drives on the dev box were checked on 2026-09-26: both Seagate backup drives are NTFS, so cross-OS linking doesn't apply to them (see [agent spec](remote-sync-agent.md#drive-identity)).
 4. **Upload**: the server's drive and changes endpoints, with acked ranges, tombstones and physical-drive matching.
 5. **`driveagent sync`**: uploads history.
 6. **Upload in `scan`**. From this step on, every `driveagent scan` needs the remote and a prior `driveagent login`; there is no way to scan locally only. Until it ships, scans stay local-only, so existing workflows keep working through steps 1–5.
