@@ -1,6 +1,6 @@
 # Remote Sync: CI, Build and Release
 
-**Status:** proposed (not implemented). The overview is in [`remote-sync.md`](remote-sync.md).
+**Status:** implemented. `agentserver-docker-image.yml` shipped in PR 1 (#22); `driveagent.yml`, `version-check.sh` and the install instructions in PR 2. The overview is in [`remote-sync.md`](remote-sync.md).
 
 Two new GitHub Actions workflows, alongside the existing `backend-docker-image.yml` and `ui-docker-image.yml`:
 

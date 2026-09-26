@@ -1,6 +1,6 @@
 # Remote Sync: Implementation Plan
 
-**Status:** M1 (PR 1, #22) implemented; the rest not started. Written 2026-09-25; revised 2026-09-26 to six PRs, one per milestone.
+**Status:** M1 (PR 1, #22) implemented; M2 (PR 2) implemented; the rest not started. Written 2026-09-25; revised 2026-09-26 to six PRs, one per milestone.
 
 This plan turns the four remote-sync specs into six pull requests, one per milestone:
 - [`remote-sync.md`](remote-sync.md) (overview and decisions)
@@ -140,7 +140,7 @@ What it changed in the spec (agent spec, [Drive identity](remote-sync-agent.md#d
 2. Add the `agentserver` compose service: image `jyothri/bhandaar-agentserver:latest`, same network as `hdd_db`, `DB_*` as for `be` (`HDD_DB_PASS`), port 8091 exposed to nginx only.
 3. Add the nginx `location /agent/` and `/agent/v1/auth/` blocks (server spec, Deployment) to both `sm.jkurapati.com` and `dev.sm.jkurapati.com`; `nginx -t`, then reload.
 4. Create the user: `docker exec -it <agentserver> agentserver user add --username jyothri`.
-5. Smoke test from the prod box: `curl --resolve sm.jkurapati.com:443:127.0.0.1 https://sm.jkurapati.com/agent/health` should give `200 {"status":"ok"}`; `/agent/` must not ask for basic auth, and the rest of the site still must.
+5. Smoke test from the prod box: `curl --resolve sm.jkurapati.com:443:127.0.0.1 https://sm.jkurapati.com/agent/health` should give `200 {"status":"ok"}`; `/agent/` must not ask for basic auth, and the rest of the site still must. (Done 2026-09-26. Requests made on the prod box itself pass through Docker's userland proxy, so nginx and `agentserver` log them as `172.23.0.1`, not `127.0.0.1`; from the LAN, real client addresses come through, e.g. `192.168.1.136`. A forged `X-Real-IP` sent straight to `:8091` is ignored.)
 
 ---
 

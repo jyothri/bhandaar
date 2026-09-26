@@ -1,6 +1,6 @@
 # Remote Sync: `driveagent` Client
 
-**Status:** proposed (not implemented). The overview and decisions are in [`remote-sync.md`](remote-sync.md); the server API is in [`remote-sync-server.md`](remote-sync-server.md).
+**Status:** partly implemented. PR 2 implements `version`, `login`, `logout` and `remote-status` (without the per-drive section), configuration, `lan_addr`, identity and credentials, and the client's error classification. The change feed, drive identity, `sync` and uploading are still proposed. The overview and decisions are in [`remote-sync.md`](remote-sync.md); the server API is in [`remote-sync-server.md`](remote-sync-server.md).
 
 This covers what changes in `agent/client/`: what each command uploads, why the remote is required, configuration, new commands, the local change feed in `state.db` and its synced marker, and the uploader that sends the feed to `agentserver`.
 
