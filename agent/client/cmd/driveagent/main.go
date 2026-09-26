@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -41,6 +42,12 @@ func main() {
 
 	var err error
 	switch os.Args[1] {
+	case "login":
+		err = runLogin(ctx, os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
+	case "logout":
+		err = runLogout(ctx, os.Args[2:], os.Stdout, os.Stderr)
+	case "remote-status":
+		err = runRemoteStatus(ctx, os.Args[2:], os.Stdout, os.Stderr)
 	case "scan":
 		err = runScan(ctx, os.Args[2:])
 	case "compare":
@@ -60,7 +67,12 @@ func main() {
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		code := exitLocal
+		var ee *exitError
+		if errors.As(err, &ee) {
+			code = ee.code
+		}
+		os.Exit(code)
 	}
 }
 
@@ -71,7 +83,13 @@ Usage:
   driveagent scan    --drive-id <id> --path <folder> [--drive-root <dir>] [--backup-root <rel-path>] [--state-dir <dir>] [--workers N] [--replace-root]
   driveagent compare --drive-a <id> --drive-b <id> [--drive-a-paths <rel,rel,...>] [--drive-b-paths <rel,rel,...>] [--state-dir <dir>]
   driveagent report  --drives <id,id,...> [--type text,json,html] [--report-out <dir>] [--include-mac-metadata] [--state-dir <dir>]
+  driveagent login         [--username <name>] [--password-stdin] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
+  driveagent logout        [--state-dir <dir>]
+  driveagent remote-status [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
   driveagent version
+
+Remote settings: flag > $DRIVEAGENT_REMOTE_URL / $DRIVEAGENT_LAN_ADDR > <state-dir>/config.json > https://sm.jkurapati.com.
+Exit codes: 0 ok, 1 local error, 2 usage, 3 remote unavailable or login needed, 4 driveagent upgrade required.
 
 Examples:
   driveagent scan    --drive-id seagate2 --drive-root /mnt/seagate2 --backup-root Jyo/Backup --path "/mnt/seagate2/Jyo/Backup/interview"

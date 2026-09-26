@@ -95,4 +95,43 @@ keep wiping each other's upload. Give each machine its own state dir, created
 by its own `driveagent`. See the remote-sync overview's
 [operational rules](../../docs/specs/remote-sync.md#operational-rules).
 
+## The remote server
+
+`driveagent` can log in to the Bhandaar server (`agentserver`, see
+[`docs/specs/remote-sync.md`](../../docs/specs/remote-sync.md)), so that later
+releases can upload scans. For now, scans stay local; logging in only prepares
+for that.
+
+```bash
+driveagent login --username jyothri          # prompts for the password (no echo)
+driveagent remote-status                     # reachability, the path used, handshake, login
+driveagent logout
+```
+
+For scripts, `--password-stdin` reads the password from standard input (as
+`docker login` does). There's deliberately no `--password` flag and no password
+environment variable. The login is stored in `<state-dir>/credentials.json`
+(mode 0600) and renews itself; `agent.json` holds this machine's agent id.
+
+Settings, highest precedence first: flags, then `DRIVEAGENT_REMOTE_URL` /
+`DRIVEAGENT_LAN_ADDR`, then `<state-dir>/config.json`, then the default
+(`https://sm.jkurapati.com`):
+
+```json
+{"remote_url": "https://sm.jkurapati.com", "lan_addr": "192.168.1.118:443"}
+```
+
+`lan_addr` is for machines on the home LAN, where the public name only works
+through the router's unreliable NAT hairpin. The agent connects to that address
+first, still verifying the certificate for the server's name, and falls back to
+DNS when it doesn't answer (away from home it's skipped for 5 minutes after a
+miss). On the server box itself use `127.0.0.1:443`. `remote-status` shows
+which path was used.
+
+A state dir logs in to, and will sync with, exactly one server. To try another
+server, use a copy of the state dir (`--state-dir`).
+
+Exit codes: 0 ok, 1 local error, 2 usage, 3 server unreachable or login
+needed, 4 this `driveagent` is too old for the server (upgrade).
+
 Run `./driveagent --help` for the full flag list.
