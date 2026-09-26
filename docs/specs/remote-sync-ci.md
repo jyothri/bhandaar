@@ -219,7 +219,7 @@ jobs:
             -ldflags "-s -w -X github.com/jyothri/bhandaar/agent/client/internal/version.Commit=${GITHUB_SHA::7}" \
             -o dist/pkg/driveagent ./cmd/driveagent
           cp README.md dist/pkg/
-          tar -C dist/pkg -czf dist/driveagent_${os}_${arch}.tar.gz .
+          tar -C dist/pkg -czf "dist/driveagent_${os}_${arch}.tar.gz" driveagent README.md
       - uses: actions/upload-artifact@v4
         with:
           name: driveagent-${{ strategy.job-index }}
@@ -275,10 +275,12 @@ For the agent README, written as part of this work:
 ```bash
 # Linux amd64 (use darwin_arm64 for Apple Silicon, darwin_amd64 for Intel Macs)
 asset=driveagent_linux_amd64.tar.gz
+cd "$(mktemp -d)"
 curl -fsSLO "https://github.com/jyothri/bhandaar/releases/latest/download/$asset"
 curl -fsSLO "https://github.com/jyothri/bhandaar/releases/latest/download/SHA256SUMS"
 sha256sum --check --ignore-missing SHA256SUMS      # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
-tar -xzf "$asset" driveagent && install -m 0755 driveagent ~/.local/bin/
+tar -xzf "$asset"                                  # driveagent and README.md
+mkdir -p ~/.local/bin && install -m 0755 driveagent ~/.local/bin/
 driveagent version
 ```
 
