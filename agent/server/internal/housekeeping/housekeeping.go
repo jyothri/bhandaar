@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -43,6 +44,33 @@ func Tasks(pool *pgxpool.Pool) []Task {
 				 WHERE ctid IN (SELECT ctid FROM agent_login_failures
 				                 WHERE failed_at < now() - make_interval(secs => $1) LIMIT $2)`,
 				LoginFailureRetention.Seconds())
+		}},
+		{"tombstones", func(ctx context.Context) (int64, error) {
+			// A tombstone at or below its drive's watermark protects nothing:
+			// every older change for its key is skipped on arrival. The
+			// watermark only rises, so this is safe during uploads.
+			rows, err := pool.Query(ctx, `SELECT id FROM agent_drives WHERE acked_version > 0 ORDER BY id`)
+			if err != nil {
+				return 0, err
+			}
+			drives, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+			if err != nil {
+				return 0, err
+			}
+			var total int64
+			for _, pk := range drives {
+				n, err := deleteInBatches(ctx, pool, `
+					DELETE FROM agent_tombstones
+					 WHERE ctid IN (SELECT t.ctid FROM agent_tombstones t
+					                 WHERE t.drive_pk = $1
+					                   AND t.row_version <= (SELECT acked_version FROM agent_drives WHERE id = $1)
+					                 LIMIT $2)`, pk)
+				total += n
+				if err != nil {
+					return total, err
+				}
+			}
+			return total, nil
 		}},
 		{"refresh_tokens", func(ctx context.Context) (int64, error) {
 			return deleteInBatches(ctx, pool, `
