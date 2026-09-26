@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,18 +80,43 @@ type FolderStatus struct {
 
 // Store wraps the checkpoint SQLite database.
 type Store struct {
-	db *sql.DB
+	db  *sql.DB
+	log io.Writer
+}
+
+// Options configures OpenWith.
+type Options struct {
+	// Log receives one-time upgrade progress; nil means os.Stderr.
+	Log io.Writer
 }
 
 // Open creates (if needed) and opens the checkpoint database at
 // <stateDir>/state.db, enabling WAL mode for crash-safety.
 func Open(stateDir string) (*Store, error) {
+	return OpenWith(stateDir, Options{})
+}
+
+// OpenWith is Open with options.
+func OpenWith(stateDir string, opts Options) (*Store, error) {
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating state dir: %w", err)
 	}
 	dbPath := filepath.Join(stateDir, "state.db")
+	if strings.Contains(dbPath, "?") {
+		return nil, fmt.Errorf("state dir %q: the path can't contain '?'", stateDir)
+	}
+	if opts.Log == nil {
+		opts.Log = os.Stderr
+	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// Every write transaction is BEGIN IMMEDIATE (_txlock): feed writers
+	// read before they write (SyncDirListings) and reserve versions after
+	// that read. Under WAL, a deferred transaction that has to upgrade to a
+	// writer after another process committed fails at once with
+	// SQLITE_BUSY_SNAPSHOT, which busy_timeout doesn't cover; taking the
+	// write lock at BEGIN avoids it. busy_timeout is in the DSN too, so it
+	// applies to every connection the pool opens.
+	db, err := sql.Open("sqlite", dbPath+"?_txlock=immediate&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("opening checkpoint db: %w", err)
 	}
@@ -136,7 +162,7 @@ func Open(stateDir string) (*Store, error) {
 		return nil, fmt.Errorf("setting synchronous mode: %w", err)
 	}
 
-	s := &Store{db: db}
+	s := &Store{db: db, log: opts.Log}
 	if err := execWithRetry(s.migrate); err != nil {
 		db.Close()
 		return nil, err
@@ -166,16 +192,17 @@ func execWithRetry(run func() error) error {
 	return err
 }
 
-func (s *Store) migrate() error {
-	stmts := []string{
-		`CREATE TABLE IF NOT EXISTS drives (
+// baseSchema is schema version 0: the tables as they were before schema
+// versioning.
+var baseSchema = []string{
+	`CREATE TABLE IF NOT EXISTS drives (
 			drive_id               TEXT PRIMARY KEY,
 			drive_root             TEXT NOT NULL,
 			backup_root            TEXT NOT NULL DEFAULT '',
 			last_scan_started_at   TIMESTAMP,
 			last_scan_completed_at TIMESTAMP
 		);`,
-		`CREATE TABLE IF NOT EXISTS files (
+	`CREATE TABLE IF NOT EXISTS files (
 			drive_id                   TEXT NOT NULL,
 			relative_path              TEXT NOT NULL,
 			size                       INTEGER NOT NULL,
@@ -193,9 +220,9 @@ func (s *Store) migrate() error {
 			compared_at                TIMESTAMP,
 			PRIMARY KEY (drive_id, relative_path)
 		);`,
-		`CREATE INDEX IF NOT EXISTS idx_files_drive_hash ON files(drive_id, content_hash);`,
-		`CREATE INDEX IF NOT EXISTS idx_files_drive_comparison_status ON files(drive_id, comparison_status);`,
-		`CREATE TABLE IF NOT EXISTS scan_runs (
+	`CREATE INDEX IF NOT EXISTS idx_files_drive_hash ON files(drive_id, content_hash);`,
+	`CREATE INDEX IF NOT EXISTS idx_files_drive_comparison_status ON files(drive_id, comparison_status);`,
+	`CREATE TABLE IF NOT EXISTS scan_runs (
 			id           INTEGER PRIMARY KEY AUTOINCREMENT,
 			drive_id     TEXT NOT NULL,
 			started_at   TIMESTAMP NOT NULL,
@@ -204,7 +231,7 @@ func (s *Store) migrate() error {
 			bytes_hashed INTEGER,
 			interrupted  BOOLEAN
 		);`,
-		`CREATE TABLE IF NOT EXISTS dir_listings (
+	`CREATE TABLE IF NOT EXISTS dir_listings (
 			drive_id      TEXT NOT NULL,
 			relative_path TEXT NOT NULL,
 			child_name    TEXT NOT NULL,
@@ -213,7 +240,7 @@ func (s *Store) migrate() error {
 			last_seen_at  TIMESTAMP NOT NULL,
 			PRIMARY KEY (drive_id, relative_path, child_name)
 		);`,
-		`CREATE TABLE IF NOT EXISTS folder_status (
+	`CREATE TABLE IF NOT EXISTS folder_status (
 			drive_id      TEXT NOT NULL,
 			relative_path TEXT NOT NULL,
 			parent_path   TEXT,
@@ -222,14 +249,17 @@ func (s *Store) migrate() error {
 			updated_at    TIMESTAMP NOT NULL,
 			PRIMARY KEY (drive_id, relative_path)
 		);`,
-		`CREATE INDEX IF NOT EXISTS idx_folder_status_parent ON folder_status(drive_id, parent_path);`,
-	}
+	`CREATE INDEX IF NOT EXISTS idx_folder_status_parent ON folder_status(drive_id, parent_path);`,
+}
+
+func (s *Store) migrate() error {
+	stmts := baseSchema
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return fmt.Errorf("running migration %q: %w", stmt, err)
 		}
 	}
-	return nil
+	return s.runMigrations()
 }
 
 // UpsertDrive records (or updates) the drive's label -> drive_root mapping.
@@ -294,50 +324,67 @@ func (s *Store) BackupRoot(driveID string) (string, error) {
 // ClearDrive deletes every checkpointed and derived row for driveID — used
 // when repointing an existing drive_id at a different drive_root, so stale
 // rows from the old root don't linger and pollute later compares/reports.
+// It also forgets the drive's remote-sync state (tombstones, synced ranges,
+// rejected entries, stream id and watermark), so the next upload starts a
+// new stream and the server discards the old root's data. One transaction.
 // The drives row itself is left for UpsertDrive to update in place.
 func (s *Store) ClearDrive(driveID string) error {
-	tables := []string{"files", "scan_runs", "dir_listings", "folder_status"}
-	for _, t := range tables {
-		if _, err := s.db.Exec(`DELETE FROM `+t+` WHERE drive_id = ?`, driveID); err != nil {
-			return fmt.Errorf("clearing %s: %w", t, err)
+	return s.inTx(context.Background(), func(tx *sql.Tx) error {
+		tables := []string{"files", "scan_runs", "dir_listings", "folder_status", "sync_tombstones", "sync_ranges", "sync_rejected"}
+		for _, t := range tables {
+			if _, err := tx.Exec(`DELETE FROM `+t+` WHERE drive_id = ?`, driveID); err != nil {
+				return fmt.Errorf("clearing %s: %w", t, err)
+			}
 		}
-	}
-	return nil
+		_, err := tx.Exec(`UPDATE drives SET sync_stream_id = NULL, synced_version = 0, synced_at = NULL WHERE drive_id = ?`, driveID)
+		return err
+	})
 }
 
 // StartScanRun records the start of a scan attempt and returns its run ID.
 func (s *Store) StartScanRun(driveID string) (int64, error) {
 	now := time.Now().UTC()
-	res, err := s.db.Exec(`
-		INSERT INTO scan_runs (drive_id, started_at, interrupted) VALUES (?, ?, 0)
-	`, driveID, now)
-	if err != nil {
-		return 0, err
-	}
-	if _, err := s.db.Exec(`
-		UPDATE drives SET last_scan_started_at = ? WHERE drive_id = ?
-	`, now, driveID); err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
+	var id int64
+	err := s.inTx(context.Background(), func(tx *sql.Tx) error {
+		v, err := reserveVersions(tx, 1)
+		if err != nil {
+			return err
+		}
+		res, err := tx.Exec(`
+			INSERT INTO scan_runs (drive_id, started_at, interrupted, row_version) VALUES (?, ?, 0, ?)
+		`, driveID, now, v)
+		if err != nil {
+			return err
+		}
+		if id, err = res.LastInsertId(); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`UPDATE drives SET last_scan_started_at = ? WHERE drive_id = ?`, now, driveID)
+		return err
+	})
+	return id, err
 }
 
 // FinishScanRun records the outcome of a scan attempt.
 func (s *Store) FinishScanRun(runID int64, driveID string, filesSeen, bytesHashed int64, interrupted bool) error {
 	now := time.Now().UTC()
-	if _, err := s.db.Exec(`
-		UPDATE scan_runs SET finished_at = ?, files_seen = ?, bytes_hashed = ?, interrupted = ?
-		WHERE id = ?
-	`, now, filesSeen, bytesHashed, interrupted, runID); err != nil {
+	return s.inTx(context.Background(), func(tx *sql.Tx) error {
+		v, err := reserveVersions(tx, 1)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`
+			UPDATE scan_runs SET finished_at = ?, files_seen = ?, bytes_hashed = ?, interrupted = ?, row_version = ?
+			WHERE id = ?
+		`, now, filesSeen, bytesHashed, interrupted, v, runID); err != nil {
+			return err
+		}
+		if interrupted {
+			return nil
+		}
+		_, err = tx.Exec(`UPDATE drives SET last_scan_completed_at = ? WHERE drive_id = ?`, now, driveID)
 		return err
-	}
-	if interrupted {
-		return nil
-	}
-	_, err := s.db.Exec(`
-		UPDATE drives SET last_scan_completed_at = ? WHERE drive_id = ?
-	`, now, driveID)
-	return err
+	})
 }
 
 // FileComparisonStatus returns the comparison_status of one file ("" if
@@ -378,46 +425,56 @@ func (s *Store) Existing(driveID, relPath string) (*FileRecord, error) {
 // single transaction. Every row here represents either a brand-new file or
 // one scan just decided needed re-hashing (size/mtime changed) — in both
 // cases any previously-computed comparison_status is now stale, so it's
-// reset to NULL (uncompared) rather than carried forward silently.
+// reset to NULL (uncompared) rather than carried forward silently. Each row
+// gets a new feed version, which supersedes any tombstone for its path.
 func (s *Store) UpsertFiles(ctx context.Context, recs []FileRecord) error {
 	if len(recs) == 0 {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.Prepare(`
-		INSERT INTO files (drive_id, relative_path, size, mtime_unix, mode, quick_sig, content_hash, hash_algo, status, error_message, scanned_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(drive_id, relative_path) DO UPDATE SET
-			size = excluded.size,
-			mtime_unix = excluded.mtime_unix,
-			mode = excluded.mode,
-			quick_sig = excluded.quick_sig,
-			content_hash = excluded.content_hash,
-			hash_algo = excluded.hash_algo,
-			status = excluded.status,
-			error_message = excluded.error_message,
-			scanned_at = excluded.scanned_at,
-			comparison_status = NULL,
-			compared_against_drive_id = NULL,
-			counterpart_relative_path = NULL,
-			compared_at = NULL
-	`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, r := range recs {
-		if _, err := stmt.Exec(r.DriveID, r.RelPath, r.Size, r.MTimeUnix, r.Mode, r.QuickSig, r.ContentHash, r.HashAlgo, r.Status, r.ErrorMessage, r.ScannedAt); err != nil {
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		first, err := reserveVersions(tx, len(recs))
+		if err != nil {
 			return err
 		}
-	}
-	return tx.Commit()
+		stmt, err := tx.Prepare(`
+			INSERT INTO files (drive_id, relative_path, size, mtime_unix, mode, quick_sig, content_hash, hash_algo, status, error_message, scanned_at, row_version)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(drive_id, relative_path) DO UPDATE SET
+				size = excluded.size,
+				mtime_unix = excluded.mtime_unix,
+				mode = excluded.mode,
+				quick_sig = excluded.quick_sig,
+				content_hash = excluded.content_hash,
+				hash_algo = excluded.hash_algo,
+				status = excluded.status,
+				error_message = excluded.error_message,
+				scanned_at = excluded.scanned_at,
+				row_version = excluded.row_version,
+				comparison_status = NULL,
+				compared_against_drive_id = NULL,
+				counterpart_relative_path = NULL,
+				compared_at = NULL
+		`)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+		untomb, err := tx.Prepare(`DELETE FROM sync_tombstones WHERE drive_id = ? AND kind = 'file' AND relative_path = ? AND child_name = ''`)
+		if err != nil {
+			return err
+		}
+		defer untomb.Close()
+
+		for i, r := range recs {
+			if _, err := stmt.Exec(r.DriveID, r.RelPath, r.Size, r.MTimeUnix, r.Mode, r.QuickSig, r.ContentHash, r.HashAlgo, r.Status, r.ErrorMessage, r.ScannedAt, first+int64(i)); err != nil {
+				return err
+			}
+			if _, err := untomb.Exec(r.DriveID, r.RelPath); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 const fileCols = `relative_path, size, mtime_unix, mode, quick_sig, content_hash, hash_algo, status, error_message, scanned_at,
@@ -554,142 +611,203 @@ func (s *Store) UpdateComparisonStatuses(ctx context.Context, updates []Comparis
 // their observation of every parent in entries was complete and
 // error-free — see scan.Run's sawSoftError handling for why a single
 // unreadable file anywhere in the walk makes this unsafe to assume.
+//
+// Feed versions: a new child, or one whose is_dir changed, gets a new
+// version; a child that's merely seen again only has last_seen_at touched
+// (otherwise every scan would re-upload every listing). Each deleted row
+// leaves a 'dir_child' tombstone.
 func (s *Store) SyncDirListings(ctx context.Context, driveID string, entries map[string][]DirChild, deleteStale bool) error {
 	if len(entries) == 0 {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		versions := &versionAlloc{tx: tx}
+		lookupStmt, err := tx.Prepare(`SELECT is_dir FROM dir_listings WHERE drive_id = ? AND relative_path = ? AND child_name = ?`)
+		if err != nil {
+			return err
+		}
+		defer lookupStmt.Close()
+		insertStmt, err := tx.Prepare(`
+			INSERT INTO dir_listings (drive_id, relative_path, child_name, is_dir, first_seen_at, last_seen_at, row_version)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`)
+		if err != nil {
+			return err
+		}
+		defer insertStmt.Close()
+		changedStmt, err := tx.Prepare(`UPDATE dir_listings SET is_dir = ?, last_seen_at = ?, row_version = ? WHERE drive_id = ? AND relative_path = ? AND child_name = ?`)
+		if err != nil {
+			return err
+		}
+		defer changedStmt.Close()
+		touchStmt, err := tx.Prepare(`UPDATE dir_listings SET last_seen_at = ? WHERE drive_id = ? AND relative_path = ? AND child_name = ?`)
+		if err != nil {
+			return err
+		}
+		defer touchStmt.Close()
+		untombStmt, err := tx.Prepare(`DELETE FROM sync_tombstones WHERE drive_id = ? AND kind = 'dir_child' AND relative_path = ? AND child_name = ?`)
+		if err != nil {
+			return err
+		}
+		defer untombStmt.Close()
 
-	upsertStmt, err := tx.Prepare(`
-		INSERT INTO dir_listings (drive_id, relative_path, child_name, is_dir, first_seen_at, last_seen_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(drive_id, relative_path, child_name) DO UPDATE SET
-			is_dir = excluded.is_dir,
-			last_seen_at = excluded.last_seen_at
-	`)
-	if err != nil {
-		return err
-	}
-	defer upsertStmt.Close()
+		var listStmt, deleteStmt, tombStmt *sql.Stmt
+		if deleteStale {
+			if listStmt, err = tx.Prepare(`SELECT child_name, is_dir FROM dir_listings WHERE drive_id = ? AND relative_path = ?`); err != nil {
+				return err
+			}
+			defer listStmt.Close()
+			if deleteStmt, err = tx.Prepare(`DELETE FROM dir_listings WHERE drive_id = ? AND relative_path = ? AND child_name = ?`); err != nil {
+				return err
+			}
+			defer deleteStmt.Close()
+			if tombStmt, err = prepareTombstone(tx); err != nil {
+				return err
+			}
+			defer tombStmt.Close()
+		}
 
-	var selectStmt, deleteStmt, deleteAllStmt *sql.Stmt
-	if deleteStale {
-		selectStmt, err = tx.Prepare(`SELECT child_name, is_dir FROM dir_listings WHERE drive_id = ? AND relative_path = ?`)
-		if err != nil {
-			return err
-		}
-		defer selectStmt.Close()
-		deleteStmt, err = tx.Prepare(`DELETE FROM dir_listings WHERE drive_id = ? AND relative_path = ? AND child_name = ?`)
-		if err != nil {
-			return err
-		}
-		defer deleteStmt.Close()
-		// Used by the recursive cascade below, to purge a removed
-		// directory's own former listing wholesale.
-		deleteAllStmt, err = tx.Prepare(`DELETE FROM dir_listings WHERE drive_id = ? AND relative_path = ?`)
-		if err != nil {
-			return err
-		}
-		defer deleteAllStmt.Close()
-	}
-
-	// cascadePurge removes dirPath's own listing-as-parent row(s), then
-	// recurses into any child that was itself a directory. Needed because
-	// a directory disappearing entirely means we'll never again observe
-	// it as a key in `entries` (there's nothing left to walk into), so
-	// its former children would otherwise become permanently orphaned
-	// (harmless — unreachable from drive_root — but untidy).
-	var cascadePurge func(dirPath string) error
-	cascadePurge = func(dirPath string) error {
-		rows, err := selectStmt.Query(driveID, dirPath)
-		if err != nil {
-			return err
-		}
 		type child struct {
 			name  string
 			isDir bool
 		}
-		var children []child
-		for rows.Next() {
-			var c child
-			if err := rows.Scan(&c.name, &c.isDir); err != nil {
-				rows.Close()
-				return err
+		listChildren := func(dirPath string) ([]child, error) {
+			rows, err := listStmt.Query(driveID, dirPath)
+			if err != nil {
+				return nil, err
 			}
-			children = append(children, c)
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		rows.Close()
-		if _, err := deleteAllStmt.Exec(driveID, dirPath); err != nil {
-			return err
-		}
-		for _, c := range children {
-			if c.isDir {
-				if err := cascadePurge(joinPath(dirPath, c.name)); err != nil {
-					return err
+			defer rows.Close()
+			var out []child
+			for rows.Next() {
+				var c child
+				if err := rows.Scan(&c.name, &c.isDir); err != nil {
+					return nil, err
 				}
+				out = append(out, c)
 			}
+			return out, rows.Err()
 		}
-		return nil
-	}
-
-	now := time.Now().UTC()
-	for parent, children := range entries {
-		if deleteStale {
-			wanted := make(map[string]bool, len(children))
-			for _, c := range children {
-				wanted[c.Name] = true
-			}
-			rows, err := selectStmt.Query(driveID, parent)
+		remove := func(parent, name string) error {
+			v, err := versions.take()
 			if err != nil {
 				return err
 			}
-			type existingChild struct {
-				name  string
-				isDir bool
-			}
-			var existing []existingChild
-			for rows.Next() {
-				var c existingChild
-				if err := rows.Scan(&c.name, &c.isDir); err != nil {
-					rows.Close()
-					return err
-				}
-				existing = append(existing, c)
-			}
-			if err := rows.Err(); err != nil {
-				rows.Close()
+			if _, err := deleteStmt.Exec(driveID, parent, name); err != nil {
 				return err
 			}
-			rows.Close()
-			for _, c := range existing {
-				if wanted[c.name] {
-					continue
-				}
-				if _, err := deleteStmt.Exec(driveID, parent, c.name); err != nil {
+			_, err = tombStmt.Exec(driveID, "dir_child", parent, name, v)
+			return err
+		}
+
+		// cascadePurge removes dirPath's own listing-as-parent row(s), then
+		// recurses into any child that was itself a directory. Needed because
+		// a directory disappearing entirely means we'll never again observe
+		// it as a key in `entries` (there's nothing left to walk into), so
+		// its former children would otherwise become permanently orphaned
+		// (harmless — unreachable from drive_root — but untidy).
+		var cascadePurge func(dirPath string) error
+		cascadePurge = func(dirPath string) error {
+			children, err := listChildren(dirPath)
+			if err != nil {
+				return err
+			}
+			for _, c := range children {
+				if err := remove(dirPath, c.name); err != nil {
 					return err
 				}
+			}
+			for _, c := range children {
 				if c.isDir {
-					if err := cascadePurge(joinPath(parent, c.name)); err != nil {
+					if err := cascadePurge(joinPath(dirPath, c.name)); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}
+
+		now := time.Now().UTC()
+		for parent, children := range entries {
+			if deleteStale {
+				wanted := make(map[string]bool, len(children))
+				for _, c := range children {
+					wanted[c.Name] = true
+				}
+				existing, err := listChildren(parent)
+				if err != nil {
+					return err
+				}
+				for _, c := range existing {
+					if wanted[c.name] {
+						continue
+					}
+					if err := remove(parent, c.name); err != nil {
+						return err
+					}
+					if c.isDir {
+						if err := cascadePurge(joinPath(parent, c.name)); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			for _, c := range children {
+				var wasDir bool
+				err := lookupStmt.QueryRow(driveID, parent, c.Name).Scan(&wasDir)
+				switch {
+				case err == sql.ErrNoRows:
+					v, err := versions.take()
+					if err != nil {
+						return err
+					}
+					if _, err := insertStmt.Exec(driveID, parent, c.Name, c.IsDir, now, now, v); err != nil {
+						return err
+					}
+					if _, err := untombStmt.Exec(driveID, parent, c.Name); err != nil {
+						return err
+					}
+				case err != nil:
+					return err
+				case wasDir != c.IsDir:
+					v, err := versions.take()
+					if err != nil {
+						return err
+					}
+					if _, err := changedStmt.Exec(c.IsDir, now, v, driveID, parent, c.Name); err != nil {
+						return err
+					}
+				default:
+					if _, err := touchStmt.Exec(now, driveID, parent, c.Name); err != nil {
 						return err
 					}
 				}
 			}
 		}
-		for _, c := range children {
-			if _, err := upsertStmt.Exec(driveID, parent, c.Name, c.IsDir, now, now); err != nil {
-				return err
-			}
+		return nil
+	})
+}
+
+// versionAlloc hands out feed versions inside one transaction, reserving
+// them from sync_clock in blocks. Versions left over at the end are simply
+// never used: the feed allows gaps.
+type versionAlloc struct {
+	tx        *sql.Tx
+	next, end int64 // next to hand out; end is the last reserved
+}
+
+const versionBlock = 1024
+
+func (a *versionAlloc) take() (int64, error) {
+	if a.next == 0 || a.next > a.end {
+		first, err := reserveVersions(a.tx, versionBlock)
+		if err != nil {
+			return 0, err
 		}
+		a.next, a.end = first, first+versionBlock-1
 	}
-	return tx.Commit()
+	v := a.next
+	a.next++
+	return v, nil
 }
 
 // ListFileRelativePaths returns every relative_path currently recorded for
@@ -713,29 +831,51 @@ func (s *Store) ListFileRelativePaths(driveID string) ([]string, error) {
 }
 
 // DeleteFiles removes a batch of files rows by relative_path — used when a
-// scan determines they no longer exist on disk.
+// scan determines they no longer exist on disk. Each removed row leaves a
+// 'file' tombstone with a new feed version, so the deletion is uploaded.
 func (s *Store) DeleteFiles(ctx context.Context, driveID string, relPaths []string) error {
 	if len(relPaths) == 0 {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.Prepare(`DELETE FROM files WHERE drive_id = ? AND relative_path = ?`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, p := range relPaths {
-		if _, err := stmt.Exec(driveID, p); err != nil {
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		first, err := reserveVersions(tx, len(relPaths))
+		if err != nil {
 			return err
 		}
-	}
-	return tx.Commit()
+		del, err := tx.Prepare(`DELETE FROM files WHERE drive_id = ? AND relative_path = ?`)
+		if err != nil {
+			return err
+		}
+		defer del.Close()
+		tomb, err := prepareTombstone(tx)
+		if err != nil {
+			return err
+		}
+		defer tomb.Close()
+
+		for i, p := range relPaths {
+			res, err := del.Exec(driveID, p)
+			if err != nil {
+				return err
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				continue // nothing was there; its version stays unused
+			}
+			if _, err := tomb.Exec(driveID, "file", p, "", first+int64(i)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// prepareTombstone records a deletion: (drive_id, kind, relative_path,
+// child_name, row_version).
+func prepareTombstone(tx *sql.Tx) (*sql.Stmt, error) {
+	return tx.Prepare(`
+		INSERT INTO sync_tombstones (drive_id, kind, relative_path, child_name, row_version) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(drive_id, kind, relative_path, child_name) DO UPDATE SET row_version = excluded.row_version
+	`)
 }
 
 // ListChildren returns the known immediate children of a directory
