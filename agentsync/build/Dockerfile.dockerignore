@@ -1,0 +1,4 @@
+# The build context is the repo root; send only agentsync/.
+*
+!agentsync/
+agentsync/build/

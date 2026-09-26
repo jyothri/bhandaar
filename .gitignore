@@ -19,3 +19,6 @@
 
 # postgres data folder
 build/data
+# Go workspaces are for local editor convenience only (see docs/specs/remote-sync-server.md)
+go.work
+go.work.sum

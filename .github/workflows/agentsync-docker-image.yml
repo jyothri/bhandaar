@@ -1,0 +1,66 @@
+name: Docker agentsync Image CI
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "agentsync/**"            # includes agentsync/wire
+      - ".github/workflows/agentsync-docker-image.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "agentsync/**"
+      - ".github/workflows/agentsync-docker-image.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AGENTSYNC_TEST_DB: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agentsync/go.mod
+          cache-dependency-path: agentsync/go.sum
+      - name: Test wire module (standard library only)
+        run: go test -race ./...
+        working-directory: agentsync/wire
+      - name: Vet
+        run: go vet ./...
+        working-directory: agentsync
+      - name: Test server (with race detector, against Postgres)
+        run: go test -race ./...
+        working-directory: agentsync
+
+  agentsync:
+    # Don't build or push an image whose tests fail.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lowercase the repo name and username
+        run: echo "REPO=${GITHUB_REPOSITORY,,}-agentsync" >>${GITHUB_ENV}
+      - uses: mr-smithers-excellent/docker-build-push@v6
+        name: Build Docker image (push to Docker Hub only on main)
+        with:
+          image: ${{ env.REPO }}
+          addLatest: true
+          # PRs build only; pushing :latest from a PR would ship unmerged code
+          # to production, which runs :latest.
+          pushImage: ${{ github.event_name == 'push' }}
+          registry: docker.io
+          dockerfile: ./agentsync/build/Dockerfile
+          # Needed for agentsync/build/Dockerfile.dockerignore (the build context is the repo root).
+          enableBuildKit: true
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
