@@ -434,7 +434,7 @@ Before updating the agent on a machine, make sure it's logged in (`driveagent re
 
 **After each agent release:** set `AGENTSERVER_LATEST_AGENT_VERSION`, and `AGENTSERVER_MIN_AGENT_VERSION` only when a release is required, in the prod `.env`, then restart `agentserver`.
 
-**Follow-ups** (separate specs, not part of this plan): a web UI for agent drives and linked copies (in `be`/`ui`, reading the `agent_*` tables); server-side compare; the thinner agent (overview, Future direction).
+**Follow-ups** (separate specs, not part of this plan): linking FAT, exFAT and NTFS drives across Linux and macOS by partition key ([`remote-sync-cross-os-linking.md`](remote-sync-cross-os-linking.md), proposed after M7); a web UI for agent drives and linked copies (in `be`/`ui`, reading the `agent_*` tables); server-side compare; the thinner agent (overview, Future direction).
 
 ---
 
