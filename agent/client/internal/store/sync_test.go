@@ -134,3 +134,37 @@ func TestDriveIDsAndPendingCount(t *testing.T) {
 		t.Errorf("clock = %d", c)
 	}
 }
+
+func TestResetStreams(t *testing.T) {
+	st := quietOpen(t, t.TempDir())
+	for _, id := range []string{"a", "b"} {
+		st.UpsertDrive(id, "/mnt/"+id, "")
+	}
+	st.SetStream("a", "", streamA)
+	st.ReplaceMarker("a", streamA, []wire.Range{{0, 4}, {6, 9}}, nil)
+	st.SetStream("b", "", streamB)
+	st.db.Exec(`INSERT INTO sync_rejected (drive_id, row_version, kind, relative_path, reason, rejected_at) VALUES ('b', 3, 'file', 'x', 'bad', '2026-01-01')`)
+
+	if err := st.ResetStreams(); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a", "b"} {
+		d, err := st.SyncDrive(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m := d.Marker; m.StreamID != "" || m.Watermark != 0 || len(m.Ranges) != 0 || !m.SyncedAt.IsZero() {
+			t.Errorf("%s: marker after the reset = %+v", id, m)
+		}
+		if r, _ := st.Rejected(id); len(r) != 0 {
+			t.Errorf("%s: rejected entries kept: %v", id, r)
+		}
+		if root, err := st.DriveRoot(id); err != nil || root != "/mnt/"+id {
+			t.Errorf("%s: drive root %q, %v", id, root, err)
+		}
+	}
+	// A new stream can be started from none.
+	if err := st.SetStream("a", "", streamB); err != nil {
+		t.Errorf("new stream after the reset: %v", err)
+	}
+}

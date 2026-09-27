@@ -102,11 +102,30 @@ By default the checkpoint database lives at `~/.driveagent/state.db`
 unmounted or disconnected mid-scan. Two `scan` processes for different
 drives can safely share the same checkpoint DB at the same time.
 
+From 0.5.0, `driveagent` keeps its processes apart (see
+[`docs/archive/agent-hardening.md`](../../docs/archive/agent-hardening.md)):
+
+- **One state dir and one version per machine.** While any `driveagent` runs,
+  another with a different `--state-dir`, or a different `driveagent` version,
+  exits 5 and names the one running. Upgrade only once running scans finish.
+- **One scan per disk.** A scan of a disk another scan is reading exits 5,
+  whatever its `--drive-id` or partition: both of seagate1's partitions are
+  one disk. `--wait` queues behind the other scan instead. Scans of different
+  disks, like seagate1 and seagate2, still run side by side.
+
+The locks live in `~/.driveagent-locks/`, and a crashed `driveagent` releases
+them. `$DRIVEAGENT_LOCK_DIR` points a process at another lock dir, for tests
+or a throwaway state dir; nothing is coordinated across lock dirs.
+
 A state dir belongs to **one machine**: never copy `~/.driveagent` to another
 machine (Migration Assistant, `rsync` to a new box) and keep using both. Once
 scans upload to the server, both copies would share one agent identity and
 keep wiping each other's upload. Give each machine its own state dir, created
-by its own `driveagent`. See the remote-sync overview's
+by its own `driveagent`. From 0.5.0, `agent.json` records its machine, and on
+another machine every command that talks to the server refuses to run. If the
+state dir moved for good (a new laptop), `driveagent login --new-agent` makes
+it a new agent, and the next `driveagent sync` uploads every drive again. See
+the remote-sync overview's
 [operational rules](../../docs/specs/remote-sync.md#operational-rules).
 
 ## The remote server
@@ -161,11 +180,15 @@ miss). On the server box itself use `127.0.0.1:443`. `remote-status` shows
 which path was used.
 
 A state dir logs in to, and will sync with, exactly one server. To try another
-server, use a copy of the state dir (`--state-dir`).
+server, use a copy of the state dir (`--state-dir`), with its own lock dir
+(`DRIVEAGENT_LOCK_DIR=/tmp/x`) if a `driveagent` with the real state dir is
+running.
 
 Exit codes: 0 ok, 1 local error (including a drive that went away
 mid-scan), 2 usage, 3 server unreachable, login needed or upload failed, 4 this
-`driveagent` is too old for the server (upgrade), 130 interrupted by Ctrl-C,
+`driveagent` is too old for the server (upgrade), 5 busy (another `driveagent`
+is running with another state dir or version, or scanning the same disk),
+130 interrupted by Ctrl-C,
 143 stopped by SIGTERM. An interrupted scan keeps what it recorded; re-run it
 to resume. The first Ctrl-C stops the walk and uploads what the scan recorded;
 a second one stops that upload too (then run `driveagent sync`). If the server

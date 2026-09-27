@@ -17,6 +17,7 @@ import (
 
 	"github.com/jyothri/bhandaar/agent/client/internal/identity"
 	"github.com/jyothri/bhandaar/agent/client/internal/remote/remotetest"
+	"github.com/jyothri/bhandaar/agent/client/internal/runlock"
 	"github.com/jyothri/bhandaar/agent/client/internal/store"
 	"github.com/jyothri/bhandaar/agent/client/internal/testutil"
 )
@@ -25,13 +26,28 @@ import (
 // with its own arguments instead of the tests (m.Run, which would parse
 // them as test flags, never runs). That lets a test run the real CLI as a
 // child process and send it signals.
+//
+// The tests (and the child processes, which inherit it) get a lock dir of
+// their own, so they never meet a real driveagent's locks; and each scan's
+// disk is its drive root, so scans of different temp dirs (all on one disk)
+// don't exclude each other. Tests of the disk lock set diskKeys themselves.
 func TestMain(m *testing.M) {
 	if os.Getenv("DRIVEAGENT_TEST_MAIN") == "1" {
 		main()
 		return
 	}
-	os.Exit(m.Run())
+	lockDir, err := os.MkdirTemp("", "driveagent-locks-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv(runlock.EnvDir, lockDir)
+	diskKeys = pathDiskKey
+	code := m.Run()
+	os.RemoveAll(lockDir)
+	os.Exit(code)
 }
+
+func pathDiskKey(root string) []string { return []string{"path:" + root} }
 
 func driveagent(t *testing.T, args ...string) *exec.Cmd {
 	t.Helper()

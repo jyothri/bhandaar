@@ -85,6 +85,114 @@ func TestAgentIDCorrupt(t *testing.T) {
 	}
 }
 
+// onMachine makes MachineID return id for the test.
+func onMachine(t *testing.T, id string) {
+	t.Helper()
+	old := MachineID
+	MachineID = func() string { return id }
+	t.Cleanup(func() { MachineID = old })
+}
+
+func readAgent(t *testing.T, dir string) agentFile {
+	t.Helper()
+	f, err := readAgentFile(filepath.Join(dir, AgentFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func TestAgentIDRecordsTheMachine(t *testing.T) {
+	dir := t.TempDir()
+	onMachine(t, "m1")
+	id, err := AgentID(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := readAgent(t, dir); f.MachineID != "m1" || f.AgentID != id {
+		t.Errorf("agent.json = %+v", f)
+	}
+}
+
+// An agent.json from before 0.5.0 adopts the machine it's used on, keeping
+// its agent id.
+func TestAgentIDAdoptsTheMachine(t *testing.T) {
+	dir := t.TempDir()
+	const old = "3f2c1d7e-0000-4000-8000-000000000001"
+	os.WriteFile(filepath.Join(dir, AgentFile), []byte(`{"agent_id":"`+old+`"}`), 0o600)
+	onMachine(t, "m1")
+	if id, err := AgentID(dir); err != nil || id != old {
+		t.Fatalf("AgentID = %q, %v", id, err)
+	}
+	if f := readAgent(t, dir); f.MachineID != "m1" || f.AgentID != old {
+		t.Errorf("agent.json = %+v", f)
+	}
+	if m := mode(t, filepath.Join(dir, AgentFile)); m != 0o600 {
+		t.Errorf("agent.json mode = %v", m)
+	}
+	noTempFiles(t, dir)
+}
+
+func TestAgentIDOnAnotherMachine(t *testing.T) {
+	dir := t.TempDir()
+	onMachine(t, "0123456789abcdef-linux-box")
+	id, err := AgentID(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onMachine(t, "fedcba9876543210-mac")
+	_, err = AgentID(dir)
+	var mm *MachineMismatchError
+	if !errors.As(err, &mm) || mm.AgentID != id || mm.Stored != "0123456789abcdef-linux-box" {
+		t.Fatalf("on another machine: %v", err)
+	}
+	if !strings.Contains(err.Error(), "driveagent login --new-agent") || !strings.Contains(err.Error(), "machine 01234567…") {
+		t.Errorf("message: %v", err)
+	}
+	// A machine whose id can't be read isn't a mismatch.
+	onMachine(t, "")
+	if got, err := AgentID(dir); err != nil || got != id {
+		t.Errorf("unknown machine: %q, %v", got, err)
+	}
+}
+
+func TestNewAgent(t *testing.T) {
+	dir := t.TempDir()
+	onMachine(t, "m1")
+	old, err := AgentID(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onMachine(t, "m2")
+	id, err := NewAgent(dir)
+	if err != nil || id == old {
+		t.Fatalf("NewAgent = %q, %v (old %q)", id, err, old)
+	}
+	if got, err := AgentID(dir); err != nil || got != id {
+		t.Errorf("AgentID after NewAgent = %q, %v", got, err)
+	}
+	if f := readAgent(t, dir); f.MachineID != "m2" {
+		t.Errorf("agent.json = %+v", f)
+	}
+	noTempFiles(t, dir)
+}
+
+func TestParseIOPlatformUUID(t *testing.T) {
+	out := []byte(`+-o J316sAP  <class IOPlatformExpertDevice, id 0x100000224, registered, matched, active, busy 0 (37 ms), retain 34>
+    {
+      "IOPlatformSerialNumber" = "C02XXXXXXX"
+      "IOPlatformUUID" = "4C4C4544-0000-1000-8000-B1C04F4E3332"
+      "model" = <"MacBookPro18,1">
+    }
+`)
+	if got := parseIOPlatformUUID(out); got != "4c4c4544-0000-1000-8000-b1c04f4e3332" {
+		t.Errorf("got %q", got)
+	}
+	if got := parseIOPlatformUUID([]byte("nothing")); got != "" {
+		t.Errorf("got %q", got)
+	}
+}
+
 func TestSaveLoadDelete(t *testing.T) {
 	dir := t.TempDir()
 	if c, err := Load(dir); c != nil || err != nil {

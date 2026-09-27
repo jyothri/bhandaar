@@ -33,14 +33,49 @@ var ErrNotLoggedIn = errors.New(`not logged in: run "driveagent login"`)
 
 type agentFile struct {
 	AgentID string `json:"agent_id"`
+	// MachineID is the machine the agent belongs to (MachineID), so a state
+	// dir copied to another machine is noticed. Empty if it couldn't be
+	// read; an agent.json from before 0.5.0 adopts the machine it's next
+	// used on.
+	MachineID string `json:"machine_id,omitempty"`
+}
+
+// MachineID returns this machine's id: /etc/machine-id on Linux,
+// IOPlatformUUID on macOS, "" if it can't be read. Tests replace it.
+var MachineID = machineID
+
+// MachineMismatchError means agent.json was written on another machine:
+// the state dir was copied or moved here (docs/archive/agent-hardening.md,
+// "Goal 1: machine binding").
+type MachineMismatchError struct {
+	AgentID, Stored, Current string
+}
+
+func (e *MachineMismatchError) Error() string {
+	return fmt.Sprintf("this state dir belongs to another machine (agent %s, machine %s; this machine is %s). "+
+		"Using one state dir on two machines makes them undo each other's uploads.\n"+
+		"If it was moved here for good, run \"driveagent login --new-agent\": this machine becomes a new agent and re-uploads its drives",
+		short(e.AgentID), short(e.Stored), short(e.Current))
+}
+
+func short(id string) string {
+	if len(id) > 8 {
+		return id[:8] + "…"
+	}
+	return id
 }
 
 // AgentID returns the state dir's agent id, creating it on first use. Two
-// processes creating it at once end up with the same id.
+// processes creating it at once end up with the same id. It fails with a
+// *MachineMismatchError if agent.json belongs to another machine.
 func AgentID(stateDir string) (string, error) {
 	path := filepath.Join(stateDir, AgentFile)
-	if id, err := readAgentID(path); err == nil || !errors.Is(err, os.ErrNotExist) {
-		return id, err
+	f, err := readAgentFile(path)
+	if err == nil {
+		return checkMachine(stateDir, f)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
 	}
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return "", err
@@ -49,7 +84,7 @@ func AgentID(stateDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	b, _ := json.Marshal(agentFile{AgentID: id.String()})
+	b, _ := json.Marshal(agentFile{AgentID: id.String(), MachineID: MachineID()})
 	tmp, err := writeTemp(stateDir, b)
 	if err != nil {
 		return "", err
@@ -60,22 +95,73 @@ func AgentID(stateDir string) (string, error) {
 	if err := os.Link(tmp, path); err != nil && !errors.Is(err, os.ErrExist) {
 		return "", err
 	}
-	return readAgentID(path)
+	if f, err = readAgentFile(path); err != nil {
+		return "", err
+	}
+	return checkMachine(stateDir, f)
 }
 
-func readAgentID(path string) (string, error) {
-	b, err := os.ReadFile(path)
+// checkMachine compares agent.json's machine with this one. One without a
+// machine (from before 0.5.0) adopts this machine; so does any, when this
+// machine's id can't be read.
+func checkMachine(stateDir string, f agentFile) (string, error) {
+	cur := MachineID()
+	switch {
+	case cur == "" || f.MachineID == cur:
+		return f.AgentID, nil
+	case f.MachineID == "":
+		f.MachineID = cur
+		if err := writeAgentFile(stateDir, f); err != nil {
+			return "", fmt.Errorf("recording the machine in %s: %w", AgentFile, err)
+		}
+		return f.AgentID, nil
+	}
+	return "", &MachineMismatchError{AgentID: f.AgentID, Stored: f.MachineID, Current: cur}
+}
+
+// NewAgent replaces the state dir's agent id with a new one, on this
+// machine ("login --new-agent"), and returns it.
+func NewAgent(stateDir string) (string, error) {
+	id, err := uuid.NewRandom()
 	if err != nil {
 		return "", err
 	}
+	if err := writeAgentFile(stateDir, agentFile{AgentID: id.String(), MachineID: MachineID()}); err != nil {
+		return "", err
+	}
+	return id.String(), nil
+}
+
+// writeAgentFile writes agent.json atomically (temp file + rename).
+func writeAgentFile(stateDir string, f agentFile) error {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return err
+	}
+	b, _ := json.Marshal(f)
+	tmp, err := writeTemp(stateDir, b)
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, filepath.Join(stateDir, AgentFile)); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func readAgentFile(path string) (agentFile, error) {
 	var f agentFile
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return f, err
+	}
 	if err := json.Unmarshal(b, &f); err != nil {
-		return "", fmt.Errorf("%s: %w", path, err)
+		return f, fmt.Errorf("%s: %w", path, err)
 	}
 	if _, err := uuid.Parse(f.AgentID); err != nil {
-		return "", fmt.Errorf("%s: agent_id %q is not a UUID", path, f.AgentID)
+		return f, fmt.Errorf("%s: agent_id %q is not a UUID", path, f.AgentID)
 	}
-	return f.AgentID, nil
+	return f, nil
 }
 
 // Credentials are a login's tokens, bound to the remote they came from.

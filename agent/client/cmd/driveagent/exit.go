@@ -18,6 +18,7 @@ const (
 	exitUsage   = 2
 	exitRemote  = 3
 	exitUpgrade = 4
+	exitBusy    = 5   // another driveagent holds a lock this one needs
 	exitSIGINT  = 130 // 128 + the signal number, as shells report it
 	exitSIGTERM = 143
 )
