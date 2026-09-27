@@ -1,0 +1,1214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<dict>
+		<key>Built-In</key>
+		<false/>
+		<key>Device Speed</key>
+		<integer>3</integer>
+		<key>IOCFPlugInTypes</key>
+		<dict>
+			<key>9dc7b780-9ec0-11d4-a54f-000a27052861</key>
+			<string>IOUSBHostFamily.kext/Contents/PlugIns/IOUSBLib.bundle</string>
+		</dict>
+		<key>IOClassNameOverride</key>
+		<string>IOUSBDevice</string>
+		<key>IOGeneralInterest</key>
+		<string>IOCommand is not serializable</string>
+		<key>IOObjectClass</key>
+		<string>IOUSBHostDevice</string>
+		<key>IOObjectRetainCount</key>
+		<integer>125</integer>
+		<key>IOPowerManagement</key>
+		<dict>
+			<key>CapabilityFlags</key>
+			<integer>32768</integer>
+			<key>ChildrenPowerState</key>
+			<integer>2</integer>
+			<key>CurrentPowerState</key>
+			<integer>2</integer>
+			<key>DevicePowerState</key>
+			<integer>2</integer>
+			<key>DriverPowerState</key>
+			<integer>0</integer>
+			<key>MaxPowerState</key>
+			<integer>2</integer>
+			<key>PowerOverrideOn</key>
+			<true/>
+		</dict>
+		<key>IORegistryEntryChildren</key>
+		<array>
+			<dict>
+				<key>IOObjectClass</key>
+				<string>AppleUSBHostLegacyClient</string>
+				<key>IOObjectRetainCount</key>
+				<integer>8</integer>
+				<key>IOPowerManagement</key>
+				<dict>
+					<key>CapabilityFlags</key>
+					<integer>65536</integer>
+					<key>CurrentPowerState</key>
+					<integer>1</integer>
+					<key>DevicePowerState</key>
+					<integer>0</integer>
+					<key>DriverPowerState</key>
+					<integer>1</integer>
+					<key>MaxPowerState</key>
+					<integer>2</integer>
+				</dict>
+				<key>IORegistryEntryID</key>
+				<integer>4294977402</integer>
+				<key>IORegistryEntryName</key>
+				<string>AppleUSBHostLegacyClient</string>
+				<key>IOServiceBusyState</key>
+				<integer>0</integer>
+				<key>IOServiceBusyTime</key>
+				<integer>0</integer>
+				<key>IOServiceState</key>
+				<integer>0</integer>
+			</dict>
+			<dict>
+				<key>CFBundleIdentifier</key>
+				<string>com.apple.driver.usb.AppleUSBHostCompositeDevice</string>
+				<key>CFBundleIdentifierKernel</key>
+				<string>com.apple.driver.usb.AppleUSBHostCompositeDevice</string>
+				<key>IOClass</key>
+				<string>AppleUSBHostCompositeDevice</string>
+				<key>IOMatchCategory</key>
+				<string>IODefaultMatchCategory</string>
+				<key>IOMatchedAtBoot</key>
+				<true/>
+				<key>IOObjectClass</key>
+				<string>AppleUSBHostCompositeDevice</string>
+				<key>IOObjectRetainCount</key>
+				<integer>4</integer>
+				<key>IOPersonalityPublisher</key>
+				<string>com.apple.driver.usb.AppleUSBHostCompositeDevice</string>
+				<key>IOPrimaryDriverTerminateOptions</key>
+				<true/>
+				<key>IOProbeScore</key>
+				<integer>50000</integer>
+				<key>IOProviderClass</key>
+				<string>IOUSBHostDevice</string>
+				<key>IORegistryEntryID</key>
+				<integer>4294977406</integer>
+				<key>IORegistryEntryName</key>
+				<string>AppleUSBHostCompositeDevice</string>
+				<key>IOServiceBusyState</key>
+				<integer>0</integer>
+				<key>IOServiceBusyTime</key>
+				<integer>0</integer>
+				<key>IOServiceState</key>
+				<integer>0</integer>
+				<key>bDeviceClass</key>
+				<integer>0</integer>
+				<key>bDeviceSubClass</key>
+				<integer>0</integer>
+				<key>kUSBPreferredConfiguration</key>
+				<integer>1</integer>
+			</dict>
+			<dict>
+				<key>IOCFPlugInTypes</key>
+				<dict>
+					<key>2d9786c6-9ef3-11d4-ad51-000a27052861</key>
+					<string>IOUSBHostFamily.kext/Contents/PlugIns/IOUSBLib.bundle</string>
+				</dict>
+				<key>IOClassNameOverride</key>
+				<string>IOUSBInterface</string>
+				<key>IOGeneralInterest</key>
+				<string>IOCommand is not serializable</string>
+				<key>IOObjectClass</key>
+				<string>IOUSBHostInterface</string>
+				<key>IOObjectRetainCount</key>
+				<integer>14</integer>
+				<key>IORegistryEntryChildren</key>
+				<array>
+					<dict>
+						<key>CFBundleIdentifier</key>
+						<string>com.apple.iokit.IOUSBMassStorageDriver</string>
+						<key>CFBundleIdentifierKernel</key>
+						<string>com.apple.iokit.IOUSBMassStorageDriver</string>
+						<key>IOClass</key>
+						<string>IOUSBMassStorageInterfaceNub</string>
+						<key>IOMatchCategory</key>
+						<string>IODefaultMatchCategory</string>
+						<key>IOMatchedAtBoot</key>
+						<true/>
+						<key>IOObjectClass</key>
+						<string>IOUSBMassStorageInterfaceNub</string>
+						<key>IOObjectRetainCount</key>
+						<integer>10</integer>
+						<key>IOPersonalityPublisher</key>
+						<string>com.apple.iokit.IOUSBMassStorageDriver</string>
+						<key>IOPowerManagement</key>
+						<dict>
+							<key>CapabilityFlags</key>
+							<integer>32768</integer>
+							<key>CurrentPowerState</key>
+							<integer>1</integer>
+							<key>DevicePowerState</key>
+							<integer>1</integer>
+							<key>DriverPowerState</key>
+							<integer>1</integer>
+							<key>MaxPowerState</key>
+							<integer>1</integer>
+						</dict>
+						<key>IOProbeScore</key>
+						<integer>50000</integer>
+						<key>IOProviderClass</key>
+						<string>IOUSBHostInterface</string>
+						<key>IORegistryEntryChildren</key>
+						<array>
+							<dict>
+								<key>CFBundleIdentifier</key>
+								<string>com.apple.iokit.IOUSBMassStorageDriver</string>
+								<key>CFBundleIdentifierKernel</key>
+								<string>com.apple.iokit.IOUSBMassStorageDriver</string>
+								<key>IOClass</key>
+								<string>IOUSBMassStorageDriverNub</string>
+								<key>IOMatchCategory</key>
+								<string>IODefaultMatchCategory</string>
+								<key>IOMatchedAtBoot</key>
+								<true/>
+								<key>IOObjectClass</key>
+								<string>IOUSBMassStorageDriverNub</string>
+								<key>IOObjectRetainCount</key>
+								<integer>14</integer>
+								<key>IOPersonalityPublisher</key>
+								<string>com.apple.iokit.IOUSBMassStorageDriver</string>
+								<key>IOPowerManagement</key>
+								<dict>
+									<key>CapabilityFlags</key>
+									<integer>32768</integer>
+									<key>ChildrenPowerState</key>
+									<integer>1</integer>
+									<key>CurrentPowerState</key>
+									<integer>1</integer>
+									<key>DevicePowerState</key>
+									<integer>1</integer>
+									<key>DriverPowerState</key>
+									<integer>1</integer>
+									<key>MaxPowerState</key>
+									<integer>1</integer>
+								</dict>
+								<key>IOProbeScore</key>
+								<integer>0</integer>
+								<key>IOProviderClass</key>
+								<string>IOUSBMassStorageInterfaceNub</string>
+								<key>IORegistryEntryChildren</key>
+								<array>
+									<dict>
+										<key>CFBundleIdentifier</key>
+										<string>com.apple.iokit.IOUSBMassStorageDriver</string>
+										<key>CFBundleIdentifierKernel</key>
+										<string>com.apple.iokit.IOUSBMassStorageDriver</string>
+										<key>IOClass</key>
+										<string>IOUSBMassStorageUASDriver</string>
+										<key>IOMatchCategory</key>
+										<string>IODefaultMatchCategory</string>
+										<key>IOMatchedAtBoot</key>
+										<true/>
+										<key>IOMaximumSegmentByteCountRead</key>
+										<integer>65536</integer>
+										<key>IOMaximumSegmentByteCountWrite</key>
+										<integer>65536</integer>
+										<key>IOMaximumSegmentCountRead</key>
+										<integer>128</integer>
+										<key>IOMaximumSegmentCountWrite</key>
+										<integer>128</integer>
+										<key>IOObjectClass</key>
+										<string>IOUSBMassStorageUASDriver</string>
+										<key>IOObjectRetainCount</key>
+										<integer>9</integer>
+										<key>IOPersonalityPublisher</key>
+										<string>com.apple.iokit.IOUSBMassStorageDriver</string>
+										<key>IOPowerManagement</key>
+										<dict>
+											<key>CapabilityFlags</key>
+											<integer>49152</integer>
+											<key>ChildrenPowerState</key>
+											<integer>1</integer>
+											<key>CurrentPowerState</key>
+											<integer>1</integer>
+											<key>DevicePowerState</key>
+											<integer>1</integer>
+											<key>DriverPowerState</key>
+											<integer>1</integer>
+											<key>MaxPowerState</key>
+											<integer>1</integer>
+										</dict>
+										<key>IOProbeScore</key>
+										<integer>0</integer>
+										<key>IOProviderClass</key>
+										<string>IOUSBMassStorageDriverNub</string>
+										<key>IORegistryEntryChildren</key>
+										<array>
+											<dict>
+												<key>Hierarchical LUN Support</key>
+												<false/>
+												<key>INQUIRY Device Identification</key>
+												<array>
+													<dict>
+														<key>Association</key>
+														<integer>0</integer>
+														<key>Code Set</key>
+														<integer>1</integer>
+														<key>Identifier</key>
+														<data>
+														UAAAAAAAAAE=
+														</data>
+														<key>Identifier Type</key>
+														<integer>3</integer>
+													</dict>
+												</array>
+												<key>INQUIRY Unit Serial Number</key>
+												<string>NA95MASK</string>
+												<key>IOMaximumByteCountRead</key>
+												<integer>1048576</integer>
+												<key>IOMaximumByteCountWrite</key>
+												<integer>1048576</integer>
+												<key>IOObjectClass</key>
+												<string>IOSCSITargetDevice</string>
+												<key>IOObjectRetainCount</key>
+												<integer>10</integer>
+												<key>IOPowerManagement</key>
+												<dict>
+													<key>ActivityTickles</key>
+													<integer>0</integer>
+													<key>CapabilityFlags</key>
+													<integer>0</integer>
+													<key>ChildProxyPowerState</key>
+													<integer>1</integer>
+													<key>ChildrenPowerState</key>
+													<integer>1</integer>
+													<key>CurrentPowerState</key>
+													<integer>1</integer>
+													<key>DevicePowerState</key>
+													<integer>1</integer>
+													<key>DriverPowerState</key>
+													<integer>1</integer>
+													<key>IdleTimerElapsedTime</key>
+													<integer>86164</integer>
+													<key>IdleTimerPeriod</key>
+													<integer>600000</integer>
+													<key>MaxPowerState</key>
+													<integer>1</integer>
+												</dict>
+												<key>IORegistryEntryChildren</key>
+												<array>
+													<dict>
+														<key>CurrentPowerState</key>
+														<integer>1</integer>
+														<key>INQUIRY Device Identification</key>
+														<array>
+															<dict>
+																<key>Association</key>
+																<integer>0</integer>
+																<key>Code Set</key>
+																<integer>1</integer>
+																<key>Identifier</key>
+																<data>
+																UAAAAAAAAAE=
+																</data>
+																<key>Identifier Type</key>
+																<integer>3</integer>
+															</dict>
+														</array>
+														<key>IOMatchCategory</key>
+														<string>SCSITaskUserClientIniter</string>
+														<key>IOObjectClass</key>
+														<string>IOSCSIHierarchicalLogicalUnit</string>
+														<key>IOObjectRetainCount</key>
+														<integer>10</integer>
+														<key>IOPowerManagement</key>
+														<dict>
+															<key>CapabilityFlags</key>
+															<integer>49152</integer>
+															<key>ChildProxyPowerState</key>
+															<integer>1</integer>
+															<key>ChildrenPowerState</key>
+															<integer>1</integer>
+															<key>CurrentPowerState</key>
+															<integer>1</integer>
+															<key>DevicePowerState</key>
+															<integer>1</integer>
+															<key>DriverPowerState</key>
+															<integer>1</integer>
+															<key>MaxPowerState</key>
+															<integer>1</integer>
+														</dict>
+														<key>IORegistryEntryChildren</key>
+														<array>
+															<dict>
+																<key>CFBundleIdentifier</key>
+																<string>com.apple.iokit.IOSCSIBlockCommandsDevice</string>
+																<key>CFBundleIdentifierKernel</key>
+																<string>com.apple.iokit.IOSCSIBlockCommandsDevice</string>
+																<key>IOClass</key>
+																<string>IOSCSIPeripheralDeviceType00</string>
+																<key>IOMatchCategory</key>
+																<string>IODefaultMatchCategory</string>
+																<key>IOMatchedAtBoot</key>
+																<true/>
+																<key>IOMaximumBlockCountRead</key>
+																<integer>2048</integer>
+																<key>IOMaximumBlockCountWrite</key>
+																<integer>2048</integer>
+																<key>IOMaximumByteCountRead</key>
+																<integer>1048576</integer>
+																<key>IOMaximumByteCountWrite</key>
+																<integer>1048576</integer>
+																<key>IOMediaIcon</key>
+																<dict>
+																	<key>CFBundleIdentifier</key>
+																	<string>com.apple.iokit.IOSCSIArchitectureModelFamily</string>
+																	<key>IOBundleResourceFile</key>
+																	<string>USBHD.icns</string>
+																</dict>
+																<key>IOObjectClass</key>
+																<string>IOSCSIPeripheralDeviceType00</string>
+																<key>IOObjectRetainCount</key>
+																<integer>9</integer>
+																<key>IOPersonalityPublisher</key>
+																<string>com.apple.iokit.IOSCSIBlockCommandsDevice</string>
+																<key>IOPowerManagement</key>
+																<dict>
+																	<key>ActivityTickles</key>
+																	<integer>5678</integer>
+																	<key>CapabilityFlags</key>
+																	<integer>49216</integer>
+																	<key>CurrentPowerState</key>
+																	<integer>4</integer>
+																	<key>DevicePowerState</key>
+																	<integer>4</integer>
+																	<key>DriverPowerState</key>
+																	<integer>1</integer>
+																	<key>IdleTimerElapsedTime</key>
+																	<integer>83401</integer>
+																	<key>IdleTimerPeriod</key>
+																	<integer>200000</integer>
+																	<key>MaxPowerState</key>
+																	<integer>4</integer>
+																	<key>TimeSinceLastTickle</key>
+																	<integer>24447</integer>
+																</dict>
+																<key>IOPrimaryDriverTerminateOptions</key>
+																<true/>
+																<key>IOProbeScore</key>
+																<integer>5000</integer>
+																<key>IOProviderClass</key>
+																<string>IOSCSIPeripheralDeviceNub</string>
+																<key>IORegistryEntryChildren</key>
+																<array>
+																	<dict>
+																		<key>Device Characteristics</key>
+																		<dict>
+																			<key>Product Name</key>
+																			<string>Ultra Slim MT</string>
+																			<key>Product Revision Level</key>
+																			<string>0304</string>
+																			<key>Vendor Name</key>
+																			<string>Seagate</string>
+																		</dict>
+																		<key>IOMinimumSegmentAlignmentByteCount</key>
+																		<integer>4</integer>
+																		<key>IOObjectClass</key>
+																		<string>IOBlockStorageServices</string>
+																		<key>IOObjectRetainCount</key>
+																		<integer>6</integer>
+																		<key>IORegistryEntryChildren</key>
+																		<array>
+																			<dict>
+																				<key>CFBundleIdentifier</key>
+																				<string>com.apple.iokit.IOStorageFamily</string>
+																				<key>CFBundleIdentifierKernel</key>
+																				<string>com.apple.iokit.IOStorageFamily</string>
+																				<key>IOClass</key>
+																				<string>IOBlockStorageDriver</string>
+																				<key>IOGeneralInterest</key>
+																				<string>IOCommand is not serializable</string>
+																				<key>IOMatchCategory</key>
+																				<string>IODefaultMatchCategory</string>
+																				<key>IOMatchedAtBoot</key>
+																				<true/>
+																				<key>IOObjectClass</key>
+																				<string>IOBlockStorageDriver</string>
+																				<key>IOObjectRetainCount</key>
+																				<integer>8</integer>
+																				<key>IOPowerManagement</key>
+																				<dict>
+																					<key>CapabilityFlags</key>
+																					<integer>0</integer>
+																					<key>CurrentPowerState</key>
+																					<integer>0</integer>
+																				</dict>
+																				<key>IOProbeScore</key>
+																				<integer>0</integer>
+																				<key>IOPropertyMatch</key>
+																				<dict>
+																					<key>device-type</key>
+																					<string>Generic</string>
+																				</dict>
+																				<key>IOProviderClass</key>
+																				<string>IOBlockStorageDevice</string>
+																				<key>IORegistryEntryChildren</key>
+																				<array>
+																					<dict>
+																						<key>BSD Major</key>
+																						<integer>1</integer>
+																						<key>BSD Minor</key>
+																						<integer>13</integer>
+																						<key>BSD Name</key>
+																						<string>disk3</string>
+																						<key>BSD Unit</key>
+																						<integer>3</integer>
+																						<key>Content</key>
+																						<string>FDisk_partition_scheme</string>
+																						<key>Content Hint</key>
+																						<string></string>
+																						<key>Ejectable</key>
+																						<false/>
+																						<key>IOBusyInterest</key>
+																						<string>IOCommand is not serializable</string>
+																						<key>IOGeneralInterest</key>
+																						<string>IOCommand is not serializable</string>
+																						<key>IOObjectClass</key>
+																						<string>IOMedia</string>
+																						<key>IOObjectRetainCount</key>
+																						<integer>12</integer>
+																						<key>IORegistryEntryChildren</key>
+																						<array>
+																							<dict>
+																								<key>CFBundleIdentifier</key>
+																								<string>com.apple.iokit.IOStorageFamily</string>
+																								<key>CFBundleIdentifierKernel</key>
+																								<string>com.apple.iokit.IOStorageFamily</string>
+																								<key>IOClass</key>
+																								<string>IOMediaBSDClient</string>
+																								<key>IOMatchCategory</key>
+																								<string>IOMediaBSDClient</string>
+																								<key>IOMatchedAtBoot</key>
+																								<true/>
+																								<key>IOObjectClass</key>
+																								<string>IOMediaBSDClient</string>
+																								<key>IOObjectRetainCount</key>
+																								<integer>6</integer>
+																								<key>IOProbeScore</key>
+																								<integer>30000</integer>
+																								<key>IOProviderClass</key>
+																								<string>IOMedia</string>
+																								<key>IORegistryEntryID</key>
+																								<integer>4294977433</integer>
+																								<key>IORegistryEntryName</key>
+																								<string>IOMediaBSDClient</string>
+																								<key>IOResourceMatch</key>
+																								<string>IOBSD</string>
+																								<key>IOServiceBusyState</key>
+																								<integer>0</integer>
+																								<key>IOServiceBusyTime</key>
+																								<integer>937093</integer>
+																								<key>IOServiceState</key>
+																								<integer>30</integer>
+																							</dict>
+																							<dict>
+																								<key>CFBundleIdentifier</key>
+																								<string>com.apple.iokit.IOStorageFamily</string>
+																								<key>CFBundleIdentifierKernel</key>
+																								<string>com.apple.iokit.IOStorageFamily</string>
+																								<key>Content Mask</key>
+																								<string>FDisk_partition_scheme</string>
+																								<key>Content Table</key>
+																								<dict>
+																									<key>0x01</key>
+																									<string>DOS_FAT_12</string>
+																									<key>0x04</key>
+																									<string>DOS_FAT_16_S</string>
+																									<key>0x06</key>
+																									<string>DOS_FAT_16</string>
+																									<key>0x07</key>
+																									<string>Windows_NTFS</string>
+																									<key>0x0B</key>
+																									<string>DOS_FAT_32</string>
+																									<key>0x0C</key>
+																									<string>Windows_FAT_32</string>
+																									<key>0x0E</key>
+																									<string>Windows_FAT_16</string>
+																									<key>0x14</key>
+																									<string>DOS_FAT_16_S_Hidden</string>
+																									<key>0x16</key>
+																									<string>DOS_FAT_16_Hidden</string>
+																									<key>0x42</key>
+																									<string>Windows_LDM</string>
+																									<key>0x82</key>
+																									<string>Linux_Swap</string>
+																									<key>0x83</key>
+																									<string>Linux</string>
+																									<key>0x8E</key>
+																									<string>Linux_LVM</string>
+																									<key>0xA5</key>
+																									<string>FreeBSD</string>
+																									<key>0xA6</key>
+																									<string>OpenBSD</string>
+																									<key>0xA7</key>
+																									<string>Apple_Rhapsody_UFS</string>
+																									<key>0xA8</key>
+																									<string>Apple_UFS</string>
+																									<key>0xA9</key>
+																									<string>NetBSD</string>
+																									<key>0xAB</key>
+																									<string>Apple_Boot</string>
+																									<key>0xAE</key>
+																									<string>Apple_Encrypted</string>
+																									<key>0xAF</key>
+																									<string>Apple_HFS</string>
+																									<key>0xFD</key>
+																									<string>Linux_RAID</string>
+																								</dict>
+																								<key>IOClass</key>
+																								<string>IOFDiskPartitionScheme</string>
+																								<key>IOMatchCategory</key>
+																								<string>IOStorage</string>
+																								<key>IOMatchedAtBoot</key>
+																								<true/>
+																								<key>IOObjectClass</key>
+																								<string>IOFDiskPartitionScheme</string>
+																								<key>IOObjectRetainCount</key>
+																								<integer>6</integer>
+																								<key>IOProbeScore</key>
+																								<integer>3000</integer>
+																								<key>IOPropertyMatch</key>
+																								<dict>
+																									<key>Whole</key>
+																									<true/>
+																								</dict>
+																								<key>IOProviderClass</key>
+																								<string>IOMedia</string>
+																								<key>IORegistryEntryChildren</key>
+																								<array>
+																									<dict>
+																										<key>BSD Major</key>
+																										<integer>1</integer>
+																										<key>BSD Minor</key>
+																										<integer>14</integer>
+																										<key>BSD Name</key>
+																										<string>disk3s1</string>
+																										<key>BSD Unit</key>
+																										<integer>3</integer>
+																										<key>Base</key>
+																										<integer>1048576</integer>
+																										<key>Content</key>
+																										<string>Windows_NTFS</string>
+																										<key>Content Hint</key>
+																										<string>Windows_NTFS</string>
+																										<key>Ejectable</key>
+																										<false/>
+																										<key>IOBusyInterest</key>
+																										<string>IOCommand is not serializable</string>
+																										<key>IOGeneralInterest</key>
+																										<string>IOCommand is not serializable</string>
+																										<key>IOObjectClass</key>
+																										<string>IOMedia</string>
+																										<key>IOObjectRetainCount</key>
+																										<integer>11</integer>
+																										<key>IORegistryEntryChildren</key>
+																										<array>
+																											<dict>
+																												<key>CFBundleIdentifier</key>
+																												<string>com.apple.iokit.IOStorageFamily</string>
+																												<key>CFBundleIdentifierKernel</key>
+																												<string>com.apple.iokit.IOStorageFamily</string>
+																												<key>IOClass</key>
+																												<string>IOMediaBSDClient</string>
+																												<key>IOMatchCategory</key>
+																												<string>IOMediaBSDClient</string>
+																												<key>IOMatchedAtBoot</key>
+																												<true/>
+																												<key>IOObjectClass</key>
+																												<string>IOMediaBSDClient</string>
+																												<key>IOObjectRetainCount</key>
+																												<integer>7</integer>
+																												<key>IOProbeScore</key>
+																												<integer>30000</integer>
+																												<key>IOProviderClass</key>
+																												<string>IOMedia</string>
+																												<key>IORegistryEntryID</key>
+																												<integer>4294977440</integer>
+																												<key>IORegistryEntryName</key>
+																												<string>IOMediaBSDClient</string>
+																												<key>IOResourceMatch</key>
+																												<string>IOBSD</string>
+																												<key>IOServiceBusyState</key>
+																												<integer>0</integer>
+																												<key>IOServiceBusyTime</key>
+																												<integer>620691</integer>
+																												<key>IOServiceState</key>
+																												<integer>30</integer>
+																											</dict>
+																										</array>
+																										<key>IORegistryEntryID</key>
+																										<integer>4294977439</integer>
+																										<key>IORegistryEntryLocation</key>
+																										<string>1</string>
+																										<key>IORegistryEntryName</key>
+																										<string>Untitled 1</string>
+																										<key>IOServiceBusyState</key>
+																										<integer>0</integer>
+																										<key>IOServiceBusyTime</key>
+																										<integer>1471474</integer>
+																										<key>IOServiceState</key>
+																										<integer>30</integer>
+																										<key>Leaf</key>
+																										<true/>
+																										<key>Open</key>
+																										<true/>
+																										<key>Partition ID</key>
+																										<integer>1</integer>
+																										<key>Preferred Block Size</key>
+																										<integer>512</integer>
+																										<key>Removable</key>
+																										<false/>
+																										<key>Size</key>
+																										<integer>2000396746752</integer>
+																										<key>Whole</key>
+																										<false/>
+																										<key>Writable</key>
+																										<true/>
+																									</dict>
+																								</array>
+																								<key>IORegistryEntryID</key>
+																								<integer>4294977436</integer>
+																								<key>IORegistryEntryName</key>
+																								<string>IOFDiskPartitionScheme</string>
+																								<key>IOServiceBusyState</key>
+																								<integer>0</integer>
+																								<key>IOServiceBusyTime</key>
+																								<integer>1471794</integer>
+																								<key>IOServiceState</key>
+																								<integer>0</integer>
+																							</dict>
+																						</array>
+																						<key>IORegistryEntryID</key>
+																						<integer>4294977432</integer>
+																						<key>IORegistryEntryName</key>
+																						<string>Seagate Ultra Slim MT Media</string>
+																						<key>IOServiceBusyState</key>
+																						<integer>0</integer>
+																						<key>IOServiceBusyTime</key>
+																						<integer>40229738</integer>
+																						<key>IOServiceState</key>
+																						<integer>30</integer>
+																						<key>Leaf</key>
+																						<false/>
+																						<key>Open</key>
+																						<true/>
+																						<key>Preferred Block Size</key>
+																						<integer>512</integer>
+																						<key>Removable</key>
+																						<false/>
+																						<key>Size</key>
+																						<integer>2000398933504</integer>
+																						<key>Whole</key>
+																						<true/>
+																						<key>Writable</key>
+																						<true/>
+																					</dict>
+																				</array>
+																				<key>IORegistryEntryID</key>
+																				<integer>4294977430</integer>
+																				<key>IORegistryEntryName</key>
+																				<string>IOBlockStorageDriver</string>
+																				<key>IOServiceBusyState</key>
+																				<integer>0</integer>
+																				<key>IOServiceBusyTime</key>
+																				<integer>40684702</integer>
+																				<key>IOServiceState</key>
+																				<integer>30</integer>
+																				<key>Statistics</key>
+																				<dict>
+																					<key>Bytes (Read)</key>
+																					<integer>749354496</integer>
+																					<key>Bytes (Write)</key>
+																					<integer>0</integer>
+																					<key>Errors (Read)</key>
+																					<integer>0</integer>
+																					<key>Errors (Write)</key>
+																					<integer>0</integer>
+																					<key>Latency Time (Read)</key>
+																					<integer>0</integer>
+																					<key>Latency Time (Write)</key>
+																					<integer>0</integer>
+																					<key>Operations (Read)</key>
+																					<integer>5678</integer>
+																					<key>Operations (Write)</key>
+																					<integer>0</integer>
+																					<key>Retries (Read)</key>
+																					<integer>0</integer>
+																					<key>Retries (Write)</key>
+																					<integer>0</integer>
+																					<key>Total Time (Read)</key>
+																					<integer>45147207230</integer>
+																					<key>Total Time (Write)</key>
+																					<integer>0</integer>
+																				</dict>
+																			</dict>
+																		</array>
+																		<key>IORegistryEntryID</key>
+																		<integer>4294977429</integer>
+																		<key>IORegistryEntryName</key>
+																		<string>IOBlockStorageServices</string>
+																		<key>IOServiceBusyState</key>
+																		<integer>0</integer>
+																		<key>IOServiceBusyTime</key>
+																		<integer>41390587</integer>
+																		<key>IOServiceState</key>
+																		<integer>30</integer>
+																		<key>Protocol Characteristics</key>
+																		<dict>
+																			<key>Physical Interconnect</key>
+																			<string>USB</string>
+																			<key>Physical Interconnect Location</key>
+																			<string>External</string>
+																			<key>Read Time Out Duration</key>
+																			<integer>30000</integer>
+																			<key>Retry Count</key>
+																			<integer>20</integer>
+																			<key>SCSI Logical Unit Bytes</key>
+																			<data>
+																			AAAAAAAAAAA=
+																			</data>
+																			<key>SCSI Logical Unit Number</key>
+																			<integer>0</integer>
+																			<key>Write Time Out Duration</key>
+																			<integer>30000</integer>
+																		</dict>
+																		<key>device-type</key>
+																		<string>Generic</string>
+																	</dict>
+																</array>
+																<key>IORegistryEntryID</key>
+																<integer>4294977422</integer>
+																<key>IORegistryEntryName</key>
+																<string>IOSCSIPeripheralDeviceType00</string>
+																<key>IOServiceBusyState</key>
+																<integer>0</integer>
+																<key>IOServiceBusyTime</key>
+																<integer>41390887</integer>
+																<key>IOServiceState</key>
+																<integer>0</integer>
+																<key>Peripheral Device Type</key>
+																<integer>0</integer>
+																<key>WriteCacheState</key>
+																<true/>
+															</dict>
+														</array>
+														<key>IORegistryEntryID</key>
+														<integer>4294977419</integer>
+														<key>IORegistryEntryLocation</key>
+														<string>0000000000000000</string>
+														<key>IORegistryEntryName</key>
+														<string>IOSCSIHierarchicalLogicalUnit</string>
+														<key>IOServiceBusyState</key>
+														<integer>0</integer>
+														<key>IOServiceBusyTime</key>
+														<integer>2704241002</integer>
+														<key>IOServiceState</key>
+														<integer>30</integer>
+														<key>IOUnitLUN</key>
+														<integer>0</integer>
+														<key>IOUnitLUNBytes</key>
+														<data>
+														AAAAAAAAAAA=
+														</data>
+														<key>Peripheral Device Type</key>
+														<integer>0</integer>
+														<key>Product Identification</key>
+														<string>Ultra Slim MT</string>
+														<key>Product Revision Level</key>
+														<string>0304</string>
+														<key>Protocol Characteristics</key>
+														<dict>
+															<key>Physical Interconnect</key>
+															<string>USB</string>
+															<key>Physical Interconnect Location</key>
+															<string>External</string>
+															<key>Read Time Out Duration</key>
+															<integer>30000</integer>
+															<key>Retry Count</key>
+															<integer>20</integer>
+															<key>SCSI Logical Unit Bytes</key>
+															<data>
+															AAAAAAAAAAA=
+															</data>
+															<key>SCSI Logical Unit Number</key>
+															<integer>0</integer>
+															<key>Write Time Out Duration</key>
+															<integer>30000</integer>
+														</dict>
+														<key>SCSI Logical Unit Bytes</key>
+														<data>
+														AAAAAAAAAAA=
+														</data>
+														<key>SCSI Logical Unit Number</key>
+														<integer>0</integer>
+														<key>TPGS Information</key>
+														<integer>0</integer>
+														<key>Vendor Identification</key>
+														<string>Seagate</string>
+													</dict>
+												</array>
+												<key>IORegistryEntryID</key>
+												<integer>4294977417</integer>
+												<key>IORegistryEntryName</key>
+												<string>IOSCSITargetDevice</string>
+												<key>IOServiceBusyState</key>
+												<integer>0</integer>
+												<key>IOServiceBusyTime</key>
+												<integer>2704240719</integer>
+												<key>IOServiceState</key>
+												<integer>30</integer>
+												<key>Peripheral Device Type</key>
+												<integer>0</integer>
+												<key>Product Identification</key>
+												<string>Ultra Slim MT</string>
+												<key>Product Revision Level</key>
+												<string>0304</string>
+												<key>Protocol Characteristics</key>
+												<dict>
+													<key>Physical Interconnect</key>
+													<string>USB</string>
+													<key>Physical Interconnect Location</key>
+													<string>External</string>
+													<key>Read Time Out Duration</key>
+													<integer>30000</integer>
+													<key>Retry Count</key>
+													<integer>20</integer>
+													<key>Write Time Out Duration</key>
+													<integer>30000</integer>
+												</dict>
+												<key>Vendor Identification</key>
+												<string>Seagate</string>
+											</dict>
+										</array>
+										<key>IORegistryEntryID</key>
+										<integer>4294977415</integer>
+										<key>IORegistryEntryName</key>
+										<string>IOUSBMassStorageUASDriver</string>
+										<key>IOServiceBusyState</key>
+										<integer>0</integer>
+										<key>IOServiceBusyTime</key>
+										<integer>2704239714</integer>
+										<key>IOServiceState</key>
+										<integer>30</integer>
+										<key>IOUnit</key>
+										<integer>1</integer>
+										<key>Physical Interconnect</key>
+										<string>USB</string>
+										<key>Physical Interconnect Location</key>
+										<string>External</string>
+										<key>Protocol Characteristics</key>
+										<dict>
+											<key>Retry Count</key>
+											<integer>20</integer>
+										</dict>
+										<key>Queue Depth</key>
+										<integer>31</integer>
+										<key>Read Time Out Duration</key>
+										<integer>30000</integer>
+										<key>Retry Count</key>
+										<integer>20</integer>
+										<key>Supports Streams</key>
+										<true/>
+										<key>UAS Version</key>
+										<string>Version .04</string>
+										<key>USB Mass Storage Trace ID</key>
+										<integer>847427889678778368</integer>
+										<key>Write Time Out Duration</key>
+										<integer>30000</integer>
+										<key>bInterfaceProtocol</key>
+										<integer>98</integer>
+									</dict>
+								</array>
+								<key>IORegistryEntryID</key>
+								<integer>4294977413</integer>
+								<key>IORegistryEntryName</key>
+								<string>IOUSBMassStorageDriverNub</string>
+								<key>IOServiceBusyState</key>
+								<integer>0</integer>
+								<key>IOServiceBusyTime</key>
+								<integer>2809713326</integer>
+								<key>IOServiceState</key>
+								<integer>30</integer>
+								<key>Number Of InterfaceNubs</key>
+								<integer>1</integer>
+								<key>Physical Interconnect</key>
+								<string>USB</string>
+								<key>Physical Interconnect Location</key>
+								<string>External</string>
+								<key>USB Device Info</key>
+								<dict>
+									<key>USB Product Name</key>
+									<string>Ultra Slim MT</string>
+									<key>bConfigurationValue</key>
+									<integer>1</integer>
+									<key>bInterfaceClass</key>
+									<integer>8</integer>
+									<key>bInterfaceNumber</key>
+									<integer>0</integer>
+									<key>bInterfaceProtocol</key>
+									<integer>98</integer>
+									<key>bInterfaceSubClass</key>
+									<integer>6</integer>
+									<key>bNumConfigurations</key>
+									<integer>1</integer>
+									<key>bcdDevice</key>
+									<integer>256</integer>
+									<key>idProduct</key>
+									<integer>43821</integer>
+									<key>idVendor</key>
+									<integer>3010</integer>
+									<key>kUSBProductString</key>
+									<string>Ultra Slim MT</string>
+									<key>kUSBSerialNumberString</key>
+									<string>NA95MASK</string>
+									<key>kUSBVendorString</key>
+									<string>Seagate</string>
+									<key>locationID</key>
+									<integer>17825792</integer>
+								</dict>
+								<key>USB Mass Storage Trace ID</key>
+								<integer>847427889678778368</integer>
+								<key>USB Product Name</key>
+								<string>Ultra Slim MT</string>
+								<key>bConfigurationValue</key>
+								<integer>1</integer>
+								<key>bInterfaceClass</key>
+								<integer>8</integer>
+								<key>bInterfaceNumber</key>
+								<integer>0</integer>
+								<key>bInterfaceProtocol</key>
+								<integer>98</integer>
+								<key>bInterfaceSubClass</key>
+								<integer>6</integer>
+								<key>idProduct</key>
+								<integer>43821</integer>
+								<key>idVendor</key>
+								<integer>3010</integer>
+								<key>kUSBVendorString</key>
+								<string>Seagate</string>
+							</dict>
+						</array>
+						<key>IORegistryEntryID</key>
+						<integer>4294977410</integer>
+						<key>IORegistryEntryName</key>
+						<string>IOUSBMassStorageInterfaceNub</string>
+						<key>IOServiceBusyState</key>
+						<integer>0</integer>
+						<key>IOServiceBusyTime</key>
+						<integer>2814683620</integer>
+						<key>IOServiceState</key>
+						<integer>30</integer>
+						<key>Physical Interconnect</key>
+						<string>USB</string>
+						<key>Physical Interconnect Location</key>
+						<string>External</string>
+						<key>USB Device Info</key>
+						<dict>
+							<key>USB Product Name</key>
+							<string>Ultra Slim MT</string>
+							<key>bConfigurationValue</key>
+							<integer>1</integer>
+							<key>bInterfaceClass</key>
+							<integer>8</integer>
+							<key>bInterfaceNumber</key>
+							<integer>0</integer>
+							<key>bInterfaceProtocol</key>
+							<integer>98</integer>
+							<key>bInterfaceSubClass</key>
+							<integer>6</integer>
+							<key>bNumConfigurations</key>
+							<integer>1</integer>
+							<key>bcdDevice</key>
+							<integer>256</integer>
+							<key>idProduct</key>
+							<integer>43821</integer>
+							<key>idVendor</key>
+							<integer>3010</integer>
+							<key>kUSBProductString</key>
+							<string>Ultra Slim MT</string>
+							<key>kUSBSerialNumberString</key>
+							<string>NA95MASK</string>
+							<key>kUSBVendorString</key>
+							<string>Seagate</string>
+							<key>locationID</key>
+							<integer>17825792</integer>
+						</dict>
+						<key>USB Mass Storage Trace ID</key>
+						<integer>847427889678778368</integer>
+						<key>USB Product Name</key>
+						<string>Ultra Slim MT</string>
+						<key>bConfigurationValue</key>
+						<integer>1</integer>
+						<key>bInterfaceClass</key>
+						<integer>8</integer>
+						<key>bInterfaceNumber</key>
+						<integer>0</integer>
+						<key>bInterfaceProtocol</key>
+						<integer>80</integer>
+						<key>bInterfaceSubClass</key>
+						<integer>6</integer>
+						<key>bNumConfigurations</key>
+						<integer>1</integer>
+						<key>bcdDevice</key>
+						<integer>256</integer>
+						<key>idProduct</key>
+						<integer>43821</integer>
+						<key>idVendor</key>
+						<integer>3010</integer>
+						<key>kUSBProductString</key>
+						<string>Ultra Slim MT</string>
+						<key>kUSBSerialNumberString</key>
+						<string>NA95MASK</string>
+						<key>kUSBVendorString</key>
+						<string>Seagate</string>
+						<key>locationID</key>
+						<integer>17825792</integer>
+					</dict>
+				</array>
+				<key>IORegistryEntryID</key>
+				<integer>4294977408</integer>
+				<key>IORegistryEntryLocation</key>
+				<string>0</string>
+				<key>IORegistryEntryName</key>
+				<string>IOUSBHostInterface</string>
+				<key>IOServiceBusyState</key>
+				<integer>0</integer>
+				<key>IOServiceBusyTime</key>
+				<integer>2818970756</integer>
+				<key>IOServiceDEXTEntitlements</key>
+				<array>
+					<array>
+						<string>com.apple.developer.driverkit.transport.usb</string>
+					</array>
+				</array>
+				<key>IOServiceLegacyMatchingRegistryID</key>
+				<integer>4294977409</integer>
+				<key>IOServiceState</key>
+				<integer>30</integer>
+				<key>USB Product Name</key>
+				<string>Ultra Slim MT</string>
+				<key>USB Serial Number</key>
+				<string>NA95MASK</string>
+				<key>USB Vendor Name</key>
+				<string>Seagate</string>
+				<key>USBPortType</key>
+				<integer>0</integer>
+				<key>USBSpeed</key>
+				<integer>4</integer>
+				<key>UsbExclusiveOwner</key>
+				<string>IOUSBMassStorageInterfaceNub</string>
+				<key>bAlternateSetting</key>
+				<integer>1</integer>
+				<key>bConfigurationValue</key>
+				<integer>1</integer>
+				<key>bInterfaceClass</key>
+				<integer>8</integer>
+				<key>bInterfaceNumber</key>
+				<integer>0</integer>
+				<key>bInterfaceProtocol</key>
+				<integer>98</integer>
+				<key>bInterfaceSubClass</key>
+				<integer>6</integer>
+				<key>bNumEndpoints</key>
+				<integer>4</integer>
+				<key>bcdDevice</key>
+				<integer>256</integer>
+				<key>iInterface</key>
+				<integer>0</integer>
+				<key>idProduct</key>
+				<integer>43821</integer>
+				<key>idVendor</key>
+				<integer>3010</integer>
+				<key>locationID</key>
+				<integer>17825792</integer>
+			</dict>
+		</array>
+		<key>IORegistryEntryID</key>
+		<integer>4294977399</integer>
+		<key>IORegistryEntryLocation</key>
+		<string>01100000</string>
+		<key>IORegistryEntryName</key>
+		<string>Ultra Slim MT</string>
+		<key>IOServiceBusyState</key>
+		<integer>0</integer>
+		<key>IOServiceBusyTime</key>
+		<integer>2883829087</integer>
+		<key>IOServiceDEXTEntitlements</key>
+		<array>
+			<array>
+				<string>com.apple.developer.driverkit.transport.usb</string>
+			</array>
+		</array>
+		<key>IOServiceLegacyMatchingRegistryID</key>
+		<integer>4294977401</integer>
+		<key>IOServiceState</key>
+		<integer>30</integer>
+		<key>USB Address</key>
+		<integer>1</integer>
+		<key>USB Product Name</key>
+		<string>Ultra Slim MT</string>
+		<key>USB Serial Number</key>
+		<string>NA95MASK</string>
+		<key>USB Vendor Name</key>
+		<string>Seagate</string>
+		<key>USBPortType</key>
+		<integer>0</integer>
+		<key>USBSpeed</key>
+		<integer>4</integer>
+		<key>UsbDeviceSignature</key>
+		<data>
+		wgstqwABTkE5NUsyS1AAAAAIBlAIBmI=
+		</data>
+		<key>bDeviceClass</key>
+		<integer>0</integer>
+		<key>bDeviceProtocol</key>
+		<integer>0</integer>
+		<key>bDeviceSubClass</key>
+		<integer>0</integer>
+		<key>bMaxPacketSize0</key>
+		<integer>9</integer>
+		<key>bNumConfigurations</key>
+		<integer>1</integer>
+		<key>bcdDevice</key>
+		<integer>256</integer>
+		<key>bcdUSB</key>
+		<integer>768</integer>
+		<key>iManufacturer</key>
+		<integer>2</integer>
+		<key>iProduct</key>
+		<integer>3</integer>
+		<key>iSerialNumber</key>
+		<integer>1</integer>
+		<key>idProduct</key>
+		<integer>43821</integer>
+		<key>idVendor</key>
+		<integer>3010</integer>
+		<key>kUSBAddress</key>
+		<integer>1</integer>
+		<key>kUSBCurrentConfiguration</key>
+		<integer>1</integer>
+		<key>kUSBProductString</key>
+		<string>Ultra Slim MT</string>
+		<key>kUSBSerialNumberString</key>
+		<string>NA95MASK</string>
+		<key>kUSBVendorString</key>
+		<string>Seagate</string>
+		<key>locationID</key>
+		<integer>17825792</integer>
+		<key>non-removable</key>
+		<string>no</string>
+		<key>sessionID</key>
+		<integer>19490974842419</integer>
+	</dict>
+</array>
+</plist>

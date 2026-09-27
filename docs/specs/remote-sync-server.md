@@ -205,6 +205,8 @@ Matching runs within one user's drives, in the `PUT` transaction. It first locks
 
 If several candidates would match (possible only when serials are missing), keep the row's existing link if it is one of them; otherwise link the oldest candidate.
 
+A proposed second matching step, by partition key (disk serial, partition offset and size), would link FAT, exFAT and NTFS drives across Linux and macOS, and drives with no filesystem ID: see [`remote-sync-cross-os-linking.md`](remote-sync-cross-os-linking.md).
+
 **Known limitation:** because a missing serial counts as a match, a drive cloned from another and kept in an enclosure that reports no serial is linked as the *same* physical drive as its original. The agent's [wrong-drive guard](remote-sync-agent.md#drive-identity) can't tell such a pair apart either, because there's no serial to compare. Linking is informational only, and each copy's data stays in its own drive row. So the effect is a wrong grouping, never mixed data. Giving each drive of a mirrored pair its own `--drive-id` still keeps their data separate.
 
 ### `POST /agent/v1/drives/{drive_id}/changes`

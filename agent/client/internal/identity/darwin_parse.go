@@ -8,21 +8,24 @@ import (
 // run runs an external command and returns its standard output.
 type runFunc func(name string, args ...string) ([]byte, error)
 
-// detectMacOS finds root's identity from diskutil and ioreg. UNVERIFIED: it
-// follows Apple's documented plist formats and has been tested only against
-// hand-written fixtures (testdata/macos), not a real Mac.
+// detectMacOS finds root's identity from diskutil and ioreg. Verified on a
+// real Mac (Intel, macOS 13.7.8) with two NTFS drives in USB enclosures,
+// whose captured output is in testdata/macos (*-real*.plist); the APFS and
+// exFAT cases are still only hand-written fixtures.
 //
 //   - diskutil info -plist <root>: VolumeUUID and FilesystemType, and the
 //     whole disk behind the volume (ParentWholeDisk, or for APFS the first
 //     APFSPhysicalStores entry, since an APFS volume's parent is a
 //     synthesized container disk).
-//   - ioreg -a -r -c IOUSBHostDevice: the USB devices, each with its
-//     registry subtree; the one whose subtree has a "BSD Name" equal to
+//   - ioreg -a -l -r -c IOUSBHostDevice: the USB devices, each with its
+//     registry subtree and every object's properties; the one whose subtree has a "BSD Name" equal to
 //     that whole disk carries the serial ("USB Serial Number").
 //
-// macOS reports a synthesized VolumeUUID for FAT, exFAT and NTFS, so those
-// only match other macOS agents (Source "macos"); the server links them
-// accordingly.
+// For FAT, exFAT and NTFS, macOS's VolumeUUID isn't the volume serial Linux
+// reports, so those only match other macOS agents (Source "macos"); the
+// server links them accordingly. For NTFS it can be missing altogether:
+// one real drive had a GUID (apparently its volume object ID) and another
+// none, which leaves only the serial.
 func detectMacOS(root string, run runFunc) (Identity, error) {
 	out, err := run("diskutil", "info", "-plist", root)
 	if err != nil {
@@ -43,7 +46,10 @@ func detectMacOS(root string, run runFunc) (Identity, error) {
 	if disk == "" {
 		return id, nil
 	}
-	out, err = run("ioreg", "-a", "-r", "-c", "IOUSBHostDevice")
+	// -l: without it ioreg prints properties only for the matched USB
+	// devices, and their descendants (down to the IOMedia with the "BSD
+	// Name") come as bare stubs, so no disk would ever match.
+	out, err = run("ioreg", "-a", "-l", "-r", "-c", "IOUSBHostDevice")
 	if err != nil {
 		return id, nil // not USB, or ioreg failed: no serial
 	}
