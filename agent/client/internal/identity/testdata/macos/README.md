@@ -10,5 +10,10 @@ macOS fixtures for `detectMacOS`.
   - seagate2 (Seagate "Ultra Slim MT" enclosure), whose NTFS volume has no
     `VolumeUUID` on macOS: `diskutil-ntfs-nouuid-real.plist` and
     `ioreg-l-real-2.plist`.
+- `*-real-arm64.plist`: seagate1 again, captured the same day on an Apple
+  Silicon MacBook (macOS 26.6.2), mounted read-only by macOS's own FSKit
+  NTFS driver: `diskutil info -plist /Volumes/Seagate1` and
+  `ioreg -a -l -r -c IOUSBHostDevice`, trimmed to the enclosure, masked the
+  same way.
 - The others are hand-written in Apple's documented plist format (APFS,
   exFAT, a network share) and not verified on a real Mac.

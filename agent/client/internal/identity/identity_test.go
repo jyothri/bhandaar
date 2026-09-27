@@ -225,6 +225,10 @@ func TestMacOS(t *testing.T) {
 		// Paragon NTFS for Mac. Serial and volume UUID masked.
 		{"ntfs on USB, real Mac", "diskutil-ntfs-real.plist", "ioreg-l-real.plist", nil,
 			Identity{FSUUID: "21782368000040008000000000004C77", FSType: "ntfs", Source: "macos", HWSerial: "NA77MASK"}},
+		// The same drive on an Apple Silicon Mac (macOS 26.6.2), mounted by
+		// macOS's own FSKit NTFS driver: the same volume GUID and serial.
+		{"ntfs on USB, real Apple Silicon Mac", "diskutil-ntfs-real-arm64.plist", "ioreg-l-real-arm64.plist", nil,
+			Identity{FSUUID: "21782368000040008000000000004C77", FSType: "ntfs", Source: "macos", HWSerial: "NA77MASK"}},
 		// seagate2, another NTFS drive on the same Mac: diskutil reports no
 		// VolumeUUID at all (NTFS has a GUID only if the volume has an
 		// object ID), so only the serial identifies it.

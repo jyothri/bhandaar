@@ -23,6 +23,8 @@ Identify the **partition** in a way both OSes agree on, without root: the disk's
 | Size, seagate1 | `ID_PART_ENTRY_SIZE` = 3,905,993,857 sectors = **1,999,868,854,784** bytes | `Size` = **1,999,868,854,784** bytes |
 | Size, seagate2 | 3,907,024,896 sectors = **2,000,396,746,752** bytes | **2,000,396,746,752** bytes |
 
+The macOS column holds on two Macs with different NTFS drivers: an Intel Mac on macOS 13.7.8 with Paragon NTFS for Mac, and an Apple Silicon Mac on macOS 26.6.2 with macOS's own FSKit driver. Both gave seagate1 the same offset, size, serial and volume GUID. Linking by that GUID already works between the two Macs (both of them macOS).
+
 udev counts in 512-byte sectors (libblkid's unit, whatever the disk's block size); macOS reports bytes. The partition's size is used, not the filesystem's: `ID_FS_SIZE` and `diskutil`'s `VolumeSize` differ for seagate2, because the two NTFS drivers compute it differently.
 
 The offset tells apart two partitions of one disk: seagate1 also has a small FAT32 partition, `DBR_BOOT`, which shares the disk's serial. The size and serial tell apart different disks.
