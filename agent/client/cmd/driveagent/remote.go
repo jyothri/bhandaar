@@ -306,8 +306,7 @@ func runRemoteStatus(ctx context.Context, args []string, stdout, stderr io.Write
 		c, _ = sess.Credentials()
 		line("login", "%s, session valid until %s", c.Username, c.RefreshExpiresAt.Local().Format("2006-01-02 15:04"))
 	}
-	line("drives", "per-drive sync status comes with \"driveagent sync\"")
-	return problem
+	return firstErr(problem, printDrives(ctx, env, sess, problem == nil, stdout))
 }
 
 func firstErr(errs ...error) error {

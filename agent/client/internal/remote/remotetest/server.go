@@ -1,5 +1,6 @@
 // Package remotetest is a fake agentserver for tests: health, handshake,
-// login, refresh and logout, recording every request.
+// login, refresh and logout, and the drive and change endpoints (in
+// drives.go), recording every request.
 package remotetest
 
 import (
@@ -34,16 +35,22 @@ type Server struct {
 	AccessTTL int64
 	// Down makes health answer 503.
 	Down bool
+	// Limits, if set, replaces the handshake's limits.
+	Limits *wire.Limits
 
 	Requests  []Request
 	Refreshes int
 	n         int
 	refresh   map[string]string // live refresh token -> username
+	access    map[string]bool   // access tokens issued; false once expired
+
+	drives
 }
 
 // New starts a plain-http fake on 127.0.0.1, closed when the test ends.
 func New(t testing.TB) *Server {
-	s := &Server{Users: map[string]string{"jyothri": "correct horse battery"}, refresh: map[string]string{}}
+	s := &Server{Users: map[string]string{"jyothri": "correct horse battery"}, refresh: map[string]string{},
+		access: map[string]bool{}, drives: newDrives()}
 	s.Server = httptest.NewServer(s)
 	t.Cleanup(s.Close)
 	return s
@@ -92,6 +99,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		resp := wire.HandshakeResponse{Decision: d, Protocol: 1, MinAgentVersion: "0.1.0", LatestAgentVersion: "0.1.0",
 			Limits: wire.Limits{MaxChangesPerBatch: 1000, MaxBatchBytes: 1 << 20}}
+		if s.Limits != nil {
+			resp.Limits = *s.Limits
+		}
 		if d != wire.DecisionOK {
 			resp.Message, resp.DownloadURL = "please upgrade", "https://example.com/releases"
 		}
@@ -124,7 +134,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		delete(s.refresh, req.RefreshToken)
 		w.WriteHeader(204)
 	default:
-		writeError(w, 404, wire.CodeNotFound)
+		if !s.serveDrives(w, r, body) {
+			writeError(w, 404, wire.CodeNotFound)
+		}
 	}
 }
 
@@ -132,6 +144,7 @@ func (s *Server) issue(user string) wire.TokenResponse {
 	s.n++
 	rt := "rt_" + strconv.Itoa(s.n)
 	s.refresh[rt] = user
+	s.access["at_"+strconv.Itoa(s.n)] = true
 	ttl := s.AccessTTL
 	if ttl == 0 {
 		ttl = 900

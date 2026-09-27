@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strconv"
 	"time"
@@ -149,26 +150,62 @@ func (c *Client) Logout(ctx context.Context, refreshToken string) error {
 	return c.do(ctx, http.MethodPost, "/agent/v1/auth/logout", wire.RefreshRequest{RefreshToken: refreshToken}, nil, "")
 }
 
+// OpenDrive calls PUT /agent/v1/drives/{drive_id}: it opens (or re-opens)
+// the drive's stream and returns the ranges the server already has.
+func (c *Client) OpenDrive(ctx context.Context, accessToken, driveID string, req wire.DriveOpenRequest) (wire.DriveOpenResponse, error) {
+	var resp wire.DriveOpenResponse
+	err := c.do(ctx, http.MethodPut, "/agent/v1/drives/"+url.PathEscape(driveID), req, &resp, accessToken)
+	return resp, err
+}
+
+// ListDrives calls GET /agent/v1/drives: this agent's drives, as the
+// server sees them.
+func (c *Client) ListDrives(ctx context.Context, accessToken string) ([]wire.Drive, error) {
+	var drives []wire.Drive
+	err := c.do(ctx, http.MethodGet, "/agent/v1/drives", nil, &drives, accessToken)
+	return drives, err
+}
+
+// PostChanges sends one change batch, already JSON-encoded and gzipped, so
+// a retry sends exactly the same bytes.
+func (c *Client) PostChanges(ctx context.Context, accessToken, driveID, idempotencyKey string, gzipped []byte) (wire.ChangesResponse, error) {
+	var resp wire.ChangesResponse
+	err := c.send(ctx, http.MethodPost, "/agent/v1/drives/"+url.PathEscape(driveID)+"/changes", gzipped, map[string]string{
+		"Content-Type":            "application/json",
+		"Content-Encoding":        "gzip",
+		wire.HeaderIdempotencyKey: idempotencyKey,
+	}, &resp, accessToken)
+	return resp, err
+}
+
 // do sends one request. in (if not nil) is sent as JSON; a 2xx JSON body is
 // decoded into out (if not nil).
 func (c *Client) do(ctx context.Context, method, path string, in, out any, accessToken string) error {
-	var body io.Reader
-	if in != nil {
-		b, err := json.Marshal(in)
-		if err != nil {
-			return err
-		}
-		body = bytes.NewReader(b)
+	if in == nil {
+		return c.send(ctx, method, path, nil, nil, out, accessToken)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
+	b, err := json.Marshal(in)
 	if err != nil {
 		return err
 	}
+	return c.send(ctx, method, path, b, map[string]string{"Content-Type": "application/json"}, out, accessToken)
+}
+
+// send sends one request with body (nil for none) and the extra headers.
+func (c *Client) send(ctx context.Context, method, path string, body []byte, headers map[string]string, out any, accessToken string) error {
+	var rd io.Reader
+	if body != nil {
+		rd = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
+	if err != nil {
+		return err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 	req.Header.Set("User-Agent", "driveagent/"+version.Version)
 	req.Header.Set("Accept", "application/json")
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
 	req.Header.Set(wire.HeaderAgentVersion, version.Version)
 	if c.agentID != "" {
 		req.Header.Set(wire.HeaderAgentID, c.agentID)
