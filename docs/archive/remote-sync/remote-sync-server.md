@@ -1,5 +1,7 @@
 # Remote Sync: `agentserver` Server
 
+> **Archived 2026-09-27.** The original spec, as written and implemented, with its design rationale, rollout notes and test lists. The current, compact reference is [`docs/specs/remote-sync-server.md`](../../specs/remote-sync-server.md); open work is in [`docs/specs/remote-sync-followups.md`](../../specs/remote-sync-followups.md).
+
 **Status:** implemented. Rollout step 1 (PR 1, #22) implemented the layout, configuration, health, handshake, login/refresh/logout, the admin CLI, housekeeping and migrations 1–2; step 4 (PR 4) the drive and changes endpoints, physical-drive matching, the tombstones housekeeping task and migration 3. A full 1,000-entry batch applies in about 40–80 ms against a local Postgres. The overview and decisions are in [`remote-sync.md`](remote-sync.md).
 
 `agentserver` is a standalone Go service that receives scan data from `driveagent` and stores it in the Bhandaar Postgres database. It sits next to `be/`, and neither service calls the other.
@@ -205,7 +207,7 @@ Matching runs within one user's drives, in the `PUT` transaction. It first locks
 
 If several candidates would match (possible only when serials are missing), keep the row's existing link if it is one of them; otherwise link the oldest candidate.
 
-A proposed second matching step, by partition key (disk serial, partition offset and size), would link FAT, exFAT and NTFS drives across Linux and macOS, and drives with no filesystem ID: see [`remote-sync-cross-os-linking.md`](remote-sync-cross-os-linking.md).
+A proposed second matching step, by partition key (disk serial, partition offset and size), would link FAT, exFAT and NTFS drives across Linux and macOS, and drives with no filesystem ID: see [`remote-sync-cross-os-linking.md`](../../specs/remote-sync-cross-os-linking.md).
 
 **Known limitation:** because a missing serial counts as a match, a drive cloned from another and kept in an enclosure that reports no serial is linked as the *same* physical drive as its original. The agent's [wrong-drive guard](remote-sync-agent.md#drive-identity) can't tell such a pair apart either, because there's no serial to compare. Linking is informational only, and each copy's data stays in its own drive row. So the effect is a wrong grouping, never mixed data. Giving each drive of a mirrored pair its own `--drive-id` still keeps their data separate.
 

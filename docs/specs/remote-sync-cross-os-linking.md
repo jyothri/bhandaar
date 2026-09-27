@@ -1,6 +1,6 @@
 # Remote Sync: Linking Drives Across Linux and macOS
 
-**Status:** proposed. Written 2026-09-27, after M7 ([implementation plan](remote-sync-implementation-plan.md#m7--rollout-verification-and-follow-ups-rollout-step-7)). It extends physical-drive matching in [`remote-sync-server.md`](remote-sync-server.md#matching-physical-drives) and drive identity in [`remote-sync-agent.md`](remote-sync-agent.md#drive-identity).
+**Status:** proposed. Written 2026-09-27, after M7 ([implementation plan](../archive/remote-sync/remote-sync-implementation-plan.md#m7--rollout-verification-and-follow-ups-rollout-step-7)). It extends physical-drive matching in [`remote-sync-server.md`](remote-sync-server.md#matching-physical-drives) and drive identity in [`remote-sync-agent.md`](remote-sync-agent.md#drive-identity).
 
 ## Problem
 

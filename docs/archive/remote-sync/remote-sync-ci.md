@@ -1,5 +1,7 @@
 # Remote Sync: CI, Build and Release
 
+> **Archived 2026-09-27.** The original spec, as written and implemented, with its design rationale, rollout notes and test lists. The current, compact reference is [`docs/specs/remote-sync-ci.md`](../../specs/remote-sync-ci.md); open work is in [`docs/specs/remote-sync-followups.md`](../../specs/remote-sync-followups.md).
+
 **Status:** implemented. `agentserver-docker-image.yml` shipped in PR 1 (#22); `driveagent.yml`, `version-check.sh` and the install instructions in PR 2. The overview is in [`remote-sync.md`](remote-sync.md).
 
 Two new GitHub Actions workflows, alongside the existing `backend-docker-image.yml` and `ui-docker-image.yml`:

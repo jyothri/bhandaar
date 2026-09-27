@@ -1,8 +1,10 @@
 # Remote Sync: driveagent → sm.jkurapati.com
 
+> **Archived 2026-09-27.** The original spec, as written and implemented, with its design rationale, rollout notes and test lists. The current, compact reference is [`docs/specs/remote-sync.md`](../../specs/remote-sync.md); open work is in [`docs/specs/remote-sync-followups.md`](../../specs/remote-sync-followups.md).
+
 **Status:** implemented: rollout steps 1–6 (the server, agent login, the change feed, the upload endpoints, `driveagent sync`, and uploads during `scan`); step 7, end-to-end verification, remains. Written 2026-09-24.
 
-This feature lets the local Linux agent (`driveagent`, see [`drive-comparison-agent.md`](drive-comparison-agent.md)) upload its scan data to the Bhandaar server at `sm.jkurapati.com`, so a drive's contents are known centrally and not only in one machine's `~/.driveagent/state.db`.
+This feature lets the local Linux agent (`driveagent`, see [`drive-comparison-agent.md`](../../specs/drive-comparison-agent.md)) upload its scan data to the Bhandaar server at `sm.jkurapati.com`, so a drive's contents are known centrally and not only in one machine's `~/.driveagent/state.db`.
 
 The design is split across four documents, plus an implementation plan:
 
