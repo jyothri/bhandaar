@@ -126,6 +126,20 @@ func (f *Feed) Count(ctx context.Context, driveID string, intervals []wire.Range
 	return total, nil
 }
 
+// Any reports whether the drive has any entry in (iv[0], iv[1]]: one
+// EXISTS per table on the feed indexes, so it's instant however big the
+// drive is.
+func (f *Feed) Any(ctx context.Context, driveID string, iv wire.Range) (bool, error) {
+	var found bool
+	err := f.db.QueryRowContext(ctx, `SELECT
+		EXISTS (SELECT 1 FROM files WHERE drive_id = ?1 AND row_version > ?2 AND row_version <= ?3)
+		OR EXISTS (SELECT 1 FROM dir_listings WHERE drive_id = ?1 AND row_version > ?2 AND row_version <= ?3)
+		OR EXISTS (SELECT 1 FROM scan_runs WHERE drive_id = ?1 AND row_version > ?2 AND row_version <= ?3)
+		OR EXISTS (SELECT 1 FROM sync_tombstones WHERE drive_id = ?1 AND row_version > ?2 AND row_version <= ?3)`,
+		driveID, iv[0], iv[1]).Scan(&found)
+	return found, err
+}
+
 // setName sets a path or child name: plain if it's valid UTF-8, otherwise
 // as base64 of its bytes (Go's JSON encoder would replace invalid bytes
 // with U+FFFD).

@@ -46,6 +46,10 @@ type Options struct {
 	BatchSize int
 	// Progress, if set, is called periodically with running totals.
 	Progress func(Stats)
+	// OnFlush, if set, is called after each batch of file records is
+	// committed (every BatchSize records or 2 s), so an uploader can pick
+	// the new rows up at once. It must not block.
+	OnFlush func()
 	// ReplaceRoot, if true, allows DriveID to be repointed at a different
 	// DriveRoot than what's already checkpointed for it, discarding all
 	// of that drive_id's checkpoint data first. Without it, Prepare refuses
@@ -277,6 +281,8 @@ func Run(ctx context.Context, st *store.Store, p Prepared, opts Options) (Stats,
 			}
 			if err := st.UpsertFiles(context.Background(), batch); err != nil {
 				flushErr = err
+			} else if opts.OnFlush != nil {
+				opts.OnFlush()
 			}
 			batch = batch[:0]
 		}

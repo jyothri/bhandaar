@@ -53,6 +53,9 @@ don't need a bump.
 
 ## Usage
 
+Every scan uploads what it records to the Bhandaar server (see
+[The remote server](#the-remote-server)), so log in once per machine first.
+
 Scan each drive independently (resumable — safe to re-run after an
 interruption, already-hashed unchanged files are skipped). `--drive-root`
 is the stable anchor for a drive's relative paths (in practice its mount
@@ -108,10 +111,13 @@ by its own `driveagent`. See the remote-sync overview's
 
 ## The remote server
 
-`driveagent` can log in to the Bhandaar server (`agentserver`, see
-[`docs/specs/remote-sync.md`](../../docs/specs/remote-sync.md)) and upload its
-scan data there with `driveagent sync`. For now, `scan` itself stays local;
-from 0.4.0 on, every scan will upload what it writes.
+`driveagent` uploads its scan data to the Bhandaar server (`agentserver`, see
+[`docs/specs/remote-sync.md`](../../docs/specs/remote-sync.md)). From 0.4.0,
+every `scan` uploads what it writes, and fails (exit 3) if it can't: log in
+first. A scan uploads only its own data; anything recorded earlier without
+being uploaded (a scan that failed or was interrupted mid-upload, or data from
+before 0.3.0) is uploaded by `driveagent sync`, and `scan` prints a hint when
+there is some. `compare` and `report` never contact the server.
 
 ```bash
 driveagent login --username jyothri          # prompts for the password (no echo)
@@ -161,6 +167,9 @@ Exit codes: 0 ok, 1 local error (including a drive that went away
 mid-scan), 2 usage, 3 server unreachable, login needed or upload failed, 4 this
 `driveagent` is too old for the server (upgrade), 130 interrupted by Ctrl-C,
 143 stopped by SIGTERM. An interrupted scan keeps what it recorded; re-run it
-to resume.
+to resume. The first Ctrl-C stops the walk and uploads what the scan recorded;
+a second one stops that upload too (then run `driveagent sync`). If the server
+stops answering mid-scan, the scan keeps going for `--remote-timeout`
+(default `2m`), then stops with exit 3; re-run it, and run `driveagent sync`.
 
 Run `./driveagent --help` for the full flag list.

@@ -1,6 +1,6 @@
 # Remote Sync: driveagent → sm.jkurapati.com
 
-**Status:** partly implemented: rollout steps 1–5 (the server, agent login, the change feed, the upload endpoints and `driveagent sync`); step 6, uploads during `scan`, is next. Written 2026-09-24.
+**Status:** implemented: rollout steps 1–6 (the server, agent login, the change feed, the upload endpoints, `driveagent sync`, and uploads during `scan`); step 7, end-to-end verification, remains. Written 2026-09-24.
 
 This feature lets the local Linux agent (`driveagent`, see [`drive-comparison-agent.md`](drive-comparison-agent.md)) upload its scan data to the Bhandaar server at `sm.jkurapati.com`, so a drive's contents are known centrally and not only in one machine's `~/.driveagent/state.db`.
 

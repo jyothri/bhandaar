@@ -72,28 +72,37 @@ func signalName(sig os.Signal) string {
 	return sig.String()
 }
 
-// withSignals returns a context cancelled, with a signalCause, on the first
-// SIGINT or SIGTERM. The first signal stops the work gracefully (a scan
-// records what it has seen); after it, the default handling is restored, so
-// a second signal ends the process at once. (From M6 on, the second one will
-// abort the upload drain instead.)
-func withSignals(parent context.Context) (context.Context, func()) {
+// withSignals returns two contexts. ctx is cancelled, with a signalCause,
+// on the first SIGINT or SIGTERM: the work stops gracefully (a scan records
+// what it has seen, then uploads it). drain is cancelled on a second
+// signal, which aborts that upload at once; the exit code still comes from
+// the first. After the second signal the default handling is restored, so
+// a third ends the process whatever it's doing.
+func withSignals(parent context.Context) (ctx, drain context.Context, stop func()) {
 	ctx, cancel := context.WithCancelCause(parent)
-	ch := make(chan os.Signal, 1)
+	drain, cancelDrain := context.WithCancelCause(parent)
+	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	done := make(chan struct{})
 	go func() {
 		select {
 		case sig := <-ch:
-			signal.Stop(ch)
 			cancel(signalCause{sig: sig})
+		case <-done:
+			return
+		}
+		select {
+		case sig := <-ch:
+			signal.Stop(ch)
+			cancelDrain(signalCause{sig: sig})
 		case <-done:
 		}
 	}()
-	return ctx, func() {
+	return ctx, drain, func() {
 		close(done)
 		signal.Stop(ch)
 		cancel(nil)
+		cancelDrain(nil)
 	}
 }
 

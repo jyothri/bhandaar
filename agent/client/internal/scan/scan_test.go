@@ -378,3 +378,27 @@ func TestSymlinksAreSkipped(t *testing.T) {
 		t.Errorf("files = %v", got)
 	}
 }
+
+// OnFlush is called after each committed batch of file records, once they
+// are readable.
+func TestOnFlushAfterEachBatch(t *testing.T) {
+	root := t.TempDir()
+	testutil.WriteTree(t, root, tree)
+	st := open(t)
+	var flushes, visible []int
+	opts := Options{RootPath: root, BatchSize: 2}
+	opts.OnFlush = func() {
+		ps, _ := st.ListFileRelativePaths("d1")
+		flushes = append(flushes, len(flushes)+1)
+		visible = append(visible, len(ps))
+	}
+	run(t, st, opts)
+	if len(flushes) != 3 {
+		t.Errorf("%d flushes for 6 files in batches of 2", len(flushes))
+	}
+	for i, n := range visible {
+		if n < 2*(i+1) {
+			t.Errorf("flush %d: only %d rows visible", i+1, n)
+		}
+	}
+}
