@@ -1,6 +1,6 @@
 # Remote Sync: Implementation Plan
 
-**Status:** M1 (PR 1, #22), M2 (PR 2, #23), M3 (PR 3, #25), M4 (PR 4, #26), M5 (PR 5, #27) and M6 (PR 6) implemented; M7 (rollout verification) remains. Written 2026-09-25; revised 2026-09-26 to six PRs, one per milestone.
+**Status:** M1 (PR 1, #22), M2 (PR 2, #23), M3 (PR 3, #25), M4 (PR 4, #26), M5 (PR 5, #27) and M6 (PR 6, #28) implemented; M7 (rollout verification) done on 2026-09-27 except the checks needing a Mac off the home network or a drive both OSes can read (see M7). Written 2026-09-25; revised 2026-09-26 to six PRs, one per milestone.
 
 This plan turns the four remote-sync specs into six pull requests, one per milestone:
 - [`remote-sync.md`](remote-sync.md) (overview and decisions)
@@ -418,6 +418,18 @@ Before updating the agent on a machine, make sure it's logged in (`driveagent re
 6. Plug the same ext4 or APFS drive into Linux and the Mac → `remote-status` shows `linked`. An exFAT drive → not linked (expected in v1).
 7. Housekeeping log lines appear hourly.
 
+**Results (2026-09-27):**
+- **Items 1–5 on `dev.sm`**, with the released 0.4.0 against a dev `agentserver` on the dev box: all passed.
+  - 1: the LAN path; the DNS fallback within about 1 s when the LAN address doesn't answer.
+  - 2: the server matched the disk exactly; killing the server mid-scan gave exit 3 after `--remote-timeout`, and after a restart the re-scan resumed and `sync` completed.
+  - 3: renames, deletes (a whole directory too) and adds all reached the server.
+  - 4: a state dir restored from an older copy made the next `sync` start a new stream and re-upload.
+  - 5: `--replace-root` left only the new root on the server.
+- **Items 2–5 weren't repeated on prod.** It's the same binary and server image, and the prod sync of the real `state.db` (M5) already matched Postgres exactly.
+- **Item 7:** housekeeping ran 5 minutes after start on dev, and on prod at 07:08 and 08:08.
+- **Item 6, partly.** An Intel Mac (macOS 13.7.8) scanned part of seagate1 (NTFS, through Paragon NTFS for Mac) and uploaded to prod. The filesystem ID was recorded (macOS's synthesized volume UUID, which differs from Linux's NTFS serial, so the Linux and Mac copies can't link, as designed). But 0.4.0 recorded **no disk serial**: without `-l`, `ioreg` lists only the USB devices' own properties, so the disk's `BSD Name` was never found. Fixed in 0.4.1 with real, masked fixtures; the fixed build recorded the serial, and prod filled it in on the physical drive.
+- **Still open:** a positive Linux/macOS link, which needs a drive both OSes can read and match on (HFS+, or ext4/APFS with extra drivers), and the DNS path from a Mac off the home network.
+
 **After each agent release:** set `AGENTSERVER_LATEST_AGENT_VERSION`, and `AGENTSERVER_MIN_AGENT_VERSION` only when a release is required, in the prod `.env`, then restart `agentserver`.
 
 **Follow-ups** (separate specs, not part of this plan): a web UI for agent drives and linked copies (in `be`/`ui`, reading the `agent_*` tables); server-side compare; the thinner agent (overview, Future direction).
@@ -430,7 +442,7 @@ Before updating the agent on a machine, make sure it's logged in (`driveagent re
 |---|---|
 | Restructuring `scan.Run` (PR 3) changes behaviour by accident | PR 2's test harness pins today's behaviour first; PR 3 must pass it unchanged |
 | The backfill on a large `state.db` is slow or blocks another process | Progress output; documented "re-run the other command"; tested on a large generated fixture in PR 3 |
-| macOS `diskutil`/`ioreg` output differs from what the parser expects | **Open until M7 item 6.** M0 was Linux-only, so the Mac fixtures are hand-written from Apple's plist format; the parser reads plist XML, never human-readable text, and the macOS path stays marked unverified until `driveagent` runs on a Mac |
+| macOS `diskutil`/`ioreg` output differs from what the parser expects | **Happened, and fixed.** M0 was Linux-only, so the Mac fixtures were hand-written, and they assumed properties that `ioreg` prints only with `-l`. M7's first real-Mac run found the missing serial; 0.4.1 adds `-l` and real, masked fixtures (NTFS on USB, Intel Mac). The APFS and exFAT fixtures are still hand-written |
 | A state dir copied to another machine, or an old binary run on a migrated `state.db` | Deferred; documented as [operational rules](remote-sync.md#operational-rules) in the overview and the agent README |
 | Hairpin NAT makes remote-required scans fail at home | `lan_addr` ships in M2, before scans depend on the remote (M6); `remote-status` shows the path |
 | M6 breaks existing workflows (a scan now needs the remote) | It ships last, as a minor version bump, with user steps to log in first; M1–M5 change nothing for a plain `scan` |
