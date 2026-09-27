@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -52,9 +53,36 @@ type Uploader struct {
 	Progress func(driveID string, uploaded int)
 
 	// For tests.
-	now    func() time.Time
-	sleep  func(ctx context.Context, d time.Duration) error
-	lastOK time.Time
+	now   func() time.Time
+	sleep func(ctx context.Context, d time.Duration) error
+
+	// failingSince is when the current run of failed requests began (zero
+	// while requests succeed): the give-up budget counts from there, so
+	// idle time between requests (a scan with nothing new) never counts.
+	failingSince time.Time
+	// For Status, read while a scan uploads.
+	uploaded, cursor, retryUntil atomic.Int64
+}
+
+// Status is a running upload's progress, for a progress line.
+type Status struct {
+	// Uploaded counts the entries the server has applied this run.
+	Uploaded int64
+	// Cursor is the version the current session has uploaded up to.
+	Cursor int64
+	// RetryLeft is how long the uploader will keep retrying a failing
+	// remote before giving up; 0 while requests succeed.
+	RetryLeft time.Duration
+}
+
+// Status returns the upload's progress; safe to call from another
+// goroutine.
+func (u *Uploader) Status() Status {
+	st := Status{Uploaded: u.uploaded.Load(), Cursor: u.cursor.Load()}
+	if until := u.retryUntil.Load(); until != 0 {
+		st.RetryLeft = max(0, time.Unix(0, until).Sub(u.timeNow()))
+	}
+	return st
 }
 
 // Result is what uploading one drive did.
@@ -131,13 +159,10 @@ func (u *Uploader) maxBytes() int {
 
 // call runs one request, f, with an access token, until it succeeds or
 // fails for good. A transient failure is retried with exponential backoff
-// and jitter (honouring Retry-After) until RemoteTimeout has passed since
-// the last successful request; a 401 TOKEN_EXPIRED or INVALID_TOKEN
-// refreshes the token once.
+// and jitter (honouring Retry-After) until RemoteTimeout has passed with no
+// successful request; a 401 TOKEN_EXPIRED or INVALID_TOKEN refreshes the
+// token once.
 func (u *Uploader) call(ctx context.Context, f func(token string) error) error {
-	if u.lastOK.IsZero() {
-		u.lastOK = u.timeNow()
-	}
 	var token string
 	renewed := false
 	backoff := firstBackoff
@@ -150,7 +175,8 @@ func (u *Uploader) call(ctx context.Context, f func(token string) error) error {
 			err = f(token)
 		}
 		if err == nil {
-			u.lastOK = u.timeNow()
+			u.failingSince = time.Time{}
+			u.retryUntil.Store(0)
 			return nil
 		}
 		if ctx.Err() != nil {
@@ -170,7 +196,11 @@ func (u *Uploader) call(ctx context.Context, f func(token string) error) error {
 		if !errors.Is(err, remote.ErrTransient) {
 			return err
 		}
-		left := u.remoteTimeout() - u.timeNow().Sub(u.lastOK)
+		if u.failingSince.IsZero() {
+			u.failingSince = u.timeNow()
+			u.retryUntil.Store(u.failingSince.Add(u.remoteTimeout()).UnixNano())
+		}
+		left := u.remoteTimeout() - u.timeNow().Sub(u.failingSince)
 		if left <= 0 {
 			return fmt.Errorf("remote unavailable for %s: %w", u.remoteTimeout(), err)
 		}
@@ -277,7 +307,6 @@ func (u *Uploader) Open(ctx context.Context, driveID string, res *Result) (store
 // server's ranges merge. The caller holds the drive's upload lock.
 func (u *Uploader) SyncDrive(ctx context.Context, driveID string) (Result, error) {
 	res := Result{DriveID: driveID, Pending: -1}
-	u.lastOK = u.timeNow()
 	err := u.syncDrive(ctx, driveID, &res)
 	if n, perr := u.pending(context.WithoutCancel(ctx), driveID); perr == nil {
 		res.Pending = n
@@ -348,71 +377,99 @@ func (u *Uploader) pending(ctx context.Context, driveID string) (int64, error) {
 // With closeGap, the last batch's to_version is upper, even with no entry
 // there.
 func (u *Uploader) upload(ctx context.Context, d store.SyncDrive, from, upper int64, closeGap bool, res *Result) error {
-	s := session{agentID: u.AgentID, driveID: d.DriveID, streamID: d.Marker.StreamID, upper: upper, closeGap: closeGap}
-	marker := d.Marker.AckedRanges()
-	pageSize := u.maxChanges()
+	ss := u.newSession(d, upper, closeGap)
 	for cursor := from; cursor < upper; {
-		page, more, err := u.Feed.Page(ctx, d.DriveID, cursor, upper, pageSize)
-		if err != nil {
+		to, sent, err := u.sendNext(ctx, ss, cursor, res)
+		if err != nil || !sent {
 			return err
 		}
-		b, err := s.build(cursor, page, more, u.maxBytes())
+		cursor = to
+	}
+	return nil
+}
+
+// sessionState is an upload session's state between batches.
+type sessionState struct {
+	session
+	marker   []wire.Range // the server's ranges as last acknowledged
+	pageSize int
+}
+
+func (u *Uploader) newSession(d store.SyncDrive, upper int64, closeGap bool) *sessionState {
+	return &sessionState{
+		session:  session{agentID: u.AgentID, driveID: d.DriveID, streamID: d.Marker.StreamID, upper: upper, closeGap: closeGap},
+		marker:   d.Marker.AckedRanges(),
+		pageSize: u.maxChanges(),
+	}
+}
+
+// sendNext sends the next batch after cursor and records its
+// acknowledgement. sent is false when there was nothing to send; to is the
+// new cursor.
+func (u *Uploader) sendNext(ctx context.Context, ss *sessionState, cursor int64, res *Result) (to int64, sent bool, err error) {
+	for {
+		page, more, err := u.Feed.Page(ctx, ss.driveID, cursor, ss.upper, ss.pageSize)
+		if err != nil {
+			return cursor, false, err
+		}
+		b, err := ss.build(cursor, page, more, u.maxBytes())
 		if err != nil || b == nil {
-			return err
+			return cursor, false, err
 		}
 
 		var resp wire.ChangesResponse
 		err = u.call(ctx, func(token string) (err error) {
-			resp, err = u.Client.PostChanges(ctx, token, d.DriveID, b.key, b.body)
+			resp, err = u.Client.PostChanges(ctx, token, ss.driveID, b.key, b.body)
 			return err
 		})
 		switch {
 		case statusIs(err, http.StatusRequestEntityTooLarge, ""):
 			if len(b.entries) <= 1 {
-				return fmt.Errorf("the server refuses even a batch of one entry as too large: %w", err)
+				return cursor, false, fmt.Errorf("the server refuses even a batch of one entry as too large: %w", err)
 			}
-			pageSize = max(1, len(b.entries)/2)
-			fmt.Fprintf(u.log(), "%s: batch too large for the server; sending %d changes per batch\n", d.DriveID, pageSize)
+			ss.pageSize = max(1, len(b.entries)/2)
+			fmt.Fprintf(u.log(), "%s: batch too large for the server; sending %d changes per batch\n", ss.driveID, ss.pageSize)
 			continue
 		case statusIs(err, http.StatusNotFound, wire.CodeDriveNotOpen), statusIs(err, http.StatusConflict, wire.CodeStreamMismatch):
-			return errReopen
+			return cursor, false, errReopen
 		case err != nil:
-			return err
+			return cursor, false, err
 		}
 		if err := checkRanges(resp.AckedRanges); err != nil {
-			return permanent(err)
+			return cursor, false, permanent(err)
 		}
 
 		// The answer must still cover everything the server acknowledged
 		// before, and this batch. If it doesn't, the server went back in
 		// time mid-session: copying its ranges would erase the evidence, so
 		// the marker stays, and re-opening mints a new stream.
-		if !covers(resp.AckedRanges, append(marker, wire.Range{b.from, b.to})...) {
+		if !covers(resp.AckedRanges, append(ss.marker, wire.Range{b.from, b.to})...) {
 			fmt.Fprintf(u.log(), "%s: the server's acked ranges %v no longer cover %v and (%d, %d]; re-opening the drive\n",
-				d.DriveID, resp.AckedRanges, marker, b.from, b.to)
-			return errReopen
+				ss.driveID, resp.AckedRanges, ss.marker, b.from, b.to)
+			return cursor, false, errReopen
 		}
 		var ack *store.Ack
 		if !resp.Duplicate {
 			ack = ackFor(b, resp, u.timeNow())
 		}
-		if err := u.Store.ReplaceMarker(d.DriveID, s.streamID, resp.AckedRanges, ack); err != nil {
+		if err := u.Store.ReplaceMarker(ss.driveID, ss.streamID, resp.AckedRanges, ack); err != nil {
 			if errors.Is(err, store.ErrStreamChanged) {
-				return errReopen
+				return cursor, false, errReopen
 			}
-			return err
+			return cursor, false, err
 		}
-		marker = resp.AckedRanges
+		ss.marker = resp.AckedRanges
 		if !resp.Duplicate {
 			res.Uploaded += len(b.entries)
 			res.Rejected += len(ack.Rejected)
+			u.uploaded.Add(int64(len(b.entries)))
 		}
+		u.cursor.Store(b.to)
 		if u.Progress != nil {
-			u.Progress(d.DriveID, res.Uploaded)
+			u.Progress(ss.driveID, res.Uploaded)
 		}
-		cursor = b.to
+		return b.to, true, nil
 	}
-	return nil
 }
 
 // ackFor sorts a batch's entries into rejected and stored.

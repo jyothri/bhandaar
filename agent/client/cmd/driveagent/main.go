@@ -7,7 +7,7 @@
 // It never writes to either drive. Three subcommands, each with a single
 // responsibility (see docs/specs/drive-comparison-agent.md):
 //
-//	scan    walks and hashes one drive's files.
+//	scan    walks and hashes one drive's files, uploading what it records.
 //	compare computes and persists comparison status for scoped paths.
 //	report  renders already-computed status — no drive access, no compute.
 //
@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,9 @@ import (
 	"github.com/jyothri/bhandaar/agent/client/internal/report"
 	"github.com/jyothri/bhandaar/agent/client/internal/scan"
 	"github.com/jyothri/bhandaar/agent/client/internal/store"
+	"github.com/jyothri/bhandaar/agent/client/internal/syncer"
 	"github.com/jyothri/bhandaar/agent/client/internal/version"
+	"github.com/jyothri/bhandaar/agent/wire"
 )
 
 func main() {
@@ -41,7 +44,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	ctx, stop := withSignals(context.Background())
+	ctx, drain, stop := withSignals(context.Background())
 
 	var err error
 	switch os.Args[1] {
@@ -54,7 +57,7 @@ func main() {
 	case "remote-status":
 		err = runRemoteStatus(ctx, os.Args[2:], os.Stdout, os.Stderr)
 	case "scan":
-		err = runScan(ctx, os.Args[2:], os.Stdout, os.Stderr)
+		err = runScan(ctx, drain, os.Args[2:], os.Stdout, os.Stderr)
 	case "compare":
 		err = runCompare(os.Args[2:])
 	case "report":
@@ -88,6 +91,7 @@ func usage() {
 
 Usage:
   driveagent scan    --drive-id <id> --path <folder> [--drive-root <dir>] [--backup-root <rel-path>] [--state-dir <dir>] [--workers N] [--replace-root] [--accept-identity-change]
+                     [--remote-timeout 2m] [--remote-url <url>] [--lan-addr <host:port>]
   driveagent compare --drive-a <id> --drive-b <id> [--drive-a-paths <rel,rel,...>] [--drive-b-paths <rel,rel,...>] [--state-dir <dir>]
   driveagent report  --drives <id,id,...> [--type text,json,html] [--report-out <dir>] [--include-mac-metadata] [--state-dir <dir>]
   driveagent login         [--username <name>] [--password-stdin] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
@@ -97,7 +101,9 @@ Usage:
   driveagent version
 
 Remote settings: flag > $DRIVEAGENT_REMOTE_URL / $DRIVEAGENT_LAN_ADDR > <state-dir>/config.json > https://sm.jkurapati.com.
-Exit codes: 0 ok, 1 local error, 2 usage, 3 remote unavailable or login needed, 4 driveagent upgrade required.
+Every scan uploads what it writes; log in first ("driveagent login"), and run "driveagent sync" for older data.
+Exit codes: 0 ok, 1 local error, 2 usage, 3 remote unavailable, login needed or upload failed, 4 driveagent upgrade required,
+130 interrupted (Ctrl-C; a second Ctrl-C stops the upload too), 143 SIGTERM.
 
 Examples:
   driveagent scan    --drive-id seagate2 --drive-root /mnt/seagate2 --backup-root Jyo/Backup --path "/mnt/seagate2/Jyo/Backup/interview"
@@ -128,17 +134,38 @@ func splitList(s string) []string {
 	return out
 }
 
-func runScan(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+// runScan is "driveagent scan". Every scan uploads what it writes, and the
+// upload is part of its success (docs/specs/remote-sync-agent.md, "Remote
+// is required"), in this order:
+//
+//  1. take the drive's upload lock, waiting for a sync of it to finish:
+//     the only thing keeping two scans of one drive apart, and keeping
+//     --replace-root's ClearDrive away from a sync of the drive;
+//  2. preflight (health, handshake, token), before the drive or state.db
+//     is touched: exit 3 or 4 on failure;
+//  3. scan.Prepare (the drive-root check; --replace-root clears the drive
+//     here, so it gets a new stream before anything is uploaded);
+//  4. the wrong-drive guard;
+//  5. read S, the clock: everything of the drive above it is this scan's;
+//  6. open the drive and reconcile;
+//  7. the session's from (ScanFrom), and the history hint;
+//  8. start the uploader;
+//  9. scan.Run;
+//  10. drain: upload the rest under --remote-timeout.
+//
+// drain is cancelled by a second Ctrl-C, which aborts step 10.
+func runScan(ctx, drain context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	driveID := fs.String("drive-id", "", "label for this drive (required)")
 	path := fs.String("path", "", "the specific folder to walk and hash this invocation (required)")
 	driveRoot := fs.String("drive-root", "", "stable anchor for this drive's relative paths, e.g. its mount point (defaults to --path)")
 	backupRoot := fs.String("backup-root", "", "where mirrored backup content starts, relative to --drive-root (only needed once per drive; omit to leave unset/unchanged)")
-	stateDir := fs.String("state-dir", defaultStateDir(), "directory holding the checkpoint database")
+	rf := addRemoteFlags(fs)
 	workers := fs.Int("workers", 2, "concurrent hashing workers (keep low for spinning USB drives)")
 	replaceRoot := fs.Bool("replace-root", false, "allow --drive-id to be repointed at a different --drive-root than it was last scanned at, discarding that drive-id's old checkpoint data first")
 	acceptIdentity := fs.Bool("accept-identity-change", false, "scan even though the drive at --drive-root has a different filesystem ID than --drive-id was last scanned on (e.g. it was reformatted); keeps the checkpoint data")
+	remoteTimeout := fs.Duration("remote-timeout", syncer.DefaultRemoteTimeout, "stop the scan once the remote has failed for this long")
 	if err := fs.Parse(args); err != nil {
 		return usageErr("%v", err)
 	}
@@ -146,14 +173,44 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		fs.Usage()
 		return usageErr("--drive-id and --path are required")
 	}
+	if *remoteTimeout <= 0 {
+		return usageErr("scan: --remote-timeout must be positive")
+	}
+	stateDir := *rf.stateDir
 
-	st, err := store.Open(*stateDir)
+	// 1. The upload lock.
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return fmt.Errorf("creating state dir: %w", err)
+	}
+	lock, err := syncer.WaitLock(ctx, stateDir, *driveID, func() {
+		fmt.Fprintf(stderr, "waiting for \"driveagent sync\" to finish uploading %s\n", *driveID)
+	})
+	if err != nil {
+		return err
+	}
+	defer lock.Unlock()
+
+	// 2. Preflight.
+	env, err := rf.open()
+	if err != nil {
+		return err
+	}
+	hs, err := preflight(ctx, env.client, stderr)
+	if err != nil {
+		return remoteErr(err)
+	}
+	sess := env.session()
+	if _, err := sess.AccessToken(ctx); err != nil {
+		return remoteErr(err)
+	}
+
+	st, err := store.Open(stateDir)
 	if err != nil {
 		return err
 	}
 	defer st.Close()
 
-	fmt.Fprintf(stdout, "scanning %q as drive %q (state: %s)\n", *path, *driveID, *stateDir)
+	fmt.Fprintf(stdout, "scanning %q as drive %q (state: %s, remote: %s)\n", *path, *driveID, stateDir, env.settings.RemoteURL)
 	opts := scan.Options{
 		DriveID:     *driveID,
 		RootPath:    *path,
@@ -161,15 +218,11 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		BackupRoot:  *backupRoot,
 		Workers:     *workers,
 		ReplaceRoot: *replaceRoot,
-		Progress: func(s scan.Stats) {
-			fmt.Fprintf(stdout, "  ...seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d\n",
-				s.FilesSeen, s.FilesSkipped, s.FilesHashed, s.FilesErrored, s.BytesHashed)
-		},
 	}
 
-	// Drive checks first, before anything is walked: the drive-root check
-	// (with --replace-root, its old data is cleared here) and recording the
-	// drive.
+	// 3, 4. Drive checks, before anything is walked: the drive-root check
+	// (with --replace-root, its old data is cleared here), recording the
+	// drive, and the wrong-drive guard.
 	prepared, err := scan.Prepare(st, opts)
 	if err != nil {
 		return err
@@ -177,28 +230,124 @@ func runScan(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if prepared.Replaced {
 		fmt.Fprintf(stdout, "discarded drive %q's checkpoint data from its previous drive-root (--replace-root)\n", *driveID)
 	}
-	// The wrong-drive guard, before anything is walked.
 	if err := checkDriveIdentity(st, prepared, *acceptIdentity, stderr); err != nil {
 		return err
 	}
 
-	stats, err := scan.Run(ctx, st, prepared, opts)
+	// 5. S.
+	S, err := st.Clock()
+	if err != nil {
+		return err
+	}
+
+	// 6, 7. Open the drive; where the session starts; the history hint.
+	feed, err := syncer.OpenFeed(stateDir)
+	if err != nil {
+		return err
+	}
+	defer feed.Close()
+	u := &syncer.Uploader{
+		Store: st, Feed: feed, Client: env.client, Tokens: sess, AgentID: env.agentID,
+		Limits: hs.Limits, RemoteTimeout: *remoteTimeout, Log: stderr,
+	}
+	var res syncer.Result
+	d, err := u.Open(ctx, *driveID, &res)
+	if err != nil {
+		return syncErr(err)
+	}
+	if res.NewStream != "" {
+		fmt.Fprintf(stdout, "note: drive %q started over on a new stream; run \"driveagent sync\" to re-upload its history\n", *driveID)
+	}
+	from, err := u.ScanFrom(ctx, d, S)
+	if err != nil {
+		return err
+	}
+	if n, err := u.DrivesWithHistory(ctx, S); err == nil && n > 0 {
+		fmt.Fprintf(stdout, "note: %d drive(s) have history not yet uploaded; run \"driveagent sync\"\n", n)
+	}
+
+	// 8. The uploader, beside the scan. A remote failure stops the scan
+	// with errRemoteFailed as the cause.
+	scanCtx, stopScan := context.WithCancelCause(ctx)
+	defer stopScan(nil)
+	wake, done := make(chan struct{}, 1), make(chan struct{})
+	upErr := make(chan error, 1)
+	go func() {
+		err := u.Stream(drain, d, from, wake, done, &res)
+		if err != nil {
+			stopScan(errRemoteFailed)
+		}
+		upErr <- err
+	}()
+	opts.OnFlush = func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
+	opts.Progress = func(s scan.Stats) {
+		fmt.Fprintf(stdout, "  ...seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d %s\n",
+			s.FilesSeen, s.FilesSkipped, s.FilesHashed, s.FilesErrored, s.BytesHashed, uploadProgress(ctx, u, feed, *driveID))
+	}
+
+	// 9. Scan.
+	stats, scanErr := scan.Run(scanCtx, st, prepared, opts)
 	fmt.Fprintf(stdout, "done in %s: seen=%d skipped=%d hashed=%d errored=%d bytes_hashed=%d deleted=%d\n",
 		stats.Elapsed.Round(time.Second), stats.FilesSeen, stats.FilesSkipped, stats.FilesHashed, stats.FilesErrored, stats.BytesHashed, stats.FilesDeleted)
 	if stats.DeletionsSkipped {
 		fmt.Fprintln(stdout, "note: skipped deletion detection because this walk hit an unreadable file/directory — a clean rescan (no warnings above) is needed to detect files removed from disk.")
 	}
 
-	var interrupted *scan.Interrupted
-	if errors.As(err, &interrupted) {
-		fmt.Fprintf(stdout, "scan stopped early: %s\nre-run the same command to resume — already-hashed files will be skipped.\n", interrupted.Reason)
-		if cause := context.Cause(ctx); cause != nil {
-			return cause // Ctrl-C or SIGTERM: main exits 130 or 143
-		}
-		// The drive went away mid-scan: incomplete, so not a success.
-		return &exitError{code: exitLocal, err: err}
+	// 10. Drain.
+	close(done)
+	if context.Cause(scanCtx) != errRemoteFailed {
+		fmt.Fprintln(stdout, "uploading what the scan recorded…")
 	}
-	return err
+	uploadErr := <-upErr
+	if uploadErr == nil {
+		fmt.Fprintf(stdout, "uploaded %s changes to %s\n", count(int64(res.Uploaded)), env.settings.RemoteURL)
+	}
+	if res.Rejected > 0 {
+		fmt.Fprintf(stdout, "note: the server rejected %s entries; see \"driveagent remote-status\"\n", count(int64(res.Rejected)))
+	}
+
+	var interrupted *scan.Interrupted
+	switch {
+	case ctx.Err() != nil:
+		// Ctrl-C or SIGTERM: main exits 130 or 143.
+		fmt.Fprintln(stdout, "scan stopped early: interrupted\nre-run the same command to resume — already-hashed files will be skipped.")
+		if uploadErr != nil {
+			fmt.Fprintln(stdout, `the upload didn't finish: run "driveagent sync" to upload what this scan recorded.`)
+		}
+		return context.Cause(ctx)
+	case uploadErr != nil:
+		what := "scan stopped"
+		if scanErr == nil {
+			what = "the scan finished, but its upload didn't"
+		}
+		return syncErr(fmt.Errorf("%w\n%s. Local checkpoint is intact — re-run to resume, and run \"driveagent sync\" to upload what this scan already recorded", uploadErr, what))
+	case errors.As(scanErr, &interrupted):
+		// The drive went away mid-scan: incomplete, so not a success.
+		fmt.Fprintf(stdout, "scan stopped early: %s\nre-run the same command to resume — already-hashed files will be skipped.\n", interrupted.Reason)
+		return &exitError{code: exitLocal, err: scanErr}
+	}
+	return scanErr
+}
+
+// errRemoteFailed is the scan's cancel cause when its upload fails.
+var errRemoteFailed = errors.New("the upload failed")
+
+// uploadProgress is the upload's part of scan's progress line.
+func uploadProgress(ctx context.Context, u *syncer.Uploader, feed *syncer.Feed, driveID string) string {
+	s := u.Status()
+	if s.RetryLeft > 0 {
+		return fmt.Sprintf("remote: retrying (%s left)", s.RetryLeft.Round(time.Second))
+	}
+	pending, err := feed.Count(ctx, driveID, []wire.Range{{s.Cursor, math.MaxInt64}})
+	if err != nil {
+		return fmt.Sprintf("uploaded %d", s.Uploaded)
+	}
+	return fmt.Sprintf("uploaded %d / pending %d", s.Uploaded, pending)
 }
 
 // detectIdentity is identity.Detect; tests replace it.

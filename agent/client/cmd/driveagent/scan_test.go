@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jyothri/bhandaar/agent/client/internal/identity"
+	"github.com/jyothri/bhandaar/agent/client/internal/remote/remotetest"
 	"github.com/jyothri/bhandaar/agent/client/internal/store"
 	"github.com/jyothri/bhandaar/agent/client/internal/testutil"
 )
@@ -67,10 +68,29 @@ func bigTree(t *testing.T) string {
 	return root
 }
 
+// loggedIn starts a fake agentserver and logs stateDir in to it.
+func loggedIn(t *testing.T, stateDir string) *remotetest.Server {
+	t.Helper()
+	srv := remotetest.New(t)
+	if r := login(t, stateDir, srv.URL, "correct horse battery", "--username", "jyothri", "--password-stdin"); r.err != nil {
+		t.Fatalf("login: %v", r.err)
+	}
+	return srv
+}
+
 // interrupt starts a scan, waits until it's running, and sends sig.
 func interrupt(t *testing.T, sig os.Signal) (code int, stdout, stderr string) {
+	state := t.TempDir()
+	srv := loggedIn(t, state)
+	return interruptWith(t, srv, state, sig)
+}
+
+// interruptWith is interrupt against srv; with more signals, each is sent
+// once the previous one's effect shows (the drain starting).
+func interruptWith(t *testing.T, srv *remotetest.Server, state string, sigs ...os.Signal) (code int, stdout, stderr string) {
 	root := bigTree(t)
-	cmd := driveagent(t, "scan", "--drive-id", "d1", "--path", root, "--state-dir", t.TempDir(), "--workers", "1")
+	cmd := driveagent(t, "scan", "--drive-id", "d1", "--path", root, "--state-dir", state, "--workers", "1",
+		"--remote-url", srv.URL, "--remote-timeout", "10m")
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	out, err := cmd.StdoutPipe()
@@ -90,11 +110,18 @@ func interrupt(t *testing.T, sig os.Signal) (code int, stdout, stderr string) {
 	}
 	time.Sleep(300 * time.Millisecond) // into the 64 GiB file
 	start := time.Now()
-	if err := cmd.Process.Signal(sig); err != nil {
+	if err := cmd.Process.Signal(sigs[0]); err != nil {
 		t.Fatal(err)
 	}
 	for sc.Scan() {
 		outBuf.WriteString(sc.Text() + "\n")
+		if len(sigs) > 1 && strings.HasPrefix(sc.Text(), "uploading what the scan recorded") {
+			time.Sleep(200 * time.Millisecond) // into the retries
+			if err := cmd.Process.Signal(sigs[1]); err != nil {
+				t.Fatal(err)
+			}
+			sigs = sigs[:1]
+		}
 	}
 	code = exitStatus(t, cmd.Wait())
 	if took := time.Since(start); took > 20*time.Second {
@@ -128,8 +155,9 @@ func TestScanExitCodes(t *testing.T) {
 	testutil.WriteTree(t, rootA, testutil.Tree{"a": "a"})
 	testutil.WriteTree(t, rootB, testutil.Tree{"b": "b"})
 	state := t.TempDir()
+	srv := loggedIn(t, state)
 	run := func(args ...string) (int, string) {
-		cmd := driveagent(t, append([]string{"scan", "--state-dir", state}, args...)...)
+		cmd := driveagent(t, append([]string{"scan", "--state-dir", state, "--remote-url", srv.URL}, args...)...)
 		b, err := cmd.CombinedOutput()
 		return exitStatus(t, err), string(b)
 	}
@@ -181,14 +209,15 @@ func TestWrongDriveGuard(t *testing.T) {
 	root := t.TempDir()
 	testutil.WriteTree(t, root, testutil.Tree{"a": "a"})
 	state := t.TempDir()
+	srv := loggedIn(t, state)
 	found := identity.Identity{FSUUID: "AAAA1111", FSType: "exfat", Source: "linux", HWSerial: "NA8F2K1X"}
 	detectIdentity = func(string) (identity.Identity, error) { return found, nil }
 	t.Cleanup(func() { detectIdentity = identity.Detect })
 
 	scanOnce := func(extra ...string) (error, string, string) {
 		var out, errOut bytes.Buffer
-		args := append([]string{"--drive-id", "seagate1", "--path", root, "--state-dir", state}, extra...)
-		err := runScan(context.Background(), args, &out, &errOut)
+		args := append([]string{"--drive-id", "seagate1", "--path", root, "--state-dir", state, "--remote-url", srv.URL}, extra...)
+		err := runScan(context.Background(), context.Background(), args, &out, &errOut)
 		return err, out.String(), errOut.String()
 	}
 	stored := func() store.DriveIdentity {
