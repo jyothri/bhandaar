@@ -1,5 +1,7 @@
 # Remote Sync: Implementation Plan
 
+> **Archived 2026-09-27.** The implementation plan, complete: M1–M6 shipped (PRs #22–#28) and M7's rollout verification was done on 2026-09-27, with 0.4.1 (#29) fixing what it found. The current references are in [`docs/specs/`](../../specs/); open work is in [`docs/specs/remote-sync-followups.md`](../../specs/remote-sync-followups.md).
+
 **Status:** M1 (PR 1, #22), M2 (PR 2, #23), M3 (PR 3, #25), M4 (PR 4, #26), M5 (PR 5, #27) and M6 (PR 6, #28) implemented; M7 (rollout verification) done on 2026-09-27 except the checks needing a Mac off the home network or a drive both OSes can read (see M7). Written 2026-09-25; revised 2026-09-26 to six PRs, one per milestone.
 
 This plan turns the four remote-sync specs into six pull requests, one per milestone:
@@ -15,7 +17,7 @@ The specs say *what* to build; this says *in what order*, *in which files*, *how
 - **Every PR is mergeable on its own and keeps `main` working.** A plain `driveagent scan` stays local only, with no login, until M6. Before that, only PR 3 changes what a user sees: the wrong-drive guard, and an interrupted scan exiting 130 (143 for `SIGTERM`) instead of 0. Server endpoints that aren't used yet are harmless.
 - **One PR per milestone: six in total.** Each PR is split into **parts**, and each part is its own commit. The parts are in the order to review them, so a large PR can be read one commit at a time. Part sizes: S (a few hundred lines), M (up to ~1,000), L (more, usually because of tests).
 - **Tests come with the code**, in the same part. The agent has **no tests today**, so PR 2 starts by adding a test harness.
-- **Docs move with the code.** When a behaviour ships, [`drive-comparison-agent.md`](drive-comparison-agent.md), `agent/client/README.md`, [`architecture.md`](../architecture.md) and `CLAUDE.md` are updated in the same PR. The remote-sync specs change status from "proposed" to "implemented" section by section.
+- **Docs move with the code.** When a behaviour ships, [`drive-comparison-agent.md`](../../specs/drive-comparison-agent.md), `agent/client/README.md`, [`architecture.md`](../../architecture.md) and `CLAUDE.md` are updated in the same PR. The remote-sync specs change status from "proposed" to "implemented" section by section.
 - **Go isn't installed on the dev box.** Build and test in containers that match each module's `go.mod`: `golang:1.27.1` for the agent, and whatever `agent/server/go.mod` pins, e.g. `docker run --rm -v "$PWD":/src -w /src golang:<ver> go test -race ./...`. CI uses `actions/setup-go` with the same `go.mod`.
 - **The user applies anything on the prod box** (compose, `.env`, nginx, users). Each milestone lists those steps separately, under "User steps".
 
@@ -432,11 +434,11 @@ Before updating the agent on a machine, make sure it's logged in (`driveagent re
   - `compare` on the Mac, of the two drives' `voice memos` folders: 29 common, none diverged, missing or relocated.
   - An Apple Silicon MacBook (macOS 26.6.2, NTFS mounted read-only by macOS's own FSKit driver, no Paragon) ran the PR build of 0.4.1. It recorded seagate1's serial and the same volume GUID as the Intel Mac under Paragon, and prod linked the two Macs' copies to one physical drive: **the first positive link between machines**. Its `diskutil`/`ioreg` output is now a fixture too.
 - **Item 1, off the home network:** on a phone hotspot, that MacBook's LAN attempt failed and it fell back to DNS (the public address), then did the handshake and the login.
-- **Still open:** a positive Linux/macOS link. For NTFS, exFAT and FAT that needs the partition-key matching proposed in [`remote-sync-cross-os-linking.md`](remote-sync-cross-os-linking.md); otherwise a drive both OSes can read and match on (HFS+, or ext4/APFS with extra drivers).
+- **Still open:** a positive Linux/macOS link. For NTFS, exFAT and FAT that needs the partition-key matching proposed in [`remote-sync-cross-os-linking.md`](../../specs/remote-sync-cross-os-linking.md); otherwise a drive both OSes can read and match on (HFS+, or ext4/APFS with extra drivers).
 
 **After each agent release:** set `AGENTSERVER_LATEST_AGENT_VERSION`, and `AGENTSERVER_MIN_AGENT_VERSION` only when a release is required, in the prod `.env`, then restart `agentserver`.
 
-**Follow-ups** (separate specs, not part of this plan): linking FAT, exFAT and NTFS drives across Linux and macOS by partition key ([`remote-sync-cross-os-linking.md`](remote-sync-cross-os-linking.md), proposed after M7); a web UI for agent drives and linked copies (in `be`/`ui`, reading the `agent_*` tables); server-side compare; the thinner agent (overview, Future direction).
+**Follow-ups** (separate specs, not part of this plan): linking FAT, exFAT and NTFS drives across Linux and macOS by partition key ([`remote-sync-cross-os-linking.md`](../../specs/remote-sync-cross-os-linking.md), proposed after M7); a web UI for agent drives and linked copies (in `be`/`ui`, reading the `agent_*` tables); server-side compare; the thinner agent (overview, Future direction).
 
 ---
 
