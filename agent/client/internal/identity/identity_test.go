@@ -185,10 +185,11 @@ func TestParsePlist(t *testing.T) {
 }
 
 // fakeRun answers diskutil from a fixture, and ioreg from ioreg-usb.plist,
-// or, with realIoreg, from the output captured on a Mac: with -l (the
-// properties of every object in the subtree) or without it (properties of
-// the matched USB device only, so no "BSD Name" below it).
-func fakeRun(diskutil string, realIoreg bool, ioregErr error) runFunc {
+// or, given realIoreg (a capture made with -l, the properties of every
+// object in the subtree), from that capture. Without -l it answers with
+// ioreg-no-l-real.plist: properties of the matched USB device only, so no
+// "BSD Name" below it.
+func fakeRun(diskutil, realIoreg string, ioregErr error) runFunc {
 	return func(name string, args ...string) ([]byte, error) {
 		switch name {
 		case "diskutil":
@@ -200,11 +201,11 @@ func fakeRun(diskutil string, realIoreg bool, ioregErr error) runFunc {
 			if ioregErr != nil {
 				return nil, ioregErr
 			}
-			if !realIoreg {
+			if realIoreg == "" {
 				return os.ReadFile("testdata/macos/ioreg-usb.plist")
 			}
 			if slices.Contains(args, "-l") {
-				return os.ReadFile("testdata/macos/ioreg-l-real.plist")
+				return os.ReadFile("testdata/macos/" + realIoreg)
 			}
 			return os.ReadFile("testdata/macos/ioreg-no-l-real.plist")
 		}
@@ -215,24 +216,29 @@ func fakeRun(diskutil string, realIoreg bool, ioregErr error) runFunc {
 func TestMacOS(t *testing.T) {
 	cases := []struct {
 		name, diskutil string
-		realIoreg      bool
+		realIoreg      string
 		ioregErr       error
 		want           Identity
 	}{
 		// Captured on a MacBook Pro (Intel, macOS 13.7.8) from seagate1, an
 		// NTFS drive in a Seagate USB enclosure, mounted read-only by
 		// Paragon NTFS for Mac. Serial and volume UUID masked.
-		{"ntfs on USB, real Mac", "diskutil-ntfs-real.plist", true, nil,
+		{"ntfs on USB, real Mac", "diskutil-ntfs-real.plist", "ioreg-l-real.plist", nil,
 			Identity{FSUUID: "21782368000040008000000000004C77", FSType: "ntfs", Source: "macos", HWSerial: "NA77MASK"}},
+		// seagate2, another NTFS drive on the same Mac: diskutil reports no
+		// VolumeUUID at all (NTFS has a GUID only if the volume has an
+		// object ID), so only the serial identifies it.
+		{"ntfs without a volume UUID, real Mac", "diskutil-ntfs-nouuid-real.plist", "ioreg-l-real-2.plist", nil,
+			Identity{FSType: "ntfs", Source: "macos", HWSerial: "NA95MASK"}},
 		// APFS: the volume's parent is a synthesized container, so the
 		// physical store's disk (disk4) is what's matched in ioreg.
-		{"apfs on USB", "diskutil-apfs.plist", false, nil,
+		{"apfs on USB", "diskutil-apfs.plist", "", nil,
 			Identity{FSUUID: "1A2B3C4D00004000800000000000ABCD", FSType: "apfs", Source: "macos", HWSerial: "NA8F2K1X"}},
 		// The bridge reports a placeholder serial: treated as none.
-		{"exfat, generic serial", "diskutil-exfat.plist", false, nil,
+		{"exfat, generic serial", "diskutil-exfat.plist", "", nil,
 			Identity{FSUUID: "4F1E00000000300090000000000077AA", FSType: "exfat", Source: "macos"}},
-		{"network share", "diskutil-network.plist", false, nil, Identity{FSType: "smbfs", Source: "macos"}},
-		{"ioreg fails", "diskutil-apfs.plist", false, errors.New("ioreg: exit status 1"),
+		{"network share", "diskutil-network.plist", "", nil, Identity{FSType: "smbfs", Source: "macos"}},
+		{"ioreg fails", "diskutil-apfs.plist", "", errors.New("ioreg: exit status 1"),
 			Identity{FSUUID: "1A2B3C4D00004000800000000000ABCD", FSType: "apfs", Source: "macos"}},
 	}
 	for _, c := range cases {
@@ -241,7 +247,7 @@ func TestMacOS(t *testing.T) {
 			t.Errorf("%s: %+v, %v\nwant %+v", c.name, got, err, c.want)
 		}
 	}
-	if _, err := detectMacOS("/Volumes/x", fakeRun("", false, nil)); err == nil {
+	if _, err := detectMacOS("/Volumes/x", fakeRun("", "", nil)); err == nil {
 		t.Error("diskutil failing should be an error")
 	}
 }
@@ -250,7 +256,7 @@ func TestMacOS(t *testing.T) {
 // descendants (down to the IOMedia with the "BSD Name") come as bare stubs,
 // so the disk can't be matched. 0.4.0 ran it that way and found no serial.
 func TestIoregWithoutDashLHasNoBSDName(t *testing.T) {
-	b, err := fakeRun("", true, nil)("ioreg", "-a", "-r", "-c", "IOUSBHostDevice")
+	b, err := fakeRun("", "ioreg-l-real.plist", nil)("ioreg", "-a", "-r", "-c", "IOUSBHostDevice")
 	if err != nil {
 		t.Fatal(err)
 	}

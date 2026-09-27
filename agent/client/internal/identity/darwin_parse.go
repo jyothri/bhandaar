@@ -9,8 +9,8 @@ import (
 type runFunc func(name string, args ...string) ([]byte, error)
 
 // detectMacOS finds root's identity from diskutil and ioreg. Verified on a
-// real Mac (Intel, macOS 13.7.8) with an NTFS drive in a USB enclosure,
-// whose captured output is in testdata/macos (*-real.plist); the APFS and
+// real Mac (Intel, macOS 13.7.8) with two NTFS drives in USB enclosures,
+// whose captured output is in testdata/macos (*-real*.plist); the APFS and
 // exFAT cases are still only hand-written fixtures.
 //
 //   - diskutil info -plist <root>: VolumeUUID and FilesystemType, and the
@@ -21,9 +21,11 @@ type runFunc func(name string, args ...string) ([]byte, error)
 //     registry subtree and every object's properties; the one whose subtree has a "BSD Name" equal to
 //     that whole disk carries the serial ("USB Serial Number").
 //
-// macOS reports a synthesized VolumeUUID for FAT, exFAT and NTFS, so those
-// only match other macOS agents (Source "macos"); the server links them
-// accordingly.
+// For FAT, exFAT and NTFS, macOS's VolumeUUID isn't the volume serial Linux
+// reports, so those only match other macOS agents (Source "macos"); the
+// server links them accordingly. For NTFS it can be missing altogether:
+// one real drive had a GUID (apparently its volume object ID) and another
+// none, which leaves only the serial.
 func detectMacOS(root string, run runFunc) (Identity, error) {
 	out, err := run("diskutil", "info", "-plist", root)
 	if err != nil {
