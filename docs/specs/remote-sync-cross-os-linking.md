@@ -79,8 +79,8 @@ Matching runs when a drive's identity is new or changed, as today. A partition k
 
 `PUT /drives` decodes JSON leniently, so an older server ignores the new fields and an older agent just doesn't send them: either side can go first. Linking starts once both are updated.
 - **agentserver:** migration 4 and the matching change. The image is released on merge, then the user redeploys.
-- **driveagent:** the identity fields, the `state.db` migration and the wire fields. Version **0.5.0** (a minor release: new behaviour).
-- **Afterwards:** scan each drive once with 0.5.0 on each machine. For the Seagates, that's a scan of any folder on each drive on the Linux box (which also records their first identity there) and on the Mac.
+- **driveagent:** the identity fields, the `state.db` migration and the wire fields. Version **0.6.0** (a minor release: new behaviour; 0.5.0 was [agent hardening](../archive/agent-hardening.md)).
+- **Afterwards:** scan each drive once with 0.6.0 on each machine. For the Seagates, that's a scan of any folder on each drive on the Linux box (which also records their first identity there) and on the Mac.
 
 ## Testing
 
@@ -100,7 +100,7 @@ Matching runs when a drive's identity is new or changed, as today. A partition k
   - a step-1 match left untouched by step 2;
   - an older agent's `PUT` without the fields;
   - validation of the two fields.
-- **End to end** (M7 item 6 again): scan seagate1 and seagate2 on the Linux box and on the Mac with 0.5.0; `remote-status` on each shows the other machine's copy as `linked`.
+- **End to end** (M7 item 6 again): scan seagate1 and seagate2 on the Linux box and on the Mac with 0.6.0; `remote-status` on each shows the other machine's copy as `linked`.
 
 ## Alternatives considered
 

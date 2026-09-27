@@ -91,10 +91,10 @@ func usage() {
 
 Usage:
   driveagent scan    --drive-id <id> --path <folder> [--drive-root <dir>] [--backup-root <rel-path>] [--state-dir <dir>] [--workers N] [--replace-root] [--accept-identity-change]
-                     [--remote-timeout 2m] [--remote-url <url>] [--lan-addr <host:port>]
+                     [--wait] [--remote-timeout 2m] [--remote-url <url>] [--lan-addr <host:port>]
   driveagent compare --drive-a <id> --drive-b <id> [--drive-a-paths <rel,rel,...>] [--drive-b-paths <rel,rel,...>] [--state-dir <dir>]
   driveagent report  --drives <id,id,...> [--type text,json,html] [--report-out <dir>] [--include-mac-metadata] [--state-dir <dir>]
-  driveagent login         [--username <name>] [--password-stdin] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
+  driveagent login         [--username <name>] [--password-stdin] [--new-agent] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
   driveagent logout        [--state-dir <dir>]
   driveagent sync          [--drive-id <id,id,...>] [--remote-timeout 2m] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
   driveagent remote-status [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
@@ -102,8 +102,10 @@ Usage:
 
 Remote settings: flag > $DRIVEAGENT_REMOTE_URL / $DRIVEAGENT_LAN_ADDR > <state-dir>/config.json > https://sm.jkurapati.com.
 Every scan uploads what it writes; log in first ("driveagent login"), and run "driveagent sync" for older data.
+One machine runs one state dir and one driveagent version at a time, and one scan per disk (--wait to queue behind another).
+The locks are in ~/.driveagent-locks ($DRIVEAGENT_LOCK_DIR overrides it; nothing is coordinated across lock dirs).
 Exit codes: 0 ok, 1 local error, 2 usage, 3 remote unavailable, login needed or upload failed, 4 driveagent upgrade required,
-130 interrupted (Ctrl-C; a second Ctrl-C stops the upload too), 143 SIGTERM.
+5 busy (another driveagent holds the state dir, version or disk), 130 interrupted (Ctrl-C; a second Ctrl-C stops the upload too), 143 SIGTERM.
 
 Examples:
   driveagent scan    --drive-id seagate2 --drive-root /mnt/seagate2 --backup-root Jyo/Backup --path "/mnt/seagate2/Jyo/Backup/interview"
@@ -138,9 +140,14 @@ func splitList(s string) []string {
 // upload is part of its success (docs/specs/remote-sync-agent.md, "Remote
 // is required"), in this order:
 //
+//  0. join the instance, then take the physical-drive lock of the disk
+//     holding the drive root, failing (exit 5) or, with --wait, waiting
+//     while another scan reads it (docs/archive/agent-hardening.md): the
+//     instance lock is taken first by every command, and the disk lock
+//     always before the upload lock, which sync takes alone;
 //  1. take the drive's upload lock, waiting for a sync of it to finish:
-//     the only thing keeping two scans of one drive apart, and keeping
-//     --replace-root's ClearDrive away from a sync of the drive;
+//     it keeps --replace-root's ClearDrive away from a sync of the drive,
+//     and two scans of one drive id on different disks apart;
 //  2. preflight (health, handshake, token), before the drive or state.db
 //     is touched: exit 3 or 4 on failure;
 //  3. scan.Prepare (the drive-root check; --replace-root clears the drive
@@ -166,6 +173,7 @@ func runScan(ctx, drain context.Context, args []string, stdout, stderr io.Writer
 	replaceRoot := fs.Bool("replace-root", false, "allow --drive-id to be repointed at a different --drive-root than it was last scanned at, discarding that drive-id's old checkpoint data first")
 	acceptIdentity := fs.Bool("accept-identity-change", false, "scan even though the drive at --drive-root has a different filesystem ID than --drive-id was last scanned on (e.g. it was reformatted); keeps the checkpoint data")
 	remoteTimeout := fs.Duration("remote-timeout", syncer.DefaultRemoteTimeout, "stop the scan once the remote has failed for this long")
+	wait := fs.Bool("wait", false, "if another scan is reading the same disk, wait for it instead of exiting 5")
 	if err := fs.Parse(args); err != nil {
 		return usageErr("%v", err)
 	}
@@ -178,10 +186,23 @@ func runScan(ctx, drain context.Context, args []string, stdout, stderr io.Writer
 	}
 	stateDir := *rf.stateDir
 
-	// 1. The upload lock.
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		return fmt.Errorf("creating state dir: %w", err)
+	// 0. The instance, then the disk.
+	release, err := joinInstance(ctx, stateDir, false)
+	if err != nil {
+		return err
 	}
+	defer release()
+	root := *driveRoot
+	if root == "" {
+		root = *path
+	}
+	unlockDisk, err := lockDisk(ctx, root, *driveID, *path, *wait, stderr)
+	if err != nil {
+		return err
+	}
+	defer unlockDisk()
+
+	// 1. The upload lock.
 	lock, err := syncer.WaitLock(ctx, stateDir, *driveID, func() {
 		fmt.Fprintf(stderr, "waiting for \"driveagent sync\" to finish uploading %s\n", *driveID)
 	})
@@ -400,6 +421,11 @@ func runCompare(args []string) error {
 		fs.Usage()
 		return fmt.Errorf("--drive-a and --drive-b are required")
 	}
+	release, err := joinInstance(context.Background(), *stateDir, false)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	st, err := store.Open(*stateDir)
 	if err != nil {
@@ -436,6 +462,11 @@ func runReport(args []string) error {
 		fs.Usage()
 		return fmt.Errorf("--drives is required")
 	}
+	release, err := joinInstance(context.Background(), *stateDir, false)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	st, err := store.Open(*stateDir)
 	if err != nil {

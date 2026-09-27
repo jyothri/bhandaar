@@ -31,10 +31,8 @@
 
 ## Operational rules
 
-The agent doesn't detect these yet; the fixes are [follow-ups](remote-sync-followups.md):
-
-1. **Never copy a state dir (`~/.driveagent`) to another machine and keep using both.** The copies share the `agent_id` and the stream ids, and reconciling makes them wipe each other's upload on the server, one full re-upload per alternation. Each machine gets its own state dir, and a state dir syncs to exactly one remote.
-2. **Never run a `driveagent` older than 0.2.0 on a migrated `state.db`.** It doesn't version its writes, so they're never uploaded, and nothing reports it. After upgrading, check `driveagent version` and remove old binaries from `PATH`.
+1. **Never copy a state dir (`~/.driveagent`) to another machine and keep using both.** The copies share the `agent_id` and the stream ids, and reconciling makes them wipe each other's upload on the server, one full re-upload per alternation. Each machine gets its own state dir, and a state dir syncs to exactly one remote. From 0.5.0 the agent enforces this: `agent.json` records its machine, and on another machine the remote commands refuse until `driveagent login --new-agent` ([agent hardening](../archive/agent-hardening.md#goal-1-machine-binding-follow-up-2)).
+2. **Never run a `driveagent` older than 0.2.0 on a migrated `state.db`.** It doesn't version its writes, so they're never uploaded, and nothing reports it. After upgrading, check `driveagent version` and remove old binaries from `PATH`. The agent doesn't detect this yet ([follow-up](remote-sync-followups.md)). From 0.5.0, two versions can't run at once on one machine, but that doesn't cover a binary older than 0.5.0.
 
 ## Decisions
 

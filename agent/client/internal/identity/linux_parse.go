@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"strings"
 )
 
@@ -20,6 +21,10 @@ type linuxEnv struct {
 	udevDir  string
 	// mountinfo is the path of /proc/self/mountinfo.
 	mountinfo string
+	// sysDir is /sys; evalSymlinks and readDir read it (DiskKeys only).
+	sysDir       string
+	evalSymlinks func(path string) (string, error)
+	readDir      func(path string) ([]string, error)
 }
 
 // detectLinux finds root's identity: stat gives the device number; the
@@ -55,6 +60,16 @@ func detectLinux(root string, env linuxEnv) (Identity, error) {
 		}
 	}
 	return id, nil
+}
+
+// readDirNames lists the names in a directory.
+func readDirNames(path string) ([]string, error) {
+	entries, err := os.ReadDir(path)
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	return names, err
 }
 
 // parseUdev reads the E:KEY=VALUE properties of a udev database record.

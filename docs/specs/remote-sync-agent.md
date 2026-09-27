@@ -1,6 +1,6 @@
 # Remote Sync: `driveagent` Client
 
-**Status:** implemented (0.4.1). This is the compact as-built reference for `agent/client/`. The original spec, with its rationale, measurements and test list, is in [`archive/remote-sync/remote-sync-agent.md`](../archive/remote-sync/remote-sync-agent.md). The overview is [`remote-sync.md`](remote-sync.md), the server API [`remote-sync-server.md`](remote-sync-server.md).
+**Status:** implemented (0.4.1; the locks and machine binding of [agent hardening](../archive/agent-hardening.md) in 0.5.0). This is the compact as-built reference for `agent/client/`. The original spec, with its rationale, measurements and test list, is in [`archive/remote-sync/remote-sync-agent.md`](../archive/remote-sync/remote-sync-agent.md). The overview is [`remote-sync.md`](remote-sync.md), the server API [`remote-sync-server.md`](remote-sync-server.md).
 
 ## Packages
 
@@ -38,6 +38,7 @@ A file unchanged since a scan that never uploaded isn't in a later scan's data (
 
 `scan` runs in this order:
 
+0. **Join the instance, and take the disk's lock** ([agent hardening](../archive/agent-hardening.md)): another state dir or version running exits 5, and so does another scan reading the same disk, unless `--wait`.
 1. **Take the drive's [upload lock](#upload-lock)**, waiting (with a message) while a `sync` holds it.
 2. **Preflight**, before the drive or `state.db` is touched: health (5 s timeout, 2 retries 1 s apart) → handshake → token. Failure exits 3, or 4 for an upgrade.
 3. **Drive checks** (`scan.Prepare`): the `--drive-root` check (`--replace-root` clears the drive here, so it gets a new stream before anything is uploaded), recording the drive, then the [wrong-drive guard](#wrong-drive-guard).
@@ -58,6 +59,7 @@ A transient failure is retried with backoff (1 s, doubling to 30 s, ±25% jitter
 | 2 | Usage error |
 | 3 | Remote unavailable, login needed, or upload failed |
 | 4 | This `driveagent` needs upgrading |
+| 5 | Busy: another `driveagent` runs with another state dir or version, or scans the same disk ([agent hardening](../archive/agent-hardening.md)) |
 | 130 / 143 | Interrupted by `SIGINT` / `SIGTERM` |
 
 ## Configuration
@@ -83,12 +85,12 @@ From the home LAN, `sm.jkurapati.com` resolves to the public IP, and the NAT hai
 ## Identity and credentials
 
 In the state dir, mode 0600:
-- `agent.json`: `{"agent_id": "<uuid v4>"}`, created on first use; one state dir is one agent.
+- `agent.json`: `{"agent_id": "<uuid v4>", "machine_id": "…"}`, created on first use; one state dir is one agent, on one machine. On another machine (`/etc/machine-id` or `IOPlatformUUID` differs), every command that talks to the server refuses, until `login --new-agent` ([machine binding](../archive/agent-hardening.md#goal-1-machine-binding-follow-up-2)).
 - `credentials.json`: remote URL, username, access and refresh tokens with their expiries, written atomically. Tokens are bound to the remote URL; another URL means not logged in.
 
 The access token is refreshed when it has under 60 s left, or after a `401 TOKEN_EXPIRED`/`INVALID_TOKEN` (once per request; a second 401 means `driveagent login`). Refresh runs under an exclusive `flock` on `credentials.lock`, re-reading `credentials.json` first, so concurrent processes rotate once. A lost refresh response is covered by the server's 30 s grace.
 
-A state dir syncs to exactly one remote, and must never be copied to another machine and used on both ([operational rules](remote-sync.md#operational-rules)).
+A state dir syncs to exactly one remote, and must never be copied to another machine and used on both ([operational rules](remote-sync.md#operational-rules)); from 0.5.0 the agent notices.
 
 ## Drive identity
 
@@ -119,17 +121,17 @@ Before walking, `scan` compares what it found with what's stored for the `--driv
 ## Commands
 
 ```
-driveagent login          [--username <name>] [--password-stdin] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
+driveagent login          [--username <name>] [--password-stdin] [--new-agent] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
 driveagent logout         [--state-dir <dir>]
 driveagent sync           [--drive-id <id,id,...>] [--remote-timeout 2m] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
 driveagent remote-status  [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
 driveagent version
 ```
 
-- **`login`**: preflight, then username and password (no echo), then `/auth/login`. `--password-stdin` for scripts; there's no password flag or environment variable.
+- **`login`**: preflight, then username and password (no echo), then `/auth/login`. `--password-stdin` for scripts; there's no password flag or environment variable. `--new-agent` first makes the state dir a new agent on this machine: every drive's stream and marker are forgotten, the old login is deleted without revoking it, and `agent.json` gets a new id; it needs the state dir to itself.
 - **`logout`**: revokes on the server (best effort) and deletes `credentials.json`.
 - **`remote-status`**: reachability and path, the handshake, the login, and per drive its root, identity, the synced marker, pending count (from the `sync_summary` view), the server's acked ranges, linked copies on other machines, and up to 10 rejected entries. It reconciles a drive only if its upload lock is free (otherwise it shows the server's list), and never opens a drive that was never uploaded.
-- `scan` also takes `--remote-url`, `--lan-addr`, `--remote-timeout` and `--accept-identity-change`.
+- `scan` also takes `--remote-url`, `--lan-addr`, `--remote-timeout`, `--accept-identity-change` and `--wait`.
 
 ### `driveagent sync`
 
@@ -199,7 +201,7 @@ A drive's first upload creates its stream id lazily. Resuming needs nothing else
 
 ### Upload lock
 
-An exclusive `flock` on `<state-dir>/upload-<sha256(drive_id)[:16]>.lock` while uploading a drive. `scan` takes it first and waits for it; `sync` tries it and skips a busy drive. It keeps a scan and a `sync` from interleaving writes to one drive's marker, and it's the only thing keeping two scans of one drive apart. Correctness of the uploaded data doesn't depend on it.
+An exclusive `flock` on `<state-dir>/upload-<sha256(drive_id)[:16]>.lock` while uploading a drive. `scan` takes it (after the instance and disk locks of [agent hardening](../archive/agent-hardening.md)) and waits for it; `sync` tries it and skips a busy drive. It keeps a scan and a `sync` from interleaving writes to one drive's marker, and two scans of one drive id apart even on different disks; two scans of one disk are kept apart by the disk lock. Correctness of the uploaded data doesn't depend on it.
 
 ### Reading the feed
 

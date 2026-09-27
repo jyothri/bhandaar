@@ -51,7 +51,7 @@ func (f remoteFlags) open() (*remoteEnv, error) {
 	}
 	id, err := creds.AgentID(*f.stateDir)
 	if err != nil {
-		return nil, fmt.Errorf("agent identity: %w", err)
+		return nil, agentIDErr(err)
 	}
 	c, err := remote.New(clientOptions(remote.Options{RemoteURL: s.RemoteURL, AgentID: id, LANAddr: s.LANAddr}))
 	if err != nil {
@@ -116,6 +116,7 @@ func runLogin(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	rf := addRemoteFlags(fs)
 	username := fs.String("username", "", "username (prompted for if omitted)")
 	passwordStdin := fs.Bool("password-stdin", false, "read the password from standard input instead of prompting")
+	newAgent := fs.Bool("new-agent", false, "make this machine a new agent (after moving the state dir here): forgets the login, and every drive is uploaded again under a new agent id")
 	if err := fs.Parse(args); err != nil {
 		return usageErr("%v", err)
 	}
@@ -124,6 +125,18 @@ func runLogin(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	}
 	if *passwordStdin && *username == "" {
 		return usageErr("login: --password-stdin needs --username")
+	}
+	release, err := joinInstance(ctx, *rf.stateDir, *newAgent)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if *newAgent {
+		id, err := startNewAgent(*rf.stateDir)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "this machine is now agent %s; once logged in, run \"driveagent sync\" to upload its drives again\n", id)
 	}
 	env, err := rf.open()
 	if err != nil {
@@ -205,6 +218,11 @@ func runLogout(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	if err := fs.Parse(args); err != nil {
 		return usageErr("%v", err)
 	}
+	release, err := joinInstance(ctx, *rf.stateDir, false)
+	if err != nil {
+		return err
+	}
+	defer release()
 	c, err := creds.Load(*rf.stateDir)
 	if err != nil {
 		return err
@@ -214,9 +232,11 @@ func runLogout(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		return nil
 	}
 	// Revoke on the server the remote the tokens came from; best effort.
+	// Not from a state dir copied from another machine: the login is that
+	// machine's too.
 	id, err := creds.AgentID(*rf.stateDir)
 	if err != nil {
-		return fmt.Errorf("agent identity: %w", err)
+		return agentIDErr(err)
 	}
 	client, err := remote.New(clientOptions(remote.Options{RemoteURL: c.RemoteURL, AgentID: id, LANAddr: lanAddrFor(rf)}))
 	if err == nil {
@@ -250,6 +270,11 @@ func runRemoteStatus(ctx context.Context, args []string, stdout, stderr io.Write
 	if err := fs.Parse(args); err != nil {
 		return usageErr("%v", err)
 	}
+	release, err := joinInstance(ctx, *rf.stateDir, false)
+	if err != nil {
+		return err
+	}
+	defer release()
 	env, err := rf.open()
 	if err != nil {
 		return err

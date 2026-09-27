@@ -140,6 +140,24 @@ func (s *Store) ClearMarker(driveID, streamID string) error {
 	})
 }
 
+// ResetStreams forgets every drive's stream, marker and sync_rejected, for
+// "login --new-agent": the new agent has no drives on the server, so each
+// drive gets a new stream when it's next opened and is uploaded again in
+// full. The scan data itself is kept.
+func (s *Store) ResetStreams() error {
+	return s.inTx(context.Background(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`UPDATE drives SET sync_stream_id = NULL, synced_version = 0, synced_at = NULL`); err != nil {
+			return err
+		}
+		for _, t := range []string{"sync_ranges", "sync_rejected"} {
+			if _, err := tx.Exec(`DELETE FROM ` + t); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func clearSyncRows(tx *sql.Tx, driveID string) error {
 	for _, t := range []string{"sync_ranges", "sync_rejected"} {
 		if _, err := tx.Exec(`DELETE FROM `+t+` WHERE drive_id = ?`, driveID); err != nil {

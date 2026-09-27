@@ -41,6 +41,11 @@ func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if *remoteTimeout <= 0 {
 		return usageErr("sync: --remote-timeout must be positive")
 	}
+	release, err := joinInstance(ctx, *rf.stateDir, false)
+	if err != nil {
+		return err
+	}
+	defer release()
 	env, err := rf.open()
 	if err != nil {
 		return err

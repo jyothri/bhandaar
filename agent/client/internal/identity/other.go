@@ -11,3 +11,8 @@ import (
 func Detect(root string) (Identity, error) {
 	return Identity{}, errors.New("drive identity isn't supported on " + runtime.GOOS)
 }
+
+// DiskKeys can't find the disk on this OS: the key is the path.
+func DiskKeys(root string) []string {
+	return fallbackKeys(root, Identity{})
+}

@@ -27,35 +27,42 @@ type runFunc func(name string, args ...string) ([]byte, error)
 // one real drive had a GUID (apparently its volume object ID) and another
 // none, which leaves only the serial.
 func detectMacOS(root string, run runFunc) (Identity, error) {
+	id, _, err := detectMacOSDisk(root, run)
+	return id, err
+}
+
+// detectMacOSDisk is detectMacOS, also returning the whole disk ("disk4")
+// behind the volume, if any.
+func detectMacOSDisk(root string, run runFunc) (id Identity, disk string, err error) {
 	out, err := run("diskutil", "info", "-plist", root)
 	if err != nil {
-		return Identity{}, fmt.Errorf("diskutil info %s: %w", root, err)
+		return Identity{}, "", fmt.Errorf("diskutil info %s: %w", root, err)
 	}
 	v, err := parsePlist(out)
 	if err != nil {
-		return Identity{}, fmt.Errorf("diskutil info %s: %w", root, err)
+		return Identity{}, "", fmt.Errorf("diskutil info %s: %w", root, err)
 	}
 	info, _ := v.(map[string]any)
-	id := Identity{
+	id = Identity{
 		Source: "macos",
 		FSUUID: NormalizeFSUUID(str(info["VolumeUUID"])),
 		FSType: normalizeFSType(str(info["FilesystemType"])),
 	}
 
-	disk := wholeDisk(info)
+	disk = wholeDisk(info)
 	if disk == "" {
-		return id, nil
+		return id, "", nil
 	}
 	// -l: without it ioreg prints properties only for the matched USB
 	// devices, and their descendants (down to the IOMedia with the "BSD
 	// Name") come as bare stubs, so no disk would ever match.
 	out, err = run("ioreg", "-a", "-l", "-r", "-c", "IOUSBHostDevice")
 	if err != nil {
-		return id, nil // not USB, or ioreg failed: no serial
+		return id, disk, nil // not USB, or ioreg failed: no serial
 	}
 	v, err = parsePlist(out)
 	if err != nil {
-		return id, nil
+		return id, disk, nil
 	}
 	devices, _ := v.([]any)
 	for _, dev := range devices {
@@ -69,7 +76,7 @@ func detectMacOS(root string, run runFunc) (Identity, error) {
 			break
 		}
 	}
-	return id, nil
+	return id, disk, nil
 }
 
 var partitionSuffix = regexp.MustCompile(`s\d+$`)
