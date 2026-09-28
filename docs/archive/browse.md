@@ -1,6 +1,6 @@
 # Browse: Files and Folders by Account and Drive
 
-**Status:** implemented 2026-09-28 (all three steps; see [As built](#as-built)). Written 2026-09-27, after [request-drive-scans.md](request-drive-scans.md) steps 1–5. Modelled on `driveagent`'s HTML report ([drive-comparison-agent.md](drive-comparison-agent.md#report)).
+**Status:** implemented 2026-09-28 (all three steps; see [As built](#as-built)). Written 2026-09-27, after [request-drive-scans.md](../specs/request-drive-scans.md) steps 1–5. Modelled on `driveagent`'s HTML report ([drive-comparison-agent.md](../specs/drive-comparison-agent.md#report)).
 
 ## Problem
 

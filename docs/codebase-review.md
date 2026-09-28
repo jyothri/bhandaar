@@ -23,7 +23,7 @@ Status legend: `[ ]` open · **Deferred** = open, parked for now · **Blocked** 
 3. The small ones, as convenient: 4.8, 5.1, 6.4, 2.8, 2.9, 2.10.
 4. When unblocked or revisited: 2.11, 6.3, 7.6.
 
-The next feature is proposed separately, in [specs/browse.md](specs/browse.md): browsing files and folders by Google account and by agent drive.
+Browsing files and folders by Google account and by agent drive was built in #35, from [archive/browse.md](archive/browse.md).
 
 ---
 

@@ -1,4 +1,4 @@
-// What Browse shows. See docs/specs/browse.md, "Browse API".
+// What Browse shows. See docs/archive/browse.md, "Browse API".
 
 import { MessageRow } from "./results";
 

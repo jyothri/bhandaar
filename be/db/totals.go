@@ -23,7 +23,7 @@ func inQuery(query string, args ...any) (string, []any, error) {
 }
 
 // Every folder's total size and file count, cached per source so that
-// opening a folder never adds up its subtree. See docs/specs/browse.md,
+// opening a folder never adds up its subtree. See docs/archive/browse.md,
 // "Folder totals cache".
 
 func migrateBrowseTotals() error {

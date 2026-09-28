@@ -11,7 +11,7 @@ import (
 )
 
 // Browse: a user's Google accounts and agent drives, one folder at a time.
-// See docs/specs/browse.md, "Browse API".
+// See docs/archive/browse.md, "Browse API".
 
 func browseRoutes(api *mux.Router) {
 	api.HandleFunc("/browse/sources", BrowseSourcesHandler).Methods("GET")

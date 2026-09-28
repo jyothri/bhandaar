@@ -47,7 +47,7 @@ func main() {
 		}
 	}()
 
-	// Keeps Browse's folder totals current (docs/specs/browse.md).
+	// Keeps Browse's folder totals current (docs/archive/browse.md).
 	go db.TotalsChecker(context.Background(), 10*time.Minute)
 
 	slog.Info("Starting web server")

@@ -12,7 +12,7 @@ import Icon from "./ui/Icon";
 
 // A folder's contents as a collapsible tree, loaded one folder at a time,
 // as driveagent's HTML report shows a drive. Each row has an icon, and a
-// bar for its share of the folder it's in. See docs/specs/browse.md,
+// bar for its share of the folder it's in. See docs/archive/browse.md,
 // "Browse page", and docs/archive/ui-refresh.md, "Storage at a glance".
 
 export type TreeSource = { kind: "google" | "agent"; key: string };

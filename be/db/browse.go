@@ -10,7 +10,7 @@ import (
 )
 
 // What Browse shows: a user's Google accounts and agent drives, one
-// folder at a time. See docs/specs/browse.md.
+// folder at a time. See docs/archive/browse.md.
 
 // BrowsePageSize is how many entries a page of a folder holds, and
 // MessagesPageSize how many messages a page of an account's Gmail does.

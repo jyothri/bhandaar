@@ -148,7 +148,7 @@ func CloudDrive(driveScan GDriveScan, userID int64) (int, error) {
 // unfilteredQueries are the Request page's default Drive queries, which
 // match everything in a scan's scope that isn't trashed (and, with 'me' in
 // owners, that the account owns). Only a scan with one of these deletes
-// from the account's record what it didn't see. See docs/specs/browse.md,
+// from the account's record what it didn't see. See docs/archive/browse.md,
 // "Updating it".
 var unfilteredQueries = map[string]bool{
 	"mimeType != '" + folderMimeType + "' and trashed = false":                    false,
