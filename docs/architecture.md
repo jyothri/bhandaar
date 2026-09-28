@@ -6,110 +6,94 @@ Bhandaar is a storage analyzer application that scans and analyzes data across m
 
 ## Architecture Diagram
 
+The whole system as built. Google Photos is left out: its scanner can't work since Google's 2025 API change (review item 7.15). The proposed Browse page ([specs/browse.md](specs/browse.md)) isn't built yet.
+
 ```mermaid
 graph TB
-    subgraph "Client Layer"
-        UI[React/Vite Frontend<br/>Port: 5173]
-        Browser[Web Browser]
+    subgraph Clients
+        Browser["Web browser"]
+        Agent["driveagent CLI<br/>Linux / macOS machines<br/>local state.db"]
     end
 
-    subgraph "Backend Layer - Go Server :8090"
-        direction TB
-        WebServer[Web Server<br/>gorilla/mux + CORS]
-        
-        subgraph "API Handlers"
-            API[REST API<br/>api.go]
-            OAuth[OAuth Handler<br/>oauth.go]
-            SSE[Server-Sent Events<br/>sse.go]
-        end
-        
-        subgraph "Collection Services"
-            LocalCollect[Local Scanner<br/>local.go]
-            DriveCollect[Drive Scanner<br/>drive.go]
-            GmailCollect[Gmail Scanner<br/>gmail.go]
-            PhotosCollect[Photos Scanner<br/>photos.go]
-        end
-        
-        NotifHub[Notification Hub<br/>hub.go<br/>Progress Broadcasting]
-        
-        DB[Database Layer<br/>database.go<br/>PostgreSQL Client]
-    end
+    subgraph "Prod box"
+        Nginx["nginx<br/>TLS, rate limits (web_login, agent_auth)"]
+        UI["UI: React SPA<br/>Vite, TanStack Router + Query<br/>Request, Request History, scan results"]
 
-    subgraph "Data Storage"
-        PostgreSQL[(PostgreSQL Database<br/>Port: 5432)]
-        
-        subgraph "Database Tables"
-            Scans[scans]
-            ScanData[scandata]
-            ScanMetadata[scanmetadata]
-            MessageMeta[messagemetadata]
-            PhotosMedia[photosmediaitem]
-            PhotoMeta[photometadata]
-            VideoMeta[videometadata]
-            Tokens[privatetokens]
+        subgraph BE["be: Go web app :8090"]
+            MW["Middleware<br/>CORS, body limits,<br/>session check + origin check"]
+            AuthH["auth.go<br/>/api/auth/login, logout, me"]
+            ApiH["api.go<br/>/api/scans, /api/accounts,<br/>/api/scans/{id}/summary, results"]
+            OAuthH["oauth.go<br/>/api/glink: link accounts"]
+            SseH["sse.go<br/>/sse/scanprogress"]
+            Collect["Collectors<br/>drive.go, gmail.go, local.go<br/>one scan at a time"]
+            Hub["notification hub<br/>progress events"]
+            DBL["db layer<br/>database.go, users.go,<br/>accounts.go, results.go"]
+        end
+
+        subgraph AS["agentserver: Go :8091"]
+            AgentAPI["/agent/v1: handshake, login (JWT),<br/>drives, change batches"]
+            House["housekeeping"]
+        end
+
+        subgraph PG["PostgreSQL :5432 (one database)"]
+            BeTables[("be tables<br/>scans, scanmetadata, scandata,<br/>messagemetadata, privatetokens,<br/>web_sessions")]
+            AgentTables[("agentserver tables<br/>agent_users, agent_login_failures,<br/>agent_agents, agent_drives, agent_files,<br/>agent_dir_listings, agent_scan_runs, …")]
         end
     end
 
-    subgraph "External Services"
-        GoogleOAuth[Google OAuth 2.0<br/>Authentication]
-        GoogleDrive[Google Drive API<br/>Drive Storage]
-        GmailAPI[Gmail API<br/>Email Data]
-        PhotosAPI[Google Photos API<br/>Photo/Video Data]
+    subgraph Google
+        GAuth["Google OAuth 2.0 / OpenID<br/>consent + token endpoint"]
+        GDrive["Google Drive API<br/>drive.metadata.readonly"]
+        GMail["Gmail API<br/>gmail.readonly"]
     end
 
-    %% Client to Backend connections
-    Browser --> UI
-    UI -->|HTTP/REST| API
-    UI -->|OAuth Flow| OAuth
-    UI -->|Real-time Updates| SSE
+    Browser -->|HTTPS| Nginx
+    Agent -->|"HTTPS /agent/"| Nginx
+    Nginx -->|"/"| UI
+    Nginx -->|"/api, /sse"| MW
+    Nginx -->|"/agent/"| AgentAPI
+    Browser -.->|"consent redirect<br/>(openid email + service scope)"| GAuth
 
-    %% Backend internal connections
-    WebServer --> API
-    WebServer --> OAuth
-    WebServer --> SSE
-    
-    API --> LocalCollect
-    API --> DriveCollect
-    API --> GmailCollect
-    API --> PhotosCollect
-    
-    GmailCollect -.->|Progress Events| NotifHub
-    NotifHub -.->|Broadcast| SSE
-    
-    %% Data storage connections
-    LocalCollect --> DB
-    DriveCollect --> DB
-    GmailCollect --> DB
-    PhotosCollect --> DB
-    OAuth --> DB
-    
-    DB --> PostgreSQL
-    PostgreSQL --> Scans
-    PostgreSQL --> ScanData
-    PostgreSQL --> ScanMetadata
-    PostgreSQL --> MessageMeta
-    PostgreSQL --> PhotosMedia
-    PostgreSQL --> PhotoMeta
-    PostgreSQL --> VideoMeta
-    PostgreSQL --> Tokens
+    MW --> AuthH
+    MW --> ApiH
+    MW --> OAuthH
+    MW --> SseH
+    ApiH -->|start scan| Collect
+    Collect -->|progress| Hub
+    Hub -->|"owner's scans only"| SseH
 
-    %% External service connections
-    OAuth <-->|Authorization Flow| GoogleOAuth
-    DriveCollect -->|API Calls| GoogleDrive
-    GmailCollect -->|API Calls| GmailAPI
-    PhotosCollect -->|API Calls| PhotosAPI
+    AuthH --> DBL
+    ApiH --> DBL
+    OAuthH --> DBL
+    Collect --> DBL
+    DBL --> BeTables
+    DBL -.->|"reads users, shares<br/>login lockout"| AgentTables
+    AgentAPI --> AgentTables
+    House --> AgentTables
 
-    %% Styling
-    classDef frontend fill:#61dafb,stroke:#333,stroke-width:2px,color:#000
-    classDef backend fill:#00add8,stroke:#333,stroke-width:2px,color:#fff
-    classDef database fill:#336791,stroke:#333,stroke-width:2px,color:#fff
-    classDef external fill:#4285f4,stroke:#333,stroke-width:2px,color:#fff
-    
-    class UI,Browser frontend
-    class WebServer,API,OAuth,SSE,LocalCollect,DriveCollect,GmailCollect,PhotosCollect,NotifHub,DB backend
-    class PostgreSQL,Scans,ScanData,ScanMetadata,MessageMeta,PhotosMedia,PhotoMeta,VideoMeta,Tokens database
-    class GoogleOAuth,GoogleDrive,GmailAPI,PhotosAPI external
+    OAuthH -->|"code exchange, id_token"| GAuth
+    Collect -->|"files.list / files.get"| GDrive
+    Collect -->|"messages.list / get"| GMail
+
+    classDef client fill:#61dafb,stroke:#333,color:#000
+    classDef edge fill:#999,stroke:#333,color:#fff
+    classDef backend fill:#00add8,stroke:#333,color:#fff
+    classDef agentsrv fill:#6b8e23,stroke:#333,color:#fff
+    classDef database fill:#336791,stroke:#333,color:#fff
+    classDef external fill:#4285f4,stroke:#333,color:#fff
+
+    class Browser,Agent,UI client
+    class Nginx edge
+    class MW,AuthH,ApiH,OAuthH,SseH,Collect,Hub,DBL backend
+    class AgentAPI,House agentsrv
+    class BeTables,AgentTables database
+    class GAuth,GDrive,GMail external
 ```
+
+- **Web users** log in to `be` with `agentserver`'s users (`agent_users`), sharing its login lockout. Sessions are `web_sessions` rows behind an HttpOnly cookie (see [Web authentication](#web-authentication)).
+- **Scans and linked Google accounts** belong to the user who made them.
+- **`be` and `agentserver` never call each other.** They only share the database, where each owns its own tables.
+- **The local scanner** walks the filesystem of the machine `be` runs on. `driveagent` is how other machines' disks are scanned.
 
 ## Component Details
 
@@ -247,14 +231,15 @@ scans, privatetokens and web_sessions have a user_id → agent_users (agentserve
 
 A separate service for `driveagent` (the local drive-comparison agent in `agent/client/`), designed in [`specs/remote-sync.md`](specs/remote-sync.md). It shares the Postgres database but only uses its own `agent_*` tables, created by its own numbered migrations (`agentserver_schema_migrations`); `be` and `agentserver` never call each other, but `be` reads its users (see [Web authentication](#web-authentication)). nginx routes `/agent/` to it on port 8091.
 
-Implemented (rollout steps 1 and 4): `GET /agent/health`, `POST /agent/v1/handshake` (version negotiation), username/password login with JWT access tokens and rotating refresh tokens, `PUT`/`GET /agent/v1/drives` (a drive's upload stream, acked version ranges, and linking copies of one physical drive by filesystem ID and serial), and `POST /agent/v1/drives/{id}/changes` (gzip JSON batches of the agent's change feed, applied with higher-version-wins and tombstones, so batches can arrive in any order). Plus the `agentserver user` admin commands and hourly housekeeping. Uploaded data lives in `agent_files`, `agent_dir_listings` and `agent_scan_runs`, keyed on a hash of the raw path. On the agent side, every `driveagent scan` uploads what it writes as it goes (step 6), and `driveagent sync` (step 5) uploads the rest of each drive's pending change feed from `state.db`. Data flow: `driveagent` → nginx `/agent/` → `agentserver` → Postgres.
+Implemented (rollout steps 1 and 4): `GET /agent/health`, `POST /agent/v1/handshake` (version negotiation), username/password login with JWT access tokens and rotating refresh tokens, `PUT`/`GET /agent/v1/drives` (a drive's upload stream, acked version ranges, and linking copies of one physical drive by filesystem ID and serial), and `POST /agent/v1/drives/{id}/changes` (gzip JSON batches of the agent's change feed, applied with higher-version-wins and tombstones, so batches can arrive in any order). Plus the `agentserver user` admin commands and hourly housekeeping. Uploaded data lives in `agent_files`, `agent_dir_listings` and `agent_scan_runs`, keyed on a hash of the raw path. On the agent side, every `driveagent scan` uploads what it writes as it goes (step 6), and `driveagent sync` (step 5) uploads the rest of each drive's pending change feed from `state.db`. Data flow: `driveagent` → nginx `/agent/` → `agentserver` → Postgres, step by step in [Agent Upload Flow](#agent-upload-flow-driveagent--agentserver).
 
 ### 5. External Services (Google APIs)
 
 **OAuth 2.0:**
-- Authorization code flow
-- Refresh token storage
-- Scopes: Drive (readonly), Gmail (readonly), Photos
+- Authorization code flow, one service at a time with incremental authorization (see [Account Linking Flow](#account-linking-flow))
+- Refresh tokens stored per linked account, with the scopes Google granted
+- Scopes: `openid email` (identifies the account) plus `gmail.readonly` and/or `drive.metadata.readonly`. The Photos scopes the Photos scanner asks for are no longer granted (review item 7.15)
+- The OAuth client is in "Testing": refresh tokens expire 7 days after they're issued (review item 2.11)
 
 **Required Credentials:**
 - `OAUTH_CLIENT_ID` - Google OAuth client ID
@@ -265,85 +250,171 @@ Implemented (rollout steps 1 and 4): `GET /agent/health`, `POST /agent/v1/handsh
 
 ### Scan Request Flow
 
+A Google Drive scan, from the Request page to its results. A Gmail scan runs the same way, minus the folder lookup, and saves messages instead of files.
+
 ```mermaid
 sequenceDiagram
-    participant User
+    actor User
     participant UI
-    participant API
-    participant Collector
-    participant DB
-    participant SSE
-    
-    User->>UI: Initiate Scan
-    UI->>API: POST /api/scans
-    API->>DB: Create scan record
-    DB-->>API: Return scan_id
-    API->>Collector: Start collection
-    API-->>UI: Return scan_id
-    
-    loop Collection Process
-        Collector->>External: Fetch data
-        External-->>Collector: Return data
-        Collector->>DB: Store data
-        Collector->>SSE: Send progress update
-        SSE-->>UI: Stream progress
+    participant API as be: api.go
+    participant Col as be: collector
+    participant DB as PostgreSQL
+    participant Drive as Google Drive API
+    participant Hub as notification hub
+
+    User->>UI: Pick account + Google Drive, set filters, Submit
+    UI->>API: POST /api/scans (session cookie)
+    API->>DB: account has granted Drive? query ≤ 2000 chars?
+    alt not granted, or bad query or folder ID
+        API-->>UI: 400 with a message (no scan created)
     end
-    
-    Collector->>DB: Mark scan complete
-    User->>UI: Request results
-    UI->>API: GET /api/scans/{scan_id}
-    API->>DB: Query results
-    DB-->>API: Return data
-    API-->>UI: Return results
-    UI-->>User: Display results
+    API->>Col: CloudDrive(scan, user)
+    Col->>DB: refresh token, name and client_key of the account
+    opt folder scan
+        Col->>Drive: files.get folder, then its parents up to My Drive
+        Drive-->>Col: folder, full path
+        Note over Col: missing, trashed or a file → 400, no scan
+    end
+    Col->>DB: scans row (Running) + scanmetadata (name, client_key, folder, query)
+    Col-->>API: scan_id
+    API-->>UI: {scan_id}
+    UI-->>User: "Request submitted" + View results
+
+    loop each folder (folder scan) or page of results (whole Drive)
+        Col->>Drive: files.list q=…
+        Drive-->>Col: files
+        Col->>DB: scandata rows (full path, file_id, size, MD5)
+        Col->>Hub: progress every 5 s (files so far)
+    end
+    Col->>DB: folder rows with recursive totals
+    Col->>DB: mark Completed (or Failed with the error)
+    DB->>Hub: final event (Completed / Failed)
+
+    User->>UI: Request History › account › scan
+    UI->>API: GET /api/scans/{id}/summary, GET /api/scans/{id}?page=n
+    API->>DB: owner check, totals, a page of rows in tree order
+    API-->>UI: summary + rows
+    UI-->>User: results page
 ```
 
-### OAuth Flow
+### Account Linking Flow
+
+Linking a Google account, or adding a service (e.g. Drive) to one already linked. The user is logged in to the web app throughout.
 
 ```mermaid
 sequenceDiagram
-    participant User
+    actor User
     participant UI
-    participant Backend
     participant Google
-    participant DB
-    
-    User->>UI: Click "Connect Account"
-    UI->>Backend: GET /oauth/authorize
-    Backend-->>UI: Redirect URL
-    UI->>Google: Redirect to OAuth
-    Google-->>User: Show consent screen
-    User->>Google: Approve
-    Google->>Backend: Redirect to /oauth/callback
-    Backend->>Google: Exchange code for tokens
-    Google-->>Backend: Return access + refresh tokens
-    Backend->>DB: Store tokens
-    Backend-->>UI: Redirect to success page
+    participant BE as be: oauth.go
+    participant DB as PostgreSQL
+
+    User->>UI: "Link another Google account" or "Grant Drive access"
+    UI->>UI: sessionStorage: random state + service being linked
+    UI->>Google: authorize: openid email + service scope,<br/>include_granted_scopes, offline, prompt=consent,<br/>login_hint (when adding a service)
+    Google-->>User: account chooser + consent
+    User->>Google: approve (may untick scopes)
+    Google->>UI: /oauth/glink?code&state
+    UI->>UI: state matches this tab's?
+    UI->>BE: full-page redirect: GET /api/glink?code&redirectUri (session cookie)
+    BE->>BE: redirectUri's origin is a -frontend_url?
+    BE->>Google: exchange the code (token endpoint)
+    Google-->>BE: access + refresh token, granted scope, id_token
+    BE->>BE: id_token → sub, email → masked display name
+    BE->>DB: LinkAccount: update the user's row with this sub,<br/>else adopt the newest same-named legacy row,<br/>else insert (new client_key)
+    BE-->>UI: 302 /request?account=<client_key>
+    UI-->>User: account selected, back on the service being linked
 ```
 
 ### Real-time Progress Updates (SSE)
 
 ```mermaid
 sequenceDiagram
-    participant UI
-    participant SSE
-    participant Hub
-    participant Collector
-    
-    UI->>SSE: Connect to /events
-    SSE->>Hub: Subscribe to updates
-    
-    loop Scanning
-        Collector->>Hub: Publish progress
-        Hub->>SSE: Broadcast to subscribers
-        SSE->>UI: Stream event
-        UI->>UI: Update progress bar
+    participant UI as UI (Request page)
+    participant SSE as be: sse.go
+    participant Hub as notification hub
+    participant Col as be: collector (Gmail or Drive)
+    participant DB as PostgreSQL
+
+    UI->>SSE: EventSource /sse/scanprogress (withCredentials)
+    SSE->>Hub: SubscribeAll
+    loop while a scan runs
+        Col->>Hub: progress (scan_id, processed, elapsed)
+        Hub->>SSE: broadcast (never blocks, keeps the newest)
+        SSE->>DB: scan owned by this user? (once per scan)
+        SSE-->>UI: event: progress
+        UI->>UI: progress bar
     end
-    
-    Collector->>Hub: Publish completion
-    Hub->>SSE: Broadcast completion
-    SSE->>UI: Stream complete event
-    UI->>UI: Show results
+    Col->>DB: mark Completed / Failed
+    DB->>Hub: PublishScanEnd
+    Hub->>SSE: final event
+    SSE-->>UI: event: progress (status Completed / Failed, error)
+    UI->>UI: "Completed" or "Failed: …" (invalid_grant → link again)
+```
+
+### Agent Upload Flow (driveagent → agentserver)
+
+How a machine's `driveagent` gets its scan data to `agentserver`: logging in once, then a `scan` that uploads while it walks, and a `sync` that uploads whatever is left. The full protocol is in [specs/remote-sync.md](specs/remote-sync.md) and [specs/remote-sync-server.md](specs/remote-sync-server.md).
+
+- **Every request** goes through nginx's `/agent/` location (with a rate limit on `/agent/v1/auth/`), and carries `X-Agent-Version` and `X-Agent-Id`, and after the handshake `X-Agent-Protocol`.
+- **At home,** the agent dials `lan_addr` (the prod box's LAN address) first, verifying the certificate for the public name, and falls back to DNS, because the router's hairpin NAT is unreliable.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant A as driveagent
+    participant L as state.db (local)
+    participant S as agentserver
+    participant P as PostgreSQL
+
+    Note over User,P: Once per machine: driveagent login
+    User->>A: driveagent login (password prompted, never stored)
+    A->>S: GET /agent/health, POST /agent/v1/handshake {version, protocols, os}
+    S-->>A: decision ok / upgrade_recommended / upgrade_required, batch limits
+    A->>S: POST /agent/v1/auth/login {username, password, agent_id, hostname}
+    S->>P: check argon2id hash in agent_users, lockout per (username, IP), register agent_agents
+    S-->>A: access token (JWT, 15 min) + refresh token (30 days, rotating)
+    A->>L: save tokens (agent.json, bound to this machine)
+
+    Note over User,P: driveagent scan --drive-id D --path …
+    A->>A: locks: one scan per disk, one version per machine
+    A->>S: health + handshake (exit 3 if unreachable, 4 if upgrade required)
+    opt access token due
+        A->>S: POST /agent/v1/auth/refresh {refresh_token}
+        S-->>A: new pair (old one rotated, 30 s grace, reuse revokes the family)
+    end
+    A->>L: wrong-drive guard (filesystem ID, serial), S = sync_clock
+    A->>S: PUT /agent/v1/drives/D {stream_id, roots, identity}
+    S->>P: create or update agent_drives, link to a physical drive by filesystem ID + serial
+    S-->>A: acked_ranges, reset (new stream → start over), physical_drive
+    A->>L: reconcile the synced marker with acked_ranges
+    par walk
+        A->>L: walk, hash (BLAKE3), write rows stamped row_version > S, tombstones for deletions
+    and upload
+        loop until the walk is done and everything above S is acked
+            A->>S: POST /agent/v1/drives/D/changes (gzip, ≤ 1000 changes, Idempotency-Key, range (from, to])
+            S->>P: one tx: skip if already acked, higher version wins, merge the range
+            S-->>A: acked_ranges, applied / skipped / rejected
+            A->>L: advance the synced marker
+        end
+    end
+    alt 409 STREAM_MISMATCH
+        A->>S: re-open the drive (PUT) and reconcile, then resume
+    else 401, 426 or unreachable past --remote-timeout
+        A-->>User: exit 3 or 4, checkpoint kept (driveagent sync resumes)
+    end
+    A-->>User: exit 0: scan done, all of it acknowledged
+
+    Note over User,P: driveagent sync (no drive needed)
+    A->>S: same preflight (health, handshake, token)
+    loop each drive in state.db
+        A->>S: PUT /agent/v1/drives/{id}, reconcile
+        loop each gap of history not yet acked, oldest first
+            A->>S: POST …/changes for that range
+            S-->>A: acked_ranges
+            A->>L: advance the synced marker
+        end
+    end
 ```
 
 ## Deployment
