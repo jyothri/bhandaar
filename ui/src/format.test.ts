@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  formatAgo,
   formatBytes,
   formatDateTime,
   formatDuration,
@@ -65,5 +66,18 @@ describe("scanTypeLabel", () => {
     expect(scanTypeLabel("gmail")).toBe("Gmail");
     expect(scanTypeLabel("google_drive")).toBe("Google Drive");
     expect(scanTypeLabel("something_new")).toBe("something_new");
+  });
+});
+
+describe("formatAgo", () => {
+  const now = Date.parse("2026-09-28T12:00:00Z");
+  it.each([
+    ["2026-09-28T11:59:30Z", "just now"],
+    ["2026-09-28T11:55:00Z", "5m ago"],
+    ["2026-09-28T10:00:00Z", "2h ago"],
+    ["2026-09-25T12:00:00Z", "3d ago"],
+    ["not a time", "not a time"],
+  ])("%s is %s", (iso, want) => {
+    expect(formatAgo(iso, now)).toBe(want);
   });
 });

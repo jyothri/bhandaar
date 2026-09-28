@@ -15,6 +15,11 @@ type FileData struct {
 	ModTime   time.Time
 	FileCount uint
 	Md5Hash   string
+	// For a Drive scan of a linked account, the item to update in the
+	// account's record (see SaveDriveScanToDb). RecordOnly rows update
+	// only the record: they get no row in the scan's results.
+	Drive      *DriveItem
+	RecordOnly bool
 }
 
 type MessageMetadata struct {

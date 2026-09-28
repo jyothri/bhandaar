@@ -320,48 +320,48 @@ func SavePhotosMediaItemToDb(scanId int, photosMediaItem <-chan PhotosMediaItem)
 }
 
 func SaveStatToDb(scanId int, scanData <-chan FileData) {
-	for {
-		fd, more := <-scanData
-		if !more {
-			// Channel closed - mark scan as complete if not already failed
-			scan, err := GetScanById(scanId)
-			if err != nil {
-				slog.Error("Failed to get scan status",
-					"scan_id", scanId,
-					"error", err)
-				return
-			}
-
-			if scan.Status != "Failed" {
-				if err := MarkScanCompleted(scanId); err != nil {
-					slog.Error("Failed to mark scan complete",
-						"scan_id", scanId,
-						"error", err)
-				}
-			}
-			break
+	for fd := range scanData {
+		if !fd.RecordOnly {
+			saveStat(scanId, fd)
 		}
+	}
+	// Channel closed - mark scan as complete if not already failed
+	scan, err := GetScanById(scanId)
+	if err != nil {
+		slog.Error("Failed to get scan status",
+			"scan_id", scanId,
+			"error", err)
+		return
+	}
+	if scan.Status != "Failed" {
+		if err := MarkScanCompleted(scanId); err != nil {
+			slog.Error("Failed to mark scan complete",
+				"scan_id", scanId,
+				"error", err)
+		}
+	}
+}
 
-		insert_row := `insert into scandata
+// saveStat saves one row of a scan's files and folders.
+func saveStat(scanId int, fd FileData) {
+	insert_row := `insert into scandata
 			(name, path, size, file_mod_time, md5hash, scan_id, is_dir, file_count, file_id)
 		values
 			($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')) RETURNING id`
-		var err error
-		if fd.IsDir {
-			_, err = db.Exec(insert_row, fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.Md5Hash, scanId, fd.IsDir, fd.FileCount, fd.FileId)
-		} else {
-			_, err = db.Exec(insert_row, fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.Md5Hash, scanId, fd.IsDir, nil, fd.FileId)
-		}
+	var err error
+	if fd.IsDir {
+		_, err = db.Exec(insert_row, fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.Md5Hash, scanId, fd.IsDir, fd.FileCount, fd.FileId)
+	} else {
+		_, err = db.Exec(insert_row, fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.Md5Hash, scanId, fd.IsDir, nil, fd.FileId)
+	}
 
-		if err != nil {
-			slog.Error("Failed to save file scan data, skipping",
-				"scan_id", scanId,
-				"path", fd.FilePath,
-				"is_dir", fd.IsDir,
-				"size_bytes", fd.Size,
-				"error", err)
-			continue
-		}
+	if err != nil {
+		slog.Error("Failed to save file scan data, skipping",
+			"scan_id", scanId,
+			"path", fd.FilePath,
+			"is_dir", fd.IsDir,
+			"size_bytes", fd.Size,
+			"error", err)
 	}
 }
 
@@ -578,7 +578,13 @@ func migrateDB() error {
 	if err := migrateUsers(); err != nil {
 		return err
 	}
-	return migrateAccounts()
+	if err := migrateAccounts(); err != nil {
+		return err
+	}
+	if err := migrateDriveItems(); err != nil {
+		return err
+	}
+	return migrateBrowseTotals()
 }
 
 // migrateDropCompletedAt drops scans.completed_at. Nothing ever set it, so

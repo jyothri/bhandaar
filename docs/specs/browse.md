@@ -1,6 +1,6 @@
 # Browse: Files and Folders by Account and Drive
 
-**Status:** proposed. Written 2026-09-27, after [request-drive-scans.md](request-drive-scans.md) steps 1–5. Modelled on `driveagent`'s HTML report ([drive-comparison-agent.md](drive-comparison-agent.md#report)).
+**Status:** implemented 2026-09-28 (all three steps; see [As built](#as-built)). Written 2026-09-27, after [request-drive-scans.md](request-drive-scans.md) steps 1–5. Modelled on `driveagent`'s HTML report ([drive-comparison-agent.md](drive-comparison-agent.md#report)).
 
 ## Problem
 
@@ -199,3 +199,17 @@ One PR each, each checked on dev.sm against the prod copy:
 Resolved 2026-09-28:
 - **Agent drive status:** a status line under the drive's totals, collapsed by default, with the last scan, last sync and linked physical drive. See [Browse page](#browse-page).
 - **Folder totals:** cached from the start, for every source. See [Folder totals cache](#folder-totals-cache).
+
+## As built
+
+Where the implementation differs from, or adds to, the above:
+- **Trash:** Browse leaves out Drive items marked trashed, in folders and in totals. The record only has them from scans that included the trash.
+- **An agent folder's files** are its directory listing's files (`agent_dir_listings`), each joined to its `agent_files` row by path key, so a folder opens with index lookups instead of a pass over the drive's files (0.3 s for the largest folder, 62,383 files, on the prod copy). A listed file with no `agent_files` row shows as "not scanned".
+- **Paths that aren't valid UTF-8** show in `agentserver`'s readable form, and a folder with such a path can't be opened: Browse looks folders up by `sha256` of the path's UTF-8 bytes.
+- **An agent drive's version** is the higher of its files' and its file tombstones' highest `row_version`, so a deletion alone also triggers a rebuild.
+- **Agent drive status** has no "folder it covered": `agent_scan_runs` doesn't record one.
+- **Drive accounts' totals** are also rebuilt by the background checker when an account has a record but was never built (such as after the replay below), and a Drive scan rebuilds them after it fails too, since its upserts stay.
+- **Drive's roots:** `drive_accounts` keeps each account's My Drive folder ID (looked up once per scan) and when a scan last updated the record. "Shared with me" totals are the account's total less My Drive's.
+- **Measured on the prod copy** at `be` startup: the largest drive's rebuild took 19.7 s (99,371 folders), the second (573,241 files) 13.5 s.
+- **Replay:** scans 9–11 of the dev copy were replayed with a one-off SQL script, not kept in the repo. Scan 8 predates folder paths and was skipped. The scans didn't record the My Drive ID, so a placeholder (`replay-my-drive`) stands for it until the account's next Drive scan; until that scan also sees them, the replayed folders directly under My Drive show under Shared with me.
+- **Masked senders and subjects:** Gmail's From and Subject are blurred, in Browse and in a scan's results, until hovered, focused, or tapped (a tap toggles one cell). A **Mask** switch above each table turns masking off everywhere at once; it's kept in memory only, so every load starts masked. Masking is visual: the API still sends the text.

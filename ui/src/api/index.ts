@@ -1,5 +1,11 @@
 import { config } from "../config";
 import { Account, ScannedAccount } from "../types/accounts";
+import {
+  AccountMessagePage,
+  AgentDriveStatus,
+  BrowseSource,
+  FolderPage,
+} from "../types/browse";
 import { MessagePage, ScanDataPage, ScanSummary } from "../types/results";
 import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 
@@ -134,3 +140,39 @@ export const getScanData = (scanId: number, page: number): Promise<ScanDataPage>
 /** A page (from 1) of the messages a Gmail scan found. */
 export const getGmailData = (scanId: number, page: number): Promise<MessagePage> =>
   fetchJson(`/api/gmaildata/${scanId}?page=${page}`);
+
+/** What the user can browse: their Google accounts and agent drives. */
+export const getBrowseSources = (): Promise<BrowseSource[]> =>
+  fetchJson("/api/browse/sources");
+
+/**
+ * A page (from 1) of a folder of a Google account's Drive ("" for its
+ * roots) or of an agent drive ("" for the drive's root).
+ */
+export const getBrowseChildren = (
+  kind: "google" | "agent",
+  key: string,
+  folder: string,
+  page: number
+): Promise<FolderPage> => {
+  const base =
+    kind === "google"
+      ? `/api/browse/google/${encodeURIComponent(key)}/drive/children`
+      : `/api/browse/agent/${encodeURIComponent(key)}/children`;
+  const query = new URLSearchParams({ folder, page: String(page) });
+  return fetchJson(`${base}?${query}`);
+};
+
+/** An agent drive's last scan, last sync and linked physical drive. */
+export const getAgentDriveStatus = (key: string): Promise<AgentDriveStatus> =>
+  fetchJson(`/api/browse/agent/${encodeURIComponent(key)}/status`);
+
+/** A page (from 1) of a Google account's messages, across its Gmail scans. */
+export const getAccountMessages = (
+  clientKey: string,
+  sort: "size" | "date",
+  page: number
+): Promise<AccountMessagePage> =>
+  fetchJson(
+    `/api/browse/google/${encodeURIComponent(clientKey)}/gmail/messages?sort=${sort}&page=${page}`
+  );

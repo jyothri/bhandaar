@@ -153,13 +153,11 @@ func runDriveScan(t *testing.T, svc *drive.Service, scan GDriveScan) map[string]
 // "<file ID> <size> <file count>".
 func runDriveScanWithFolders(t *testing.T, svc *drive.Service, scan GDriveScan) (map[string]string, map[string]string) {
 	t.Helper()
-	scanData := make(chan db.FileData, 100)
-	if err := startCloudDrive(svc, 1, scan, "Desktop", "drive-test-"+t.Name(), scanData); err != nil {
-		t.Fatalf("startCloudDrive: %v", err)
-	}
-	close(scanData)
 	files, folders := map[string]string{}, map[string]string{}
-	for fd := range scanData {
+	for _, fd := range driveScanRows(t, svc, scan, nil) {
+		if fd.RecordOnly {
+			continue
+		}
 		if fd.IsDir {
 			folders[fd.FilePath] = fmt.Sprintf("%s %d %d", fd.FileId, fd.Size, fd.FileCount)
 		} else {
@@ -167,6 +165,22 @@ func runDriveScanWithFolders(t *testing.T, svc *drive.Service, scan GDriveScan) 
 		}
 	}
 	return files, folders
+}
+
+// driveScanRows runs startCloudDrive, with "Desktop" as a folder scan's
+// folder and known as the folders known before, and returns every row.
+func driveScanRows(t *testing.T, svc *drive.Service, scan GDriveScan, known []*drive.File) []db.FileData {
+	t.Helper()
+	scanData := make(chan db.FileData, 100)
+	if err := startCloudDrive(svc, 1, scan, "Desktop", "drive-test-"+t.Name(), rootId, known, scanData); err != nil {
+		t.Fatalf("startCloudDrive: %v", err)
+	}
+	close(scanData)
+	var rows []db.FileData
+	for fd := range scanData {
+		rows = append(rows, fd)
+	}
+	return rows
 }
 
 func TestDriveWholeDriveSkipsFolders(t *testing.T) {
@@ -302,7 +316,7 @@ func TestPathOfFolder(t *testing.T) {
 		if err != nil {
 			t.Fatalf("checkFolder(%s): %v", id, err)
 		}
-		if got, err := pathOfFolder(svc, folder); err != nil || got != path {
+		if got, _, err := pathOfFolder(svc, folder, rootId); err != nil || got != path {
 			t.Errorf("pathOfFolder(%s) = %q, %v; want %q", id, got, err, path)
 		}
 	}
@@ -362,5 +376,105 @@ func TestFolderNamesMayContainSlashes(t *testing.T) {
 	// Its total isn't mistaken for a folder "2024".
 	if _, ok := folders["Desktop/2024"]; ok {
 		t.Errorf("a row for a folder that doesn't exist: %v", folders)
+	}
+}
+
+func TestPathOfFolderReturnsTheFoldersAbove(t *testing.T) {
+	_, svc := newFakeDrive(t, testTree())
+	folder, err := checkFolder(svc, deepId)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, above, err := pathOfFolder(svc, folder, rootId)
+	if err != nil || len(above) != 1 || above[0].Id != subId || above[0].Parents[0] != rootId {
+		t.Errorf("above = %+v, %v; want Sub, in My Drive", above, err)
+	}
+}
+
+// recordItems returns the Drive items of rows, by file ID, as
+// "<parent> <name> <dir|file> <size> <record-only>".
+func recordItems(rows []db.FileData) map[string]string {
+	items := map[string]string{}
+	for _, fd := range rows {
+		if fd.Drive == nil {
+			continue
+		}
+		kind := "file"
+		if fd.Drive.IsDir {
+			kind = "dir"
+		}
+		items[fd.Drive.FileId] = fmt.Sprintf("%s %s %s %d %v", fd.Drive.ParentId, fd.Drive.Name, kind, fd.Drive.Size, fd.RecordOnly)
+	}
+	return items
+}
+
+func TestDriveFolderScanRecordsFilesAndFolders(t *testing.T) {
+	tree := testTree()
+	tree[deepId] = []*drive.File{file("c", 30)} // without the loop back to root
+	_, svc := newFakeDrive(t, tree)
+	above := folder("above-folder-001", "Above")
+	above.Parents = []string{rootId}
+	scanned := folder(subId, "Sub")
+	scanned.Parents = []string{"above-folder-001"}
+
+	rows := driveScanRows(t, svc, GDriveScan{FolderId: subId, Recursive: true}, []*drive.File{above, scanned})
+
+	// Files go to the results and the record; every folder listed, and the
+	// known ones, to the record only (the walk's folder rows carry no item).
+	want := map[string]string{
+		"above-folder-001": rootId + " Above dir 0 true",
+		subId:              "above-folder-001 Sub dir 0 true",
+		"b":                subId + " b.txt file 20 false",
+		deepId:             subId + " Deep dir 0 true",
+		"c":                deepId + " c.txt file 30 false",
+	}
+	if got := recordItems(rows); !maps.Equal(got, want) {
+		t.Errorf("record items\n got %v\nwant %v", got, want)
+	}
+}
+
+func TestDriveWholeDriveRecordsEveryFolder(t *testing.T) {
+	tree := testTree()
+	// A folder with nothing in it is still recorded.
+	tree[rootId] = append(tree[rootId], folder("empty-folder-01", "Empty"))
+	_, svc := newFakeDrive(t, tree)
+
+	items := recordItems(driveScanRows(t, svc, GDriveScan{QueryString: "trashed = false"}, nil))
+
+	for id, want := range map[string]string{
+		"empty-folder-01": rootId + " Empty dir 0 true",
+		trashId:           rootId + " Old dir 0 true",
+		"a":               rootId + " a.txt file 10 false",
+		"s":               "hidden-folder-01 s.txt file 50 false",
+	} {
+		if items[id] != want {
+			t.Errorf("item %s = %q, want %q", id, items[id], want)
+		}
+	}
+}
+
+func TestDriveRecord(t *testing.T) {
+	folderQ := "mimeType != 'application/vnd.google-apps.folder'"
+	cases := []struct {
+		query             string
+		sawAll, ownedOnly bool
+	}{
+		{folderQ + " and trashed = false", true, false},
+		{folderQ + " and trashed = false and 'me' in owners", true, true},
+		{folderQ + " and trashed = false and mimeType contains 'image/'", false, false},
+		{folderQ, false, false},
+		{"", false, false},
+	}
+	for _, c := range cases {
+		r := driveRecord(GDriveScan{QueryString: c.query, FolderId: subId}, "k1", rootId)
+		if r.SawAll != c.sawAll || r.OwnedOnly != c.ownedOnly || r.FolderId != subId || r.MyDriveId != rootId || r.Recursive {
+			t.Errorf("driveRecord(%q) = %+v", c.query, r)
+		}
+	}
+	if r := driveRecord(GDriveScan{}, "k1", rootId); !r.Recursive {
+		t.Errorf("a whole-Drive scan's record isn't recursive: %+v", r)
+	}
+	if r := driveRecord(GDriveScan{RefreshToken: "rt"}, "", rootId); r != nil {
+		t.Errorf("a scan without a linked account has record %+v, want nil", r)
 	}
 }

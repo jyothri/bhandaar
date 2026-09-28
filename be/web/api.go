@@ -42,6 +42,7 @@ func api(r *mux.Router) {
 	api.HandleFunc("/photos/albums", ListAlbumsHandler).Methods("GET").Queries("refresh_token", "{refresh_token}")
 	api.HandleFunc("/photos/{scan_id}", ListPhotosHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/photos/{scan_id}", ListPhotosHandler).Methods("GET")
+	browseRoutes(api)
 }
 
 func DoScansHandler(w http.ResponseWriter, r *http.Request) {

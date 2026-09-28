@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/jyothri/hdd/constants"
 	"github.com/jyothri/hdd/db"
@@ -44,6 +46,9 @@ func main() {
 			slog.Error("Failed to close database", "error", err)
 		}
 	}()
+
+	// Keeps Browse's folder totals current (docs/specs/browse.md).
+	go db.TotalsChecker(context.Background(), 10*time.Minute)
 
 	slog.Info("Starting web server")
 	web.Server()

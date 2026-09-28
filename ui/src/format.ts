@@ -20,6 +20,37 @@ export function formatDateTime(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : dateTimeFormat.format(date);
 }
 
+/**
+ * How long ago an ISO timestamp was, roughly: "just now", "5m ago",
+ * "2h ago", "3d ago", or a date past a month.
+ */
+export function formatAgo(iso: string, now: number = Date.now()): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) {
+    return iso;
+  }
+  const minutes = Math.floor((now - then) / 60_000);
+  if (minutes < 1) {
+    return "just now";
+  }
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+  const days = Math.floor(hours / 24);
+  return days <= 30 ? `${days}d ago` : formatDateTime(iso);
+}
+
+const countFormat = new Intl.NumberFormat();
+
+/** A count with thousands separators, e.g. 5,910. */
+export function formatCount(n: number): string {
+  return countFormat.format(n);
+}
+
 const byteUnits = ["B", "KB", "MB", "GB", "TB"];
 
 /** Formats a byte count in binary units, e.g. 3.7 GB. */
