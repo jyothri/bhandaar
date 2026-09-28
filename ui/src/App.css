@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Design tokens (docs/specs/ui-refresh.md, "Design tokens"). Components
+/* Design tokens (docs/archive/ui-refresh.md, "Design tokens"). Components
    use these, never raw palette colours, so each theme is set here once.
    Dark values follow the system theme, below. */
 @theme {

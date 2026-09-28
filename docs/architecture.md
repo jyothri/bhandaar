@@ -104,7 +104,7 @@ graph TB
 - Vite (build tool)
 - TanStack Router (routing)
 - TanStack Query (data fetching)
-- Tailwind CSS v4 (styling): design tokens in `App.css` (`@theme`), light and dark from the system theme; no component library ([specs/ui-refresh.md](specs/ui-refresh.md))
+- Tailwind CSS v4 (styling): design tokens in `App.css` (`@theme`), light and dark from the system theme; no component library ([archive/ui-refresh.md](archive/ui-refresh.md))
 
 **Key Components:**
 - `/routes/__root.tsx` and `/components/Header.tsx` - The app shell: a top bar with the Bhandaar name, the nav tabs (Browse · Request · Request History; a menu on phones) and the user menu (Log out); page titles `<page> · Bhandaar`. Login and the OAuth callback show just the name

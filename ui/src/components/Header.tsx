@@ -7,7 +7,7 @@ import { setSession } from "../api/session";
 import Icon, { Logo } from "./ui/Icon";
 
 // The app's top bar: name, nav tabs and the user menu; on phones the tabs
-// move into a menu. See docs/specs/ui-refresh.md, "App shell".
+// move into a menu. See docs/archive/ui-refresh.md, "App shell".
 
 /** The name and mark, linking to Browse. */
 export function Brand() {

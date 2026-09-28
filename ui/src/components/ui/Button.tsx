@@ -2,7 +2,7 @@ import { ComponentProps } from "react";
 import Spinner from "./Spinner";
 import { ButtonSize, ButtonVariant, buttonClasses } from "./styles";
 
-// Buttons in four looks and two sizes. See docs/specs/ui-refresh.md,
+// Buttons in four looks and two sizes. See docs/archive/ui-refresh.md,
 // "Components". Links that look like buttons use buttonClasses.
 
 export type ButtonProps = ComponentProps<"button"> & {

@@ -1,5 +1,5 @@
 // Which icon a file gets: by MIME type for Drive, by extension otherwise.
-// See docs/specs/ui-refresh.md, "File-type icons".
+// See docs/archive/ui-refresh.md, "File-type icons".
 
 export type FileKind =
   | "folder"
