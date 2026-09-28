@@ -7,6 +7,7 @@ import {
   formatBytes,
   formatDateTime,
   formatDuration,
+  shareOf,
   scanTypeLabel,
 } from "./format";
 
@@ -79,5 +80,20 @@ describe("formatAgo", () => {
     ["not a time", "not a time"],
   ])("%s is %s", (iso, want) => {
     expect(formatAgo(iso, now)).toBe(want);
+  });
+});
+
+describe("shareOf", () => {
+  it.each([
+    [50, 200, 25],
+    [200, 200, 100],
+    // A sliver for a tiny share, nothing for nothing.
+    [1, 1_000_000, 0.5],
+    [0, 200, 0],
+    // A folder of 0 bytes has no shares.
+    [0, 0, 0],
+    [10, 0, 0],
+  ])("%d of %d is %d%%", (bytes, total, want) => {
+    expect(shareOf(bytes, total)).toBe(want);
   });
 });

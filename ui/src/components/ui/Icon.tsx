@@ -3,7 +3,57 @@ import { ComponentProps } from "react";
 // Inline SVG icons, drawn in currentColor on a 24-unit grid with 2-unit
 // strokes. Decorative unless given a label.
 
+// A page with a folded corner, for the file kinds drawn on one.
+const page = (
+  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5" />
+);
+
 const paths = {
+  chevronRight: <path d="m9 6 6 6-6 6" />,
+  externalLink: (
+    <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+  ),
+  folder: (
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+  ),
+  file: page,
+  image: (
+    <path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM21 15l-5-5L5 21M9 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />
+  ),
+  video: (
+    <path d="M4 6h11a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zM16 10l5-3v10l-5-3" />
+  ),
+  audio: (
+    <path d="M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
+  ),
+  document: (
+    <>
+      {page}
+      <path d="M9 13h6M9 17h6" />
+    </>
+  ),
+  sheet: (
+    <>
+      {page}
+      <path d="M8 12h8v6H8zM12 12v6M8 15h8" />
+    </>
+  ),
+  slides: (
+    <path d="M3 4h18M4 4v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V4M12 15v5M8 20h8" />
+  ),
+  archive: (
+    <path d="M3 4h18v4H3zM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4" />
+  ),
+  code: <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />,
+  cloud: (
+    <path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.6 12 3.5 3.5 0 0 0 6 19z" />
+  ),
+  hardDrive: (
+    <path d="M22 12H2M5.5 5h13l3.5 7v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6zM6 16h.01M10 16h.01" />
+  ),
+  mail: (
+    <path d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM3 7l9 6 9-6" />
+  ),
   chevronDown: <path d="m6 9 6 6 6-6" />,
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
   close: <path d="M6 6l12 12M18 6 6 18" />,

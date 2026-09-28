@@ -67,6 +67,8 @@ export type FolderPage = {
   page_size: number;
   // The source's folder totals are being rebuilt.
   updating: boolean;
+  // Everything under the folder itself.
+  totals: { files: number; bytes: number };
 };
 
 export type AgentScanRun = {

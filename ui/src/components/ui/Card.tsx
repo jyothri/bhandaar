@@ -4,16 +4,19 @@ import { ComponentProps, ReactNode } from "react";
 export default function Card({
   title,
   actions,
+  flush = false,
   className = "",
   children,
   ...props
 }: Omit<ComponentProps<"section">, "title"> & {
   title?: ReactNode;
   actions?: ReactNode;
+  // No padding, for content that lays out its own rows.
+  flush?: boolean;
 }) {
   return (
     <section
-      className={`rounded-lg border border-line bg-surface p-3 shadow-sm sm:p-4 ${className}`}
+      className={`rounded-lg border border-line bg-surface shadow-sm ${flush ? "" : "p-3 sm:p-4"} ${className}`}
       {...props}
     >
       {(title || actions) && (

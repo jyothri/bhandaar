@@ -76,3 +76,14 @@ const scanTypeLabels: Record<string, string> = {
 export function scanTypeLabel(scanType: string): string {
   return scanTypeLabels[scanType] ?? scanType;
 }
+
+/**
+ * A size's share of its folder's, as a percentage for a size bar. Anything
+ * above nothing shows at least a sliver (min), so it still reads as there.
+ */
+export function shareOf(bytes: number, total: number, min = 0.5): number {
+  if (bytes <= 0 || total <= 0) {
+    return 0;
+  }
+  return Math.min(100, Math.max(min, (bytes / total) * 100));
+}

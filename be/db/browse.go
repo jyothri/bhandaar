@@ -227,6 +227,8 @@ type FolderPage struct {
 	Page     int  `json:"page"`
 	PageSize int  `json:"page_size"`
 	Updating bool `json:"updating"`
+	// Everything under the folder itself, for each entry's share of it.
+	Totals FolderTotals `json:"totals"`
 }
 
 // GoogleAccountOwnedBy reports whether userID linked clientKey.
@@ -306,6 +308,7 @@ func DriveChildren(clientKey string, folder string, pageNo int) (FolderPage, err
 		}
 		page.Files = []BrowseFile{}
 		page.Entries, page.PageSize = 2, BrowsePageSize
+		page.Totals = all
 		return page, nil
 	}
 
@@ -333,9 +336,14 @@ func DriveChildren(clientKey string, folder string, pageNo int) (FolderPage, err
 		clientKey, arg); err != nil {
 		return FolderPage{}, fmt.Errorf("failed to list folders in %s: %w", folder, err)
 	}
-	ids := make([]string, len(folders))
-	for i, f := range folders {
-		ids[i] = f.Id
+	// The subfolders' totals, and the folder's own: "Shared with me" is
+	// the account's ("") less My Drive's.
+	ids := []string{folder}
+	if folder == SharedWithMe {
+		ids = []string{"", myDrive}
+	}
+	for _, f := range folders {
+		ids = append(ids, f.Id)
 	}
 	totals, err := totalsOf(ids)
 	if err != nil {
@@ -343,6 +351,11 @@ func DriveChildren(clientKey string, folder string, pageNo int) (FolderPage, err
 	}
 	for i := range folders {
 		folders[i].FolderTotals = totals[folders[i].Id]
+	}
+	page.Totals = totals[folder]
+	if folder == SharedWithMe {
+		all, mine := totals[""], totals[myDrive]
+		page.Totals = FolderTotals{Files: all.Files - mine.Files, Bytes: all.Bytes - mine.Bytes}
 	}
 	var files int
 	if err := db.Get(&files, `SELECT count(*) `+base+` AND NOT i.is_dir`, clientKey, arg); err != nil {
@@ -467,7 +480,8 @@ func AgentChildren(drivePk int64, folder string, pageNo int) (FolderPage, error)
 	}
 	var totals map[string]FolderTotals
 	if state.Built {
-		totals, err = cachedTotals(source, ids)
+		// The folder's own totals too.
+		totals, err = cachedTotals(source, append(ids, folder))
 		page.Updating = state.Building
 		if err == nil && !page.Updating {
 			var version int64
@@ -476,6 +490,9 @@ func AgentChildren(drivePk int64, folder string, pageNo int) (FolderPage, error)
 		}
 	} else {
 		totals, err = liveAgentTotals(drivePk, prefix)
+		if err == nil {
+			totals[folder], err = liveAgentFolderTotals(drivePk, prefix)
+		}
 		page.Updating = true
 	}
 	if err != nil {
@@ -484,6 +501,7 @@ func AgentChildren(drivePk int64, folder string, pageNo int) (FolderPage, error)
 	for i := range folders {
 		folders[i].FolderTotals = totals[folders[i].Id]
 	}
+	page.Totals = totals[folder]
 
 	// A listed file's path key: its parent's raw path, "/", its raw name.
 	const files = `FROM agent_dir_listings l
@@ -530,6 +548,18 @@ func liveAgentTotals(drivePk int64, prefix string) (map[string]FolderTotals, err
 		totals[r.Folder] = r.FolderTotals
 	}
 	return totals, nil
+}
+
+// liveAgentFolderTotals adds up everything under the folder whose paths
+// start with prefix ("" for the drive's root).
+func liveAgentFolderTotals(drivePk int64, prefix string) (FolderTotals, error) {
+	var t FolderTotals
+	err := db.Get(&t, `SELECT count(*) AS files, COALESCE(sum(size), 0) AS bytes FROM agent_files
+		WHERE drive_pk = $1 AND left(relative_path, length($2)) = $2`, drivePk, prefix)
+	if err != nil {
+		return FolderTotals{}, fmt.Errorf("failed to add up the folder %q: %w", prefix, err)
+	}
+	return t, nil
 }
 
 // AgentScanRun is an agent drive's last scan.

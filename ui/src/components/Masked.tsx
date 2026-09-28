@@ -1,30 +1,17 @@
 import { useState } from "react";
 
 import { setUnmasked, useMaskings, useUnmasked } from "../masking";
+import Switch from "./ui/Switch";
 
 /** A switch between masked (on) and unmasked (off), everywhere. */
 export function MaskToggle() {
   const shown = useUnmasked();
   return (
-    <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={!shown}
-        onClick={() => setUnmasked(!shown)}
-        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${
-          shown ? "bg-gray-300 dark:bg-gray-600" : "bg-green-500"
-        }`}
-      >
-        <span
-          aria-hidden="true"
-          className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
-            shown ? "translate-x-0.5" : "translate-x-5.5"
-          }`}
-        />
-      </button>
-      Mask
-    </label>
+    <Switch
+      checked={!shown}
+      onChange={(masked) => setUnmasked(!masked)}
+      label="Mask"
+    />
   );
 }
 
