@@ -40,7 +40,7 @@ func ValidFolderId(id string) bool {
 }
 
 // Built on first use, after main has parsed the OAuth flags. The collector
-// reads only metadata (docs/specs/request-drive-scans.md, "Scopes").
+// reads only metadata (docs/archive/request-drive-scans.md, "Scopes").
 var cloudConfig = sync.OnceValue(func() *oauth2.Config {
 	return &oauth2.Config{
 		ClientID:     constants.OauthClientId,

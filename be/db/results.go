@@ -6,7 +6,7 @@ import (
 )
 
 // A scan's results, for its results view. See
-// docs/specs/request-drive-scans.md, "Results view".
+// docs/archive/request-drive-scans.md, "Results view".
 
 // resultsPageSize is how many rows a page of results holds.
 const resultsPageSize = 10

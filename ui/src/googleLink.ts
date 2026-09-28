@@ -1,5 +1,5 @@
 // Sends the user to Google to link an account for one service. See
-// docs/specs/request-drive-scans.md, "Scopes".
+// docs/archive/request-drive-scans.md, "Scopes".
 import { config } from "./config";
 import { createOAuthState, rememberLinkService } from "./oauthState";
 import { Service } from "./types/accounts";

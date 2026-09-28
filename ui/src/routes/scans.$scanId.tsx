@@ -28,7 +28,7 @@ import { fileKind } from "../fileTypes";
 import { MessageRow, ScanDataRow, ScanSummary } from "../types/results";
 
 // A scan's results: its summary, then a page of what it found. See
-// docs/specs/request-drive-scans.md, "Results view".
+// docs/archive/request-drive-scans.md, "Results view".
 
 type ResultsSearch = { page: number };
 

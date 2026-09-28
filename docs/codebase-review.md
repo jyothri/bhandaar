@@ -44,7 +44,7 @@ Browsing files and folders by Google account and by agent drive was built in #35
 - [ ] **2.11 Linked Google accounts expire after 7 days** — **Deferred** — Google Cloud console (ops)
   Found in production on 2026-09-24: scan 4 failed with `invalid_grant`, because the account's refresh token, linked in March 2025, was no longer valid. That one was simply old. But if the OAuth consent screen is still in "Testing" status, Google also expires refresh tokens 7 days after they're issued, so every newly linked account would break a week later.
   *Checked 2026-09-27:* the OAuth client is in "Testing". So every linked account's refresh token expires 7 days after it's issued, and its scans then fail with `invalid_grant` (the progress panel already says to link the account again).
-  *Deferred* by decision on 2026-09-27: moving the app to "In production", and any verification, wait. Until then, re-link an account before scanning it if its last link is over a week old. Once [specs/request-drive-scans.md](specs/request-drive-scans.md) step 1 is in, re-linking updates the account in place, so it keeps its history.
+  *Deferred* by decision on 2026-09-27: moving the app to "In production", and any verification, wait. Until then, re-link an account before scanning it if its last link is over a week old. Once [archive/request-drive-scans.md](archive/request-drive-scans.md) step 1 is in, re-linking updates the account in place, so it keeps its history.
   *Fix, when revisited:* publish the app ("In production"). The restricted scopes (`gmail.readonly`, `drive.metadata.readonly`) then show Google's unverified-app warning, with a 100-user cap, unless the app goes through verification.
 
 ## 4. UI / UX
@@ -55,7 +55,7 @@ Browsing files and folders by Google account and by agent drive was built in #35
 
 - [ ] **4.9 Linked accounts can't be removed** — `be/web/api.go`, `src/routes/request.tsx`
   Found in production on 2026-09-24. Re-linking an account used to add a new `privatetokens` row, and the stale one stayed in the Accounts list under the same name; picking it fails with `invalid_grant`. Production has one such stale row (account 1), from the account re-linked that day.
-  *Half done in #33* ([spec](specs/request-drive-scans.md#identity-and-re-linking-beweboauthgo)): accounts are identified by their Google account ID, and re-linking updates the account's row, keeping its `client_key`. The first re-link of an account from before that updates its newest row, so the stale row is left behind.
+  *Half done in #33* ([spec](archive/request-drive-scans.md#identity-and-re-linking-beweboauthgo)): accounts are identified by their Google account ID, and re-linking updates the account's row, keeping its `client_key`. The first re-link of an account from before that updates its newest row, so the stale row is left behind.
   *Left:* let users remove an account; then remove production's stale row that way. Its scans were recorded under the newer account, so removing it loses no history. Until then, it can only be deleted by hand in the database.
 
 ## 5. Code health
@@ -86,5 +86,5 @@ Browsing files and folders by Google account and by agent drive was built in #35
   *When revisited:* send a `listing_complete` flag. Before it's set, show "processed N, M queued". After it, processed + pending is the exact total, so a percentage (and an ETA from the processing rate) becomes meaningful. Until then, hide the always-0 ETA column in the UI (ties to 4.3). *Done in #14:* the ETA column is gone, and the progress bar is indeterminate until `completion_pct` is non-zero.
 
 - [ ] **7.15 Google Photos scans can't work** — `be/collect/photos.go`, `be/web/api.go`
-  Found while writing [specs/request-drive-scans.md](specs/request-drive-scans.md#google-photos-deferred) (2026-09-27). Since 2025-03-31 the Photos Library API no longer grants `photoslibrary.readonly` or `photoslibrary.sharing` to new authorizations. So the collector, which lists the whole library or an album, can't work for any account linked now. The Request page offers no Photos option. `GET /api/photos/albums` also still takes a raw refresh token in its URL.
+  Found while writing [archive/request-drive-scans.md](archive/request-drive-scans.md#google-photos-deferred) (2026-09-27). Since 2025-03-31 the Photos Library API no longer grants `photoslibrary.readonly` or `photoslibrary.sharing` to new authorizations. So the collector, which lists the whole library or an album, can't work for any account linked now. The Request page offers no Photos option. `GET /api/photos/albums` also still takes a raw refresh token in its URL.
   *To decide:* the Photos Picker API (only what the user picks, and apparently without sizes), importing a Google Takeout export as a local scan, or removing the Photos collector, its routes and tables. If Photos stays, the albums route should take a `ClientKey`.

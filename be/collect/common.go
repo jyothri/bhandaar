@@ -78,7 +78,7 @@ type googleAccount struct {
 // resolveAccount returns the Google account a scan uses: the account
 // clientKey, which userID must have linked, or else the refresh token given
 // in the request. The name comes from the database, never the request, so
-// all scans of one account list together (docs/specs/request-drive-scans.md,
+// all scans of one account list together (docs/archive/request-drive-scans.md,
 // "Account names").
 func resolveAccount(userID int64, clientKey string, token string) (googleAccount, error) {
 	account := googleAccount{RefreshToken: token}

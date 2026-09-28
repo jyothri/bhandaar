@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Linked Google accounts (privatetokens). See docs/specs/request-drive-scans.md,
+// Linked Google accounts (privatetokens). See docs/archive/request-drive-scans.md,
 // "Identity and re-linking".
 
 // Services a linked account can be scanned for, as GET /api/accounts names them.
