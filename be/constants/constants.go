@@ -9,6 +9,7 @@ var (
 	OauthClientId     string
 	OauthClientSecret string
 	FrontendUrl       string
+	LegacyOwner       string
 )
 
 // Flags are registered here and parsed by main. Read these values only after
@@ -18,6 +19,8 @@ func init() {
 	flag.StringVar(&OauthClientSecret, "oauth_client_secret", "dummy", "oauth client secret")
 	flag.StringVar(&FrontendUrl, "frontend_url", "http://localhost:5173",
 		"UI origin, or a comma-separated list of origins, trusted for CORS and as account-linking return targets.")
+	flag.StringVar(&LegacyOwner, "legacy_owner", "jyothri",
+		"agentserver user that scans and linked accounts from before users are given to at startup; empty to skip.")
 }
 
 // FrontendOrigins returns the origins listed in -frontend_url, trimmed and

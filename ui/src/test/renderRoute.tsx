@@ -8,14 +8,19 @@ import { render } from "@testing-library/react";
 import { vi } from "vitest";
 import { routeTree } from "../routeTree.gen";
 
-/** Renders the app's real route tree at `path`, with a fresh query cache. */
+/**
+ * Renders the app's real route tree at `path`, with a fresh query cache.
+ * Pages other than /login and /oauth/glink first ask the backend
+ * (GET /api/auth/me) who is logged in; tests fake it, e.g. with loggedIn.
+ */
 export function renderRoute(path: string) {
-  const router = createRouter({
-    routeTree,
-    history: createMemoryHistory({ initialEntries: [path] }),
-  });
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
+  });
+  const router = createRouter({
+    routeTree,
+    context: { queryClient },
+    history: createMemoryHistory({ initialEntries: [path] }),
   });
   render(
     <QueryClientProvider client={queryClient}>
@@ -24,6 +29,13 @@ export function renderRoute(path: string) {
   );
   return { router, queryClient };
 }
+
+/** A backend reply to GET /api/auth/me for a logged-in user. */
+export const loggedIn = (username = "alice") =>
+  new Response(JSON.stringify({ username }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
 
 /** jsdom has no EventSource; the progress stream just never connects. */
 export function stubEventSource() {

@@ -46,11 +46,15 @@ func getDriveService(refreshToken string) (*drive.Service, error) {
 	return driveService, nil
 }
 
-func CloudDrive(driveScan GDriveScan) (int, error) {
+func CloudDrive(driveScan GDriveScan, userID int64) (int, error) {
 	// Phase 1: Create scan record (synchronous)
-	scanId, err := db.LogStartScan("google_drive")
+	scanId, err := db.LogStartScan("google_drive", userID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to start google drive scan (query=%s): %w", driveScan.QueryString, err)
+	}
+	driveScan.RefreshToken, err = refreshToken(userID, driveScan.ClientKey, driveScan.RefreshToken)
+	if err != nil {
+		return failStart(scanId, err)
 	}
 
 	// Get Drive service
@@ -153,4 +157,5 @@ func parseTime(inputTime string) time.Time {
 type GDriveScan struct {
 	QueryString  string
 	RefreshToken string
+	ClientKey    string // a linked account, used instead of RefreshToken
 }

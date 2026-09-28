@@ -17,7 +17,10 @@ func Server() {
 
 	// Apply global default size limit to all routes (512 KB)
 	r.Use(RequestSizeLimitMiddleware(DefaultMaxBodySize))
+	// Everything but health and login/logout needs a logged-in user.
+	r.Use(authenticate)
 
+	authRoutes(r)
 	api(r)
 	oauth(r)
 	sse(r)

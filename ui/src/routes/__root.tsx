@@ -1,8 +1,36 @@
-import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
+import { QueryClient } from "@tanstack/react-query";
+import {
+  createRootRouteWithContext,
+  Link,
+  Outlet,
+  redirect,
+} from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
+import { getMe } from "../api";
+import { queryKeys } from "../api/queryKeys";
 import Header from "../components/Header";
 
-export const Route = createRootRoute({
+export type RouterContext = { queryClient: QueryClient };
+
+// Pages that work without a session. The OAuth callback hands its one-time
+// code straight to the backend, which checks the session itself.
+const publicPaths = ["/login", "/oauth/glink"];
+
+export const Route = createRootRouteWithContext<RouterContext>()({
+  // Every other page needs a logged-in user. The answer is cached; a 401
+  // later on (see App) clears it and comes back here.
+  beforeLoad: async ({ context: { queryClient }, location }) => {
+    if (publicPaths.includes(location.pathname)) {
+      return;
+    }
+    const me = await queryClient.ensureQueryData({
+      queryKey: queryKeys.me,
+      queryFn: getMe,
+    });
+    if (!me) {
+      throw redirect({ to: "/login", search: { redirect: location.href } });
+    }
+  },
   component: () => (
     <>
       <Header />

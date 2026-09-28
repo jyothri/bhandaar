@@ -53,11 +53,15 @@ func getPhotosService(refreshToken string) (*http.Client, error) {
 	return client, nil
 }
 
-func Photos(photosScan GPhotosScan) (int, error) {
+func Photos(photosScan GPhotosScan, userID int64) (int, error) {
 	// Phase 1: Create scan record (synchronous)
-	scanId, err := db.LogStartScan("photos")
+	scanId, err := db.LogStartScan("photos", userID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to start photos scan (album=%s): %w", photosScan.AlbumId, err)
+	}
+	photosScan.RefreshToken, err = refreshToken(userID, photosScan.ClientKey, photosScan.RefreshToken)
+	if err != nil {
+		return failStart(scanId, err)
 	}
 
 	// Validate photos client
@@ -530,4 +534,5 @@ type GPhotosScan struct {
 	FetchSize    bool
 	FetchMd5Hash bool
 	RefreshToken string
+	ClientKey    string // a linked account, used instead of RefreshToken
 }

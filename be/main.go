@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/jyothri/hdd/constants"
 	"github.com/jyothri/hdd/db"
 	"github.com/jyothri/hdd/web"
 )
@@ -32,6 +33,10 @@ func main() {
 	// Initialize database connection
 	if err := db.SetupDatabase(); err != nil {
 		slog.Error("Failed to initialize database", "error", err)
+		os.Exit(1)
+	}
+	if err := db.AssignUnownedTo(constants.LegacyOwner); err != nil {
+		slog.Error("Failed to assign unowned scans", "error", err)
 		os.Exit(1)
 	}
 	defer func() {

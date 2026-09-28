@@ -54,9 +54,9 @@ func getGmailService(refreshToken string) (*gmail.Service, error) {
 	return gmailService, nil
 }
 
-func Gmail(gMailScan GMailScan) (int, error) {
+func Gmail(gMailScan GMailScan, userID int64) (int, error) {
 	// Phase 1: Create scan record (synchronous)
-	scanId, err := db.LogStartScan("gmail")
+	scanId, err := db.LogStartScan("gmail", userID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to start gmail scan (account=%s, filter=%s): %w",
 			gMailScan.ClientKey, gMailScan.Filter, err)
@@ -71,16 +71,9 @@ func Gmail(gMailScan GMailScan) (int, error) {
 		}
 	}()
 
-	// Get refresh token
-	if gMailScan.ClientKey != "" {
-		token, err := db.GetOAuthToken(gMailScan.ClientKey)
-		if err != nil {
-			return failStart(scanId, fmt.Errorf("failed to get OAuth token for client %s: %w", gMailScan.ClientKey, err))
-		}
-		gMailScan.RefreshToken = token.RefreshToken
-	}
-	if gMailScan.RefreshToken == "" {
-		return failStart(scanId, fmt.Errorf("refresh token is empty for account %s", gMailScan.ClientKey))
+	gMailScan.RefreshToken, err = refreshToken(userID, gMailScan.ClientKey, gMailScan.RefreshToken)
+	if err != nil {
+		return failStart(scanId, err)
 	}
 
 	// Get Gmail service

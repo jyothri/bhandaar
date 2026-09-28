@@ -17,6 +17,9 @@ func TestScanProgressAllowsEachFrontendOrigin(t *testing.T) {
 	original := constants.FrontendUrl
 	constants.FrontendUrl = "https://sm.example.com,http://192.168.1.118:5173"
 	t.Cleanup(func() { constants.FrontendUrl = original })
+	originalOwned := scanOwnedBy
+	scanOwnedBy = func(int, int64) (bool, error) { return true, nil }
+	t.Cleanup(func() { scanOwnedBy = originalOwned })
 
 	r := mux.NewRouter()
 	sse(r)

@@ -58,15 +58,16 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 	slog.Info(fmt.Sprintf("Received request: %v", doScanRequest))
 
 	var scanId int
+	userID := currentUser(r).ID
 	switch doScanRequest.ScanType {
 	case "Local":
-		scanId, err = collect.LocalDrive(doScanRequest.LocalScan)
+		scanId, err = collect.LocalDrive(doScanRequest.LocalScan, userID)
 	case "GDrive":
-		scanId, err = collect.CloudDrive(doScanRequest.GDriveScan)
+		scanId, err = collect.CloudDrive(doScanRequest.GDriveScan, userID)
 	case "GMail":
-		scanId, err = collect.Gmail(doScanRequest.GMailScan)
+		scanId, err = collect.Gmail(doScanRequest.GMailScan, userID)
 	case "GPhotos":
-		scanId, err = collect.Photos(doScanRequest.GPhotosScan)
+		scanId, err = collect.Photos(doScanRequest.GPhotosScan, userID)
 	default:
 		slog.Error("Unknown scan type", "scan_type", doScanRequest.ScanType)
 		http.Error(w, fmt.Sprintf("Unknown scan type: %s", doScanRequest.ScanType), http.StatusBadRequest)
@@ -87,7 +88,7 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 
 func ListScansHandler(w http.ResponseWriter, r *http.Request) {
 	pageNo := getPageNumber(mux.Vars(r))
-	scans, totResults, err := db.GetScansFromDb(pageNo)
+	scans, totResults, err := db.GetScansFromDb(currentUser(r).ID, pageNo)
 	if err != nil {
 		slog.Error("Failed to get scans from database",
 			"page", pageNo,
@@ -105,7 +106,7 @@ func ListScansHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetRequestAccountsHandler(w http.ResponseWriter, r *http.Request) {
-	accounts, err := db.GetRequestAccountsFromDb()
+	accounts, err := db.GetRequestAccountsFromDb(currentUser(r).ID)
 	if err != nil {
 		slog.Error("Failed to get request accounts from database", "error", err)
 		http.Error(w, "Failed to retrieve accounts", http.StatusInternalServerError)
@@ -117,7 +118,7 @@ func GetRequestAccountsHandler(w http.ResponseWriter, r *http.Request) {
 func GetScanRequestsHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	accountKey := vars["account_key"]
-	accountRequests, err := db.GetScanRequestsFromDb(accountKey)
+	accountRequests, err := db.GetScanRequestsFromDb(currentUser(r).ID, accountKey)
 	if err != nil {
 		slog.Error("Failed to get scan requests from database",
 			"account_key", accountKey,
@@ -129,7 +130,7 @@ func GetScanRequestsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetAccountsHandler(w http.ResponseWriter, r *http.Request) {
-	accounts, err := db.GetAccountsFromDb()
+	accounts, err := db.GetAccountsFromDb(currentUser(r).ID)
 	if err != nil {
 		slog.Error("Failed to get accounts from database", "error", err)
 		http.Error(w, "Failed to retrieve accounts", http.StatusInternalServerError)
@@ -143,6 +144,9 @@ func DeleteScanHandler(w http.ResponseWriter, r *http.Request) {
 	scanId, ok := getIntFromMap(vars, "scan_id")
 	if !ok {
 		http.Error(w, "Invalid scan ID", http.StatusBadRequest)
+		return
+	}
+	if !checkScanOwner(w, r, scanId) {
 		return
 	}
 
@@ -161,6 +165,9 @@ func ListMessageMetaDataHandler(w http.ResponseWriter, r *http.Request) {
 	scanId, ok := getIntFromMap(vars, "scan_id")
 	if !ok {
 		http.Error(w, "Invalid scan ID", http.StatusBadRequest)
+		return
+	}
+	if !checkScanOwner(w, r, scanId) {
 		return
 	}
 
@@ -209,6 +216,9 @@ func ListPhotosHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid scan ID", http.StatusBadRequest)
 		return
 	}
+	if !checkScanOwner(w, r, scanId) {
+		return
+	}
 
 	photosMediaItem, totResults, err := db.GetPhotosMediaItemFromDb(scanId, pageNo)
 	if err != nil {
@@ -236,6 +246,9 @@ func ListScanDataHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid scan ID", http.StatusBadRequest)
 		return
 	}
+	if !checkScanOwner(w, r, scanId) {
+		return
+	}
 
 	scanData, totResults, err := db.GetScanDataFromDb(scanId, pageNo)
 	if err != nil {
@@ -253,6 +266,25 @@ func ListScanDataHandler(w http.ResponseWriter, r *http.Request) {
 		ScanData: scanData,
 	}
 	writeJSONResponse(w, body, http.StatusOK)
+}
+
+// scanOwnedBy reports whether a scan belongs to a user; tests replace it.
+var scanOwnedBy = db.ScanOwnedBy
+
+// checkScanOwner answers 404 unless the logged-in user owns scanId, so other
+// users' scans look the same as missing ones.
+func checkScanOwner(w http.ResponseWriter, r *http.Request, scanId int) bool {
+	owned, err := scanOwnedBy(scanId, currentUser(r).ID)
+	if err != nil {
+		slog.Error("Failed to check scan owner", "scan_id", scanId, "error", err)
+		http.Error(w, "Failed to retrieve scan", http.StatusInternalServerError)
+		return false
+	}
+	if !owned {
+		http.Error(w, "Scan not found", http.StatusNotFound)
+		return false
+	}
+	return true
 }
 
 func getIntFromMap(vars map[string]string, field string) (int, bool) {

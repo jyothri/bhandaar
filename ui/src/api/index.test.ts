@@ -36,7 +36,7 @@ describe("fetchJson", () => {
     ]);
     expect(fetchMock).toHaveBeenCalledWith(
       "http://backend.test/api/accounts",
-      undefined
+      { credentials: "include" }
     );
   });
 
@@ -90,7 +90,7 @@ describe("getScanRequests", () => {
     await getScanRequests("a/b c?#");
     expect(fetchMock).toHaveBeenCalledWith(
       "http://backend.test/api/scans/requests/a%2Fb%20c%3F%23",
-      undefined
+      { credentials: "include" }
     );
   });
 });

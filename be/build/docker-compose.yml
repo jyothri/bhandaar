@@ -8,6 +8,23 @@ services:
       - POSTGRES_NAME=postgres
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
+  # Owns the users table be logs web users in with (agent_users). Add one
+  # with: docker compose exec agentserver agentserver user add --username NAME
+  agentserver:
+    image: jyothri/bhandaar-agentserver
+    restart: always
+    environment:
+      - AGENTSERVER_JWT_SECRET=${AGENTSERVER_JWT_SECRET:?set it to the output of openssl rand -base64 48}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=postgres
+      - DB_SSL_MODE=disable
+    ports:
+      - "8091:8091"
+    depends_on:
+      - postgres
   web:
     image: jyothri/hdd-go-build
     restart: always
@@ -27,5 +44,8 @@ services:
       - /Users/jyothri/test:/scan
     ports:
       - "8090:8090"
+    # be refuses to start until agentserver has created agent_users;
+    # restart: always retries it.
     depends_on:
       - postgres
+      - agentserver

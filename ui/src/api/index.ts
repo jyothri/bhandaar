@@ -4,16 +4,64 @@ import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 
 export const backend_url = config.backendUrl;
 
+/** Thrown for a 401: there's no session, or it has ended. */
+export class UnauthenticatedError extends Error {}
+
 /**
- * Fetches a backend path and parses the JSON response. Throws an Error with
- * the backend's message if the response isn't 2xx.
+ * Fetches a backend path, sending the session cookie (the backend is on
+ * another origin in dev). Throws UnauthenticatedError for a 401, and an Error
+ * with the backend's message for any other non-2xx response.
  */
+async function fetchBackend(path: string, init?: RequestInit): Promise<Response> {
+  const response = await fetch(backend_url + path, {
+    credentials: "include",
+    ...init,
+  });
+  if (response.status === 401) {
+    throw new UnauthenticatedError(await errorMessage(response));
+  }
+  if (!response.ok) {
+    throw new Error(await errorMessage(response));
+  }
+  return response;
+}
+
+/** Like fetchBackend, and parses the JSON response. */
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(backend_url + path, init);
+  return (await fetchBackend(path, init)).json();
+}
+
+export type User = { username: string };
+
+/** Logs in, setting the session cookie. Wrong credentials throw an Error. */
+export async function login(username: string, password: string): Promise<User> {
+  const response = await fetch(backend_url + "/api/auth/login", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
   if (!response.ok) {
     throw new Error(await errorMessage(response));
   }
   return response.json();
+}
+
+/** Ends the session. */
+export const logout = async (): Promise<void> => {
+  await fetchBackend("/api/auth/logout", { method: "POST" });
+};
+
+/** The logged-in user, or null without a session. */
+export async function getMe(): Promise<User | null> {
+  try {
+    return await fetchJson<User>("/api/auth/me");
+  } catch (e) {
+    if (e instanceof UnauthenticatedError) {
+      return null;
+    }
+    throw e;
+  }
 }
 
 /**
