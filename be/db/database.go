@@ -94,7 +94,7 @@ func SetupDatabase() error {
 		return fmt.Errorf("failed to mark interrupted scans: %w", err)
 	}
 
-	return nil
+	return endPickerSessions()
 }
 
 // markInterruptedScans marks scans that are still open at startup as failed.
@@ -326,6 +326,7 @@ func DeleteScan(scanId int) error {
 	}{
 		{"scandata", `DELETE FROM scandata WHERE scan_id = $1`},
 		{"messagemetadata", `DELETE FROM messagemetadata WHERE scan_id = $1`},
+		{"photos_picked_items", `DELETE FROM photos_picked_items WHERE scan_id = $1`},
 		{"scanmetadata", `DELETE FROM scanmetadata WHERE scan_id = $1`},
 		{"scans", `DELETE FROM scans WHERE id = $1`},
 	}
@@ -455,6 +456,9 @@ func migrateDB() error {
 		return err
 	}
 	if err := migrateDriveItems(); err != nil {
+		return err
+	}
+	if err := migratePhotosPicker(); err != nil {
 		return err
 	}
 	return migrateBrowseTotals()

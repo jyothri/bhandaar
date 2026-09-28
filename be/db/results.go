@@ -30,6 +30,9 @@ type ScanSummary struct {
 	ItemCount   int   `db:"item_count" json:"item_count"`
 	TotalBytes  int64 `db:"total_bytes" json:"total_bytes"`
 	FolderCount int   `db:"folder_count" json:"folder_count"`
+	// Google Photos items with no size (see docs/specs/photos-picker.md);
+	// 0 for other scans.
+	UnsizedCount int `db:"unsized_count" json:"unsized_count"`
 }
 
 // GetScanSummary returns a scan's summary. The caller checks its owner.
@@ -43,13 +46,18 @@ func GetScanSummary(scanId int) (ScanSummary, error) {
 			COALESCE(EXTRACT(EPOCH FROM (s.scan_end_time - s.scan_start_time)), -1) AS scan_duration_in_sec,
 			CASE WHEN s.scan_type = 'gmail'
 				THEN (SELECT count(*) FROM messagemetadata m WHERE m.scan_id = s.id)
+				WHEN s.scan_type = 'google_photos'
+				THEN (SELECT count(*) FROM photos_picked_items p WHERE p.scan_id = s.id)
 				ELSE (SELECT count(*) FROM scandata d WHERE d.scan_id = s.id AND NOT COALESCE(d.is_dir, false))
 			END AS item_count,
 			CASE WHEN s.scan_type = 'gmail'
 				THEN (SELECT COALESCE(sum(size_estimate), 0) FROM messagemetadata m WHERE m.scan_id = s.id)
+				WHEN s.scan_type = 'google_photos'
+				THEN (SELECT COALESCE(sum(size), 0) FROM photos_picked_items p WHERE p.scan_id = s.id)
 				ELSE (SELECT COALESCE(sum(size), 0) FROM scandata d WHERE d.scan_id = s.id AND NOT COALESCE(d.is_dir, false))
 			END AS total_bytes,
-			(SELECT count(*) FROM scandata d WHERE d.scan_id = s.id AND COALESCE(d.is_dir, false)) AS folder_count
+			(SELECT count(*) FROM scandata d WHERE d.scan_id = s.id AND COALESCE(d.is_dir, false)) AS folder_count,
+			(SELECT count(*) FROM photos_picked_items p WHERE p.scan_id = s.id AND p.size IS NULL) AS unsized_count
 		FROM scans s LEFT JOIN scanmetadata sm ON sm.scan_id = s.id
 		WHERE s.id = $1
 		LIMIT 1`, scanId)

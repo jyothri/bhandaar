@@ -39,6 +39,7 @@ func api(r *mux.Router) {
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET")
 	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET")
+	photosRoutes(api)
 	browseRoutes(api)
 }
 
@@ -131,6 +132,13 @@ func checkScanRequest(req DoScanRequest, userID int64) (int, string) {
 		// A raw RefreshToken instead; the collector checks it.
 		return http.StatusOK, ""
 	}
+	return checkAccountService(userID, clientKey, service, serviceName)
+}
+
+// checkAccountService checks that userID linked the account clientKey and
+// that it has granted access to service (serviceName as people read it).
+// It returns http.StatusOK, or a status and a message the UI can show.
+func checkAccountService(userID int64, clientKey string, service string, serviceName string) (int, string) {
 	account, err := accountFor(userID, clientKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return http.StatusBadRequest, "This account isn't linked. Pick another, or link it again."

@@ -94,10 +94,9 @@ func TestPhotosLibraryAPIIsGone(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("POST /api/scans GPhotos: status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
-	for _, path := range []string{"/api/photos/albums?refresh_token=x", "/api/photos/2"} {
-		rec := serve(r, withSession(httptest.NewRequest(http.MethodGet, path, nil), "good"))
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("GET %s: status = %d, want %d", path, rec.Code, http.StatusNotFound)
-		}
+	// "albums" isn't a scan ID to /api/photos/{scan_id}.
+	rec = serve(r, withSession(httptest.NewRequest(http.MethodGet, "/api/photos/albums?refresh_token=x", nil), "good"))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("GET /api/photos/albums: status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }
