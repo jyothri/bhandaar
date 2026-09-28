@@ -4,6 +4,7 @@ import {
   Link,
   Outlet,
   redirect,
+  useRouterState,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { getMe } from "../api";
@@ -31,7 +32,12 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       throw redirect({ to: "/login", search: { redirect: location.href } });
     }
   },
-  component: () => (
+  component: RootLayout,
+});
+
+function RootLayout() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  return (
     <>
       <Header />
       <div className="p-2 flex gap-2">
@@ -41,7 +47,13 @@ export const Route = createRootRouteWithContext<RouterContext>()({
         <Link to="/request" className="[&.active]:font-bold">
           Request
         </Link>
-        <Link to="/requests" className="[&.active]:font-bold">
+        <Link
+          to="/requests"
+          // A scan's page is part of Request History.
+          className={
+            pathname.startsWith("/scans/") ? "font-bold" : "[&.active]:font-bold"
+          }
+        >
           Request History
         </Link>
       </div>
@@ -49,5 +61,5 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       <Outlet />
       <TanStackRouterDevtools />
     </>
-  ),
-});
+  );
+}

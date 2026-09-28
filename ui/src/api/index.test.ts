@@ -104,7 +104,6 @@ describe("requestScan", () => {
         Filter: "is:unread",
         ClientKey: "k1",
         RefreshToken: "",
-        Username: "alice",
       },
     };
 

@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as RequestRouteImport } from './routes/request'
 import { Route as RequestsRouteImport } from './routes/requests'
 import { Route as OauthGlinkRouteImport } from './routes/oauth/glink'
+import { Route as ScansScanIdRouteImport } from './routes/scans.$scanId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,6 +41,11 @@ const OauthGlinkRoute = OauthGlinkRouteImport.update({
   path: '/oauth/glink',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ScansScanIdRoute = ScansScanIdRouteImport.update({
+  id: '/scans/$scanId',
+  path: '/scans/$scanId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/request': typeof RequestRoute
   '/requests': typeof RequestsRoute
   '/oauth/glink': typeof OauthGlinkRoute
+  '/scans/$scanId': typeof ScansScanIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/request': typeof RequestRoute
   '/requests': typeof RequestsRoute
   '/oauth/glink': typeof OauthGlinkRoute
+  '/scans/$scanId': typeof ScansScanIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +70,33 @@ export interface FileRoutesById {
   '/request': typeof RequestRoute
   '/requests': typeof RequestsRoute
   '/oauth/glink': typeof OauthGlinkRoute
+  '/scans/$scanId': typeof ScansScanIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/request' | '/requests' | '/oauth/glink'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/request'
+    | '/requests'
+    | '/oauth/glink'
+    | '/scans/$scanId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/request' | '/requests' | '/oauth/glink'
-  id: '__root__' | '/' | '/login' | '/request' | '/requests' | '/oauth/glink'
+  to:
+    | '/'
+    | '/login'
+    | '/request'
+    | '/requests'
+    | '/oauth/glink'
+    | '/scans/$scanId'
+  id:
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/request'
+    | '/requests'
+    | '/oauth/glink'
+    | '/scans/$scanId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -77,6 +105,7 @@ export interface RootRouteChildren {
   RequestRoute: typeof RequestRoute
   RequestsRoute: typeof RequestsRoute
   OauthGlinkRoute: typeof OauthGlinkRoute
+  ScansScanIdRoute: typeof ScansScanIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -116,6 +145,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OauthGlinkRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/scans/$scanId': {
+      id: '/scans/$scanId'
+      path: '/scans/$scanId'
+      fullPath: '/scans/$scanId'
+      preLoaderRoute: typeof ScansScanIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -125,6 +161,7 @@ const rootRouteChildren: RootRouteChildren = {
   RequestRoute: RequestRoute,
   RequestsRoute: RequestsRoute,
   OauthGlinkRoute: OauthGlinkRoute,
+  ScansScanIdRoute: ScansScanIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

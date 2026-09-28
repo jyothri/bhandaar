@@ -1,28 +1,29 @@
 # Codebase Review: Open Items
 
-Open and pending work from the review of the UI, backend and ops that started on 2026-09-23. Completed and won't-fix items (53 done, 1 won't fix), the change log and the investigation notes are in [archive/codebase-review-history.md](archive/codebase-review-history.md), under the same item numbers. Local setup is in [local-dev.md](local-dev.md).
+Open and pending work from the review of the UI, backend and ops that started on 2026-09-23. Completed and won't-fix items (56 done, 1 won't fix), the change log and the investigation notes are in [archive/codebase-review-history.md](archive/codebase-review-history.md), under the same item numbers. Local setup is in [local-dev.md](local-dev.md).
 
-Items 2.8–2.11, 4.8, 4.9 and 6.4 are new: leftover work split out of the notes of completed items, or found in production on 2026-09-24. Each says where it came from.
+Items 2.8–2.11, 4.8, 4.9 and 6.4 are new: leftover work split out of the notes of completed items, or found in production on 2026-09-24. 7.15 came out of the Drive scans work on 2026-09-27. Each says where it came from.
 
 Status legend: `[ ]` open · **Deferred** = open, parked for now · **Blocked** = open, waiting on something outside this repo (reason in the item)
 
 ## Status
 
-*Last updated: 2026-09-24*
+*Last updated: 2026-09-27*
 
 | | Count |
 |---|---|
-| Open | 13 |
-| *of which Deferred* | 1 (7.6) |
+| Open | 11 |
+| *of which Deferred* | 2 (2.11, 7.6) |
 | *of which Blocked* | 1 (6.3) |
 
 ## Suggested order
 
-1. **2.11** Check the Google OAuth app's publishing status. If it's still in "Testing", every linked account stops working a week after linking.
-2. **4.9** A way to remove (or replace) a linked account, then clear the stale production entry.
-3. **4.1** Results view (next feature).
-4. The small ones, as convenient: 3.7, 4.8, 5.1, 6.4, 2.8, 2.9, 2.10.
-5. When unblocked or revisited: 6.3, 7.6.
+1. **4.9** A way to remove a linked account, then clear the stale production entry.
+2. **7.15** Decide what to do about Google Photos.
+3. The small ones, as convenient: 4.8, 5.1, 6.4, 2.8, 2.9, 2.10.
+4. When unblocked or revisited: 2.11, 6.3, 7.6.
+
+The next feature is proposed separately, in [specs/browse.md](specs/browse.md): browsing files and folders by Google account and by agent drive.
 
 ---
 
@@ -40,31 +41,22 @@ Status legend: `[ ]` open · **Deferred** = open, parked for now · **Blocked** 
   Split out of 2.6 ([archived](archive/codebase-review-history.md)). With `DB_PASSWORD` unset, the backend uses an empty password, and a misconfigured deploy only shows up as a generic "failed to ping database" error.
   *Fix:* fail fast with a clear message when `DB_PASSWORD` is empty and `DB_HOST` isn't `localhost`.
 
-- [ ] **2.11 Linked Google accounts may expire after 7 days** — Google Cloud console (ops)
+- [ ] **2.11 Linked Google accounts expire after 7 days** — **Deferred** — Google Cloud console (ops)
   Found in production on 2026-09-24: scan 4 failed with `invalid_grant`, because the account's refresh token, linked in March 2025, was no longer valid. That one was simply old. But if the OAuth consent screen is still in "Testing" status, Google also expires refresh tokens 7 days after they're issued, so every newly linked account would break a week later.
-  *To check:* the OAuth app's publishing status. Publishing it lifts the 7-day limit.
-
-## 3. React / TanStack Query idioms
-
-- [ ] **3.7 Username is read from the option's text** — `src/routes/request.tsx:73`
-  *Fix:* look up the account in `accounts` by `clientKey`.
+  *Checked 2026-09-27:* the OAuth client is in "Testing". So every linked account's refresh token expires 7 days after it's issued, and its scans then fail with `invalid_grant` (the progress panel already says to link the account again).
+  *Deferred* by decision on 2026-09-27: moving the app to "In production", and any verification, wait. Until then, re-link an account before scanning it if its last link is over a week old. Once [specs/request-drive-scans.md](specs/request-drive-scans.md) step 1 is in, re-linking updates the account in place, so it keeps its history.
+  *Fix, when revisited:* publish the app ("In production"). The restricted scopes (`gmail.readonly`, `drive.metadata.readonly`) then show Google's unverified-app warning, with a 100-user cap, unless the app goes through verification.
 
 ## 4. UI / UX
-
-- [ ] **4.1 The home route (`/`, "Data") is a placeholder** — `src/routes/index.tsx`
-  `types/mail.ts` (`MessageMetadata`) is defined but unused, and the backend already serves `/api/gmaildata/{id}` and `/api/photos/{id}`.
-  *Next feature:* a results view, linked from the history table by scan ID, with pagination and sizes.
-  *Note:* by 7.9's decision ([archived](archive/codebase-review-history.md), won't fix), a scan's `messagemetadata` rows are only the messages *new* in that scan. Label per-scan results "new messages", and use the scan's processed count for the total matched.
-
-- [ ] **4.2 Only Gmail scans can be requested**, although `ScanType` also lists Local, GDrive, GStorage and GPhotos.
 
 - [ ] **4.8 The progress table overflows on phones** — `src/components/ScanProgress.tsx`
   Split out of 4.7 ([archived](archive/codebase-review-history.md)). At a 390 px viewport, the five-column progress table makes the page about 470 px wide, with or without an error message in it.
   *Fix:* stack the cells on narrow screens, or let the table scroll inside its container.
 
 - [ ] **4.9 Linked accounts can't be removed** — `be/web/api.go`, `src/routes/request.tsx`
-  Found in production on 2026-09-24. Re-linking an account adds a new `privatetokens` row, and the stale one stays in the Accounts list under the same name; picking it fails with `invalid_grant`. Production has one such stale row, from the account re-linked that day.
-  *Fix:* let users remove an account, or have a re-link of the same email replace the existing row. Until then, the stale row can only be deleted by hand in the database.
+  Found in production on 2026-09-24. Re-linking an account used to add a new `privatetokens` row, and the stale one stayed in the Accounts list under the same name; picking it fails with `invalid_grant`. Production has one such stale row (account 1), from the account re-linked that day.
+  *Half done in #33* ([spec](specs/request-drive-scans.md#identity-and-re-linking-beweboauthgo)): accounts are identified by their Google account ID, and re-linking updates the account's row, keeping its `client_key`. The first re-link of an account from before that updates its newest row, so the stale row is left behind.
+  *Left:* let users remove an account; then remove production's stale row that way. Its scans were recorded under the newer account, so removing it loses no history. Until then, it can only be deleted by hand in the database.
 
 ## 5. Code health
 
@@ -83,7 +75,7 @@ Status legend: `[ ]` open · **Deferred** = open, parked for now · **Blocked** 
 
 ## 7. Backend (`be/`)
 
-- [ ] **7.6 Progress events never carry `completion_pct` or `eta_in_sec`** — **Deferred** — `be/collect/gmail.go:255-280`
+- [ ] **7.6 Progress events never carry `completion_pct` or `eta_in_sec`** — **Deferred** — `be/collect/common.go` (`logProgress`, shared by Gmail and Drive since #33)
   `logProgress` fills in the counts and elapsed time but leaves `CompletionPct` and `EtaInSec` at zero. Even the final event after scan 1 finished reported 0%. The UI shows the ETA column (always 0), and 4.3 plans a progress bar that would need these values.
   *Fix:* compute them from processed / (processed + pending), or send an explicit `done` flag with the final event. Otherwise drop both fields and the UI's ETA column.
   **Deferred (2026-09-24): non-trivial.** The total isn't known up front. `startGmailScan` (`:147-186`) lists messages page by page (`Messages.List(...).Q(filter)` + `NextPageToken`) while earlier pages are already being fetched, and `counter_pending` only grows as each page arrives (`:181`). The alternatives each have a catch:
@@ -92,3 +84,7 @@ Status legend: `[ ]` open · **Deferred** = open, parked for now · **Blocked** 
   - `Labels.Get` counts are exact, but only for a single folder with no filter.
 
   *When revisited:* send a `listing_complete` flag. Before it's set, show "processed N, M queued". After it, processed + pending is the exact total, so a percentage (and an ETA from the processing rate) becomes meaningful. Until then, hide the always-0 ETA column in the UI (ties to 4.3). *Done in #14:* the ETA column is gone, and the progress bar is indeterminate until `completion_pct` is non-zero.
+
+- [ ] **7.15 Google Photos scans can't work** — `be/collect/photos.go`, `be/web/api.go`
+  Found while writing [specs/request-drive-scans.md](specs/request-drive-scans.md#google-photos-deferred) (2026-09-27). Since 2025-03-31 the Photos Library API no longer grants `photoslibrary.readonly` or `photoslibrary.sharing` to new authorizations. So the collector, which lists the whole library or an album, can't work for any account linked now. The Request page offers no Photos option. `GET /api/photos/albums` also still takes a raw refresh token in its URL.
+  *To decide:* the Photos Picker API (only what the user picks, and apparently without sizes), importing a Google Takeout export as a local scan, or removing the Photos collector, its routes and tables. If Photos stays, the albums route should take a `ClientKey`.

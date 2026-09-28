@@ -7,4 +7,7 @@ export const queryKeys = {
   // Prefix of every scanRequests(accountKey) key, for invalidating them all.
   allScanRequests: ["scanRequests"] as const,
   scanRequests: (accountKey: string) => ["scanRequests", accountKey] as const,
+  scanSummary: (scanId: number) => ["scanSummary", scanId] as const,
+  scanResults: (scanId: number, page: number) =>
+    ["scanResults", scanId, page] as const,
 };

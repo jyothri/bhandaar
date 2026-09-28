@@ -1,6 +1,8 @@
 package web
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -8,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jyothri/hdd/constants"
+	"github.com/jyothri/hdd/db"
 )
 
 // linkRequest calls the account-linking handler with the given query string.
@@ -191,5 +194,118 @@ func TestLinkRejectsForeignRedirectBeforeExchange(t *testing.T) {
 	}
 	if loc := rec.Header().Get("Location"); loc != "" {
 		t.Errorf("Location = %q, want no redirect", loc)
+	}
+}
+
+// idToken builds an unsigned JWT with the given claims, as the fake token
+// endpoint's id_token.
+func idToken(t *testing.T, claims map[string]string) string {
+	t.Helper()
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc := base64.RawURLEncoding.EncodeToString
+	return enc([]byte(`{"alg":"RS256"}`)) + "." + enc(payload) + "." + enc([]byte("sig"))
+}
+
+// fakeGoogle answers the code exchange with tokens, the granted scope and,
+// unless idTok is empty, an id_token.
+func fakeGoogle(t *testing.T, scope string, idTok string) {
+	t.Helper()
+	fakeTokenEndpoint(t, func(w http.ResponseWriter, r *http.Request) {
+		body := map[string]any{
+			"access_token": "at", "refresh_token": "rt", "token_type": "Bearer",
+			"expires_in": 3599, "scope": scope,
+		}
+		if idTok != "" {
+			body["id_token"] = idTok
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(body)
+	})
+}
+
+// fakeLinkAccount records what the handler links, answering with clientKey.
+func fakeLinkAccount(t *testing.T, clientKey string) (*[]db.GoogleLink, *int64) {
+	t.Helper()
+	var links []db.GoogleLink
+	var userID int64
+	original := linkAccount
+	linkAccount = func(id int64, link db.GoogleLink, newClientKey string) (string, error) {
+		userID = id
+		links = append(links, link)
+		if clientKey == "" {
+			return newClientKey, nil
+		}
+		return clientKey, nil
+	}
+	t.Cleanup(func() { linkAccount = original })
+	return &links, &userID
+}
+
+func linkAsAlice(t *testing.T) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/glink?"+linkQuery("abc"), nil)
+	req = withUser(req, db.User{ID: 7, Username: "alice"})
+	rec := httptest.NewRecorder()
+	GoogleAccountLinkingHandler(rec, req)
+	return rec
+}
+
+func TestLinkIdentifiesTheAccountFromTheIDToken(t *testing.T) {
+	scope := "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.readonly"
+	fakeGoogle(t, scope, idToken(t, map[string]string{"sub": "1178", "email": "jyothri@example.com"}))
+	links, userID := fakeLinkAccount(t, "existing-key")
+
+	rec := linkAsAlice(t)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d %q, want 302", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "http://localhost:5173/request?account=existing-key" {
+		t.Errorf("Location = %q, want the Request page selecting the account", loc)
+	}
+	if *userID != 7 || len(*links) != 1 {
+		t.Fatalf("linked %v for user %d, want one link for alice (7)", *links, *userID)
+	}
+	want := db.GoogleLink{GoogleSub: "1178", DisplayName: "jyo****ri@example.com",
+		AccessToken: "at", RefreshToken: "rt", Scope: scope, TokenType: "Bearer"}
+	got := (*links)[0]
+	got.ExpiresIn = 0 // depends on the clock
+	if got != want {
+		t.Errorf("link = %+v, want %+v", got, want)
+	}
+}
+
+func TestLinkNeedsAnIDToken(t *testing.T) {
+	fakeGoogle(t, "https://www.googleapis.com/auth/gmail.readonly", "")
+	links, _ := fakeLinkAccount(t, "")
+
+	rec := linkAsAlice(t)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+	if len(*links) != 0 {
+		t.Errorf("linked %v without knowing the account", *links)
+	}
+}
+
+func TestParseIDToken(t *testing.T) {
+	got, err := parseIDToken(idToken(t, map[string]string{"sub": "42", "email": "a@b.c"}))
+	if err != nil || got != (googleIdentity{Sub: "42", Email: "a@b.c"}) {
+		t.Errorf("parseIDToken = %+v, %v", got, err)
+	}
+	for _, raw := range []string{
+		"",
+		"not-a-jwt",
+		"a.!!!.c",
+		"a." + base64.RawURLEncoding.EncodeToString([]byte("not json")) + ".c",
+		idToken(t, map[string]string{"email": "a@b.c"}), // no sub
+	} {
+		if got, err := parseIDToken(raw); err == nil {
+			t.Errorf("parseIDToken(%q) = %+v, want an error", raw, got)
+		}
 	}
 }

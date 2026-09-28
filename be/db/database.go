@@ -142,12 +142,15 @@ func LogStartScan(scanType string, userID int64) (int, error) {
 	return lastInsertId, nil
 }
 
-func SaveScanMetadata(name string, searchPath string, searchFilter string, scanId int) error {
+// SaveScanMetadata records what a scan covers. A Google scan's name and
+// clientKey are its linked account's; others leave both empty (clientKey is
+// then stored as NULL).
+func SaveScanMetadata(name string, clientKey string, searchPath string, searchFilter string, scanId int) error {
 	insert_row := `insert into scanmetadata
-			(name, search_path, search_filter, scan_id)
+			(name, client_key, search_path, search_filter, scan_id)
 		values
-			($1, $2, $3, $4) RETURNING id`
-	_, err := db.Exec(insert_row, name, searchPath, searchFilter, scanId)
+			($1, NULLIF($2, ''), $3, $4, $5) RETURNING id`
+	_, err := db.Exec(insert_row, name, clientKey, searchPath, searchFilter, scanId)
 	if err != nil {
 		return fmt.Errorf("failed to save scan metadata for scan %d (name=%s, path=%s): %w",
 			scanId, name, searchPath, err)
@@ -340,14 +343,14 @@ func SaveStatToDb(scanId int, scanData <-chan FileData) {
 		}
 
 		insert_row := `insert into scandata
-			(name, path, size, file_mod_time, md5hash, scan_id, is_dir, file_count)
+			(name, path, size, file_mod_time, md5hash, scan_id, is_dir, file_count, file_id)
 		values
-			($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
+			($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')) RETURNING id`
 		var err error
 		if fd.IsDir {
-			_, err = db.Exec(insert_row, fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.Md5Hash, scanId, fd.IsDir, fd.FileCount)
+			_, err = db.Exec(insert_row, fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.Md5Hash, scanId, fd.IsDir, fd.FileCount, fd.FileId)
 		} else {
-			_, err = db.Exec(insert_row, fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.Md5Hash, scanId, fd.IsDir, nil)
+			_, err = db.Exec(insert_row, fd.FileName, fd.FilePath, fd.Size, fd.ModTime, fd.Md5Hash, scanId, fd.IsDir, nil, fd.FileId)
 		}
 
 		if err != nil {
@@ -362,24 +365,12 @@ func SaveStatToDb(scanId int, scanData <-chan FileData) {
 	}
 }
 
-// SaveOAuthToken stores a Google account linked by userID.
-func SaveOAuthToken(userID int64, accessToken string, refreshToken string, displayName string, clientKey string, scope string, expiresIn int16, tokenType string) error {
-	insert_row := `insert into privatetokens
-			(access_token, refresh_token, display_name, client_key, scope, expires_in, token_type, created_on, user_id)
-		values
-			($1, $2, $3, $4, $5, $6, $7, current_timestamp, $8) RETURNING id`
-	_, err := db.Exec(insert_row, accessToken, refreshToken, displayName, clientKey, scope, expiresIn, tokenType, userID)
-	if err != nil {
-		return fmt.Errorf("failed to save OAuth token for client %s: %w", clientKey, err)
-	}
-	return nil
-}
-
 // GetOAuthToken returns a Google account userID linked. Another user's
 // account is not found.
 func GetOAuthToken(userID int64, clientKey string) (PrivateToken, error) {
 	read_row :=
-		`select id, access_token, refresh_token, display_name, client_key, created_on, scope, expires_in, token_type
+		`select id, access_token, refresh_token, COALESCE(display_name, '') AS display_name, client_key, created_on,
+			COALESCE(scope, '') AS scope, COALESCE(expires_in, 0) AS expires_in, COALESCE(token_type, '') AS token_type
 		FROM privatetokens
 		WHERE client_key = $1 AND user_id = $2`
 	tokenData := PrivateToken{}
@@ -388,53 +379,6 @@ func GetOAuthToken(userID int64, clientKey string) (PrivateToken, error) {
 		return PrivateToken{}, fmt.Errorf("failed to get OAuth token for client %s: %w", clientKey, err)
 	}
 	return tokenData, nil
-}
-
-func GetRequestAccountsFromDb(userID int64) ([]Account, error) {
-	read_row :=
-		`select distinct display_name, client_key from privatetokens p
-		where user_id = $1`
-	accounts := []Account{}
-	err := db.Select(&accounts, read_row, userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get request accounts: %w", err)
-	}
-	return accounts, nil
-}
-
-func GetAccountsFromDb(userID int64) ([]string, error) {
-	read_row := `select distinct sm.name from scanmetadata sm
-			join scans s on s.id = sm.scan_id
-			where sm.name is not null and s.user_id = $1
-			order by 1 `
-	accounts := []string{}
-	err := db.Select(&accounts, read_row, userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get accounts: %w", err)
-	}
-	return accounts, nil
-}
-
-func GetScanRequestsFromDb(userID int64, accountKey string) ([]ScanRequests, error) {
-	if len(strings.TrimSpace(accountKey)) == 0 {
-		return []ScanRequests{}, nil
-	}
-	read_row := `select distinct COALESCE(sm.name, '') as name, sm.search_filter, s.id,
-			s.scan_type,
-			scan_start_time,
-			COALESCE(EXTRACT(EPOCH FROM (scan_end_time - scan_start_time)), -1) as scan_duration_in_sec,
-			COALESCE(s.status, 'Completed') as status
-			from scans s
-			join scanmetadata sm on sm.scan_id = s.id
-			where sm.name = $1 and s.user_id = $2
-			group by sm.name, sm.search_filter, s.id, s.scan_start_time, s.scan_type, s.status
-			order by s.id desc`
-	scanRequests := []ScanRequests{}
-	err := db.Select(&scanRequests, read_row, accountKey, userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get scan requests for account %s: %w", accountKey, err)
-	}
-	return scanRequests, nil
 }
 
 func GetScansFromDb(userID int64, pageNo int) ([]Scan, int, error) {
@@ -465,27 +409,6 @@ func GetScansFromDb(userID int64, pageNo int) ([]Scan, int, error) {
 	return scans, count, nil
 }
 
-func GetMessageMetadataFromDb(scanId int, pageNo int) ([]MessageMetadataRead, int, error) {
-	limit := 10
-	offset := limit * (pageNo - 1)
-	count_rows := `select count(*) from messagemetadata where scan_id = $1`
-	read_row := `select id, message_id, thread_id, date, mail_from, mail_to,
-							 subject, size_estimate, labels, scan_id
-	             from messagemetadata
-							 where scan_id = $1 order by id limit $2 offset $3`
-	messageMetadata := []MessageMetadataRead{}
-	var count int
-	err := db.Get(&count, count_rows, scanId)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get message count for scan %d: %w", scanId, err)
-	}
-	err = db.Select(&messageMetadata, read_row, scanId, limit, offset)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get message metadata for scan %d, page %d: %w", scanId, pageNo, err)
-	}
-	return messageMetadata, count, nil
-}
-
 func GetPhotosMediaItemFromDb(scanId int, pageNo int) ([]PhotosMediaItemRead, int, error) {
 	limit := 10
 	offset := limit * (pageNo - 1)
@@ -505,24 +428,6 @@ func GetPhotosMediaItemFromDb(scanId int, pageNo int) ([]PhotosMediaItemRead, in
 		return nil, 0, fmt.Errorf("failed to get photos for scan %d, page %d: %w", scanId, pageNo, err)
 	}
 	return photosMediaItemRead, count, nil
-}
-
-func GetScanDataFromDb(scanId int, pageNo int) ([]ScanData, int, error) {
-	limit := 10
-	offset := limit * (pageNo - 1)
-	count_rows := `select count(*) from scandata where scan_id = $1`
-	read_row := `select * from scandata where scan_id = $1 order by id limit $2 offset $3`
-	scandata := []ScanData{}
-	var count int
-	err := db.Get(&count, count_rows, scanId)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get scan data count for scan %d: %w", scanId, err)
-	}
-	err = db.Select(&scandata, read_row, scanId, limit, offset)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get scan data for scan %d, page %d: %w", scanId, pageNo, err)
-	}
-	return scandata, count, nil
 }
 
 func DeleteScan(scanId int) error {
@@ -666,7 +571,14 @@ func migrateDB() error {
 	if err := migrateScanTimesToTimestamptz(); err != nil {
 		return err
 	}
-	return migrateUsers()
+	// A cloud file's ID; its path is then the folder path it was found at.
+	if _, err := db.Exec(`ALTER TABLE scandata ADD COLUMN IF NOT EXISTS file_id VARCHAR(200)`); err != nil {
+		return fmt.Errorf("failed to add scandata.file_id: %w", err)
+	}
+	if err := migrateUsers(); err != nil {
+		return err
+	}
+	return migrateAccounts()
 }
 
 // migrateDropCompletedAt drops scans.completed_at. Nothing ever set it, so
@@ -901,34 +813,11 @@ type ScanRequests struct {
 	Name              string    `db:"name" json:"name"`
 	ScanType          string    `db:"scan_type" json:"scan_type"`
 	SearchFilter      string    `db:"search_filter" json:"search_filter"`
+	// A Drive folder scan's folder; empty otherwise.
+	SearchPath        string    `db:"search_path" json:"search_path"`
 	ScanStartTime     time.Time `db:"scan_start_time" json:"scan_start_time"`
 	ScanDurationInSec string    `db:"scan_duration_in_sec" json:"scan_duration_in_sec"`
 	Status            string    `db:"status" json:"status"`
-}
-
-type ScanData struct {
-	Id           int            `db:"id" json:"scan_data_id"`
-	Name         sql.NullString `db:"name"`
-	Path         sql.NullString `db:"path"`
-	Size         sql.NullInt64  `db:"size"`
-	ModifiedTime sql.NullTime   `db:"file_mod_time"`
-	Md5Hash      sql.NullString `db:"md5hash"`
-	IsDir        sql.NullBool   `db:"is_dir"`
-	FileCount    sql.NullInt32  `db:"file_count"`
-	ScanId       int            `db:"scan_id"`
-}
-
-type MessageMetadataRead struct {
-	Id           int            `db:"id" json:"message_metadata_id"`
-	ScanId       int            `db:"scan_id"`
-	MessageId    sql.NullString `db:"message_id"`
-	ThreadId     sql.NullString `db:"thread_id"`
-	LabelIds     sql.NullString `db:"labels"`
-	From         sql.NullString `db:"mail_from"`
-	To           sql.NullString `db:"mail_to"`
-	Subject      sql.NullString
-	Date         sql.NullString
-	SizeEstimate sql.NullInt64 `db:"size_estimate"`
 }
 
 type PhotosMediaItemRead struct {
@@ -944,9 +833,14 @@ type PhotosMediaItemRead struct {
 	ContributorDisplayName sql.NullString `db:"contributor_display_name"`
 }
 
+// Account is a linked Google account, as GET /api/accounts lists it.
 type Account struct {
-	ClientKey   string `db:"client_key" json:"clientKey"`
-	DisplayName string `db:"display_name" json:"displayName"`
+	ClientKey   string   `json:"clientKey"`
+	DisplayName string   `json:"displayName"`
+	Services    []string `json:"services"`
+	// The Google account ID, for Google's login_hint; empty for an account
+	// linked before it was recorded.
+	LoginHint string `json:"loginHint,omitempty"`
 }
 
 func substr(s string, end int) string {

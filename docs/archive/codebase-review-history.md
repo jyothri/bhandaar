@@ -34,6 +34,7 @@ This work was first raised as one PR (#6). After review it was split into focuse
 | 2026-09-24 | #17 | Backend OAuth linking: token exchange via `x/oauth2` (form body, errors stop the handler, tokens no longer logged); redirect only to `-frontend_url` origins, which now takes a list; real 400/502 responses. Scan status: new scans start `Running`; `completed_at` dropped | 7.1–7.5, 7.10 |
 | 2026-09-24 | #18 | OAuth callback forwards the code with a full page load; account linking was broken in production since #12 | 1.15 |
 | 2026-09-24 | #19 | Progress events carry `status` and `error`, and each scan ends with a final event; the progress row shows "Completed" or "Failed: …" | 4.7 |
+| 2026-09-27 | #33 | Google Drive scans from the Request page ([spec](../specs/request-drive-scans.md)): accounts linked per service (Gmail, Drive) with incremental authorization and identified by their Google account ID, so re-linking updates the account; scans recorded under their account's key and name from the database, and history grouped by account; Drive folder scans (with subfolders), full paths from My Drive, and folder rows with recursive totals; a results view per scan; a Request History › account › scan trail. 4.9 half done; Photos split out as 7.15 | 3.7, 4.1, 4.2; 4.9 (half), 7.15 (open) |
 | 2026-09-24 | #20 | Review split: open and pending items stay in `docs/codebase-review.md` (with new items 2.8–2.11, 4.8, 4.9, 6.4 split out of these notes); done and won't-fix items, the change log and these notes move here; the local dev setup moves to `docs/local-dev.md` | — |
 
 ---
@@ -201,7 +202,9 @@ Found in production after #17 was deployed:
   `infoMessage` is never cleared on error, so success and error text can show at the same time.
   *Done in #13:* one `message` state with a `kind` (error or info). Each new message replaces the last one, and submitting clears it.
 
-- [ ] **3.7 Username is read from the option's text** — *open; see [../codebase-review.md](../codebase-review.md)*
+- [x] **3.7 Username is read from the option's text** — `src/routes/request.tsx:73`
+  *Fix:* look up the account in `accounts` by `clientKey`.
+  *Done in #33:* the Request page no longer sends a name at all. Every Google collector takes the account's name (and key) from `privatetokens`, so one Google account's scans always list together ([spec](../specs/request-drive-scans.md#account-names)).
 
 - [x] **3.8 `Header` is outside `RouterProvider`** — `src/App.tsx:32`
   It can't use `Link` or router hooks.
@@ -218,9 +221,14 @@ Found in production after #17 was deployed:
 
 ## 4. UI / UX
 
-- [ ] **4.1 The home route (`/`, "Data") is a placeholder** — *open; see [../codebase-review.md](../codebase-review.md)*
+- [x] **4.1 The home route (`/`, "Data") is a placeholder** — `src/routes/index.tsx`
+  `types/mail.ts` (`MessageMetadata`) is defined but unused, and the backend already serves `/api/gmaildata/{id}` and `/api/photos/{id}`.
+  *Next feature:* a results view, linked from the history table by scan ID, with pagination and sizes.
+  *Note:* by 7.9's decision (won't fix), a scan's `messagemetadata` rows are only the messages *new* in that scan. Label per-scan results "new messages", and use the scan's processed count for the total matched.
+  *Done in #33,* as `/scans/<id>` rather than on `/`: a summary (`GET /api/scans/{id}/summary`: files or new messages, bytes, folders), then 10 rows a page. Drive and local scans show files and folders in tree order, linked to Drive; Gmail scans show new messages. Linked from Request History and from the Request page's success message. The results endpoints return plain JSON. `/` stays a placeholder; browsing by account is proposed in [../specs/browse.md](../specs/browse.md).
 
-- [ ] **4.2 Only Gmail scans can be requested** — *open; see [../codebase-review.md](../codebase-review.md)*
+- [x] **4.2 Only Gmail scans can be requested**, although `ScanType` also lists Local, GDrive, GStorage and GPhotos.
+  *Done in #33* ([spec](../specs/request-drive-scans.md)): the Request page scans Gmail or Google Drive. Drive has guided fields that build the Drive query, an editable query, and an optional folder with or without its subfolders. An account without the chosen service gets a **Grant … access** button. Photos is left out: the Photos Library API no longer lists a library (7.15). Verified on a copy of production: a Drive folder scan of 13 files in 2 folders, and a scan of its parent (504 files, 138 folders), with identical paths and IDs for the shared files.
 
 - [x] **4.3 Values are shown raw**
   - The progress table shows raw seconds and ignores `completion_pct`. Add a `<progress>` bar and mm:ss formatting.

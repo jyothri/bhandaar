@@ -5,12 +5,56 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/jyothri/hdd/db"
+	"github.com/jyothri/hdd/notification"
 	"google.golang.org/api/googleapi"
 )
 
 var lock sync.RWMutex
+
+// Progress of the running scan (scans run one at a time, behind lock).
+var counter_processed atomic.Int64
+var counter_pending atomic.Int64
+
+// resetCounters resets progress counters to zero for a new scan
+func resetCounters() {
+	counter_processed.Store(0)
+	counter_pending.Store(0)
+}
+
+// logProgress publishes the running scan's counts every tick, and once more
+// when done is signalled, then closes notificationChannel.
+func logProgress(scanId int, ClientKey string, start time.Time, done <-chan bool, ticker *time.Ticker, notificationChannel chan<- notification.Progress) {
+	defer close(notificationChannel)
+	for {
+		select {
+		case <-done:
+			progress := notification.Progress{
+				ProcessedCount: int(counter_processed.Load()),
+				ActiveCount:    int(counter_pending.Load()),
+				ScanId:         scanId,
+				ClientKey:      ClientKey,
+				ElapsedInSec:   int(time.Since(start).Seconds()),
+				Status:         notification.StatusRunning,
+			}
+			notificationChannel <- progress
+			return
+		case <-ticker.C:
+			progress := notification.Progress{
+				ProcessedCount: int(counter_processed.Load()),
+				ActiveCount:    int(counter_pending.Load()),
+				ScanId:         scanId,
+				ClientKey:      ClientKey,
+				ElapsedInSec:   int(time.Since(start).Seconds()),
+				Status:         notification.StatusRunning,
+			}
+			notificationChannel <- progress
+		}
+	}
+}
 
 // failStart marks a scan that was logged but couldn't start as failed, so
 // it doesn't stay open forever, and returns err for the caller.
@@ -19,21 +63,36 @@ func failStart(scanId int, err error) (int, error) {
 	return 0, err
 }
 
-// refreshToken returns the Google refresh token a scan uses: that of the
-// account clientKey, which userID must have linked, or else the token given
-// in the request.
-func refreshToken(userID int64, clientKey string, token string) (string, error) {
+// linkedAccount looks up a user's linked account; tests replace it.
+var linkedAccount = db.GetOAuthToken
+
+// googleAccount is the Google account a scan runs as.
+type googleAccount struct {
+	RefreshToken string
+	// The linked account's key and display name, which the scan is recorded
+	// under; both empty for a raw refresh token.
+	ClientKey string
+	Name      string
+}
+
+// resolveAccount returns the Google account a scan uses: the account
+// clientKey, which userID must have linked, or else the refresh token given
+// in the request. The name comes from the database, never the request, so
+// all scans of one account list together (docs/specs/request-drive-scans.md,
+// "Account names").
+func resolveAccount(userID int64, clientKey string, token string) (googleAccount, error) {
+	account := googleAccount{RefreshToken: token}
 	if clientKey != "" {
-		account, err := db.GetOAuthToken(userID, clientKey)
+		linked, err := linkedAccount(userID, clientKey)
 		if err != nil {
-			return "", err
+			return googleAccount{}, err
 		}
-		token = account.RefreshToken
+		account = googleAccount{RefreshToken: linked.RefreshToken, ClientKey: clientKey, Name: linked.DisplayName}
 	}
-	if token == "" {
-		return "", fmt.Errorf("refresh token is empty for account %s", clientKey)
+	if account.RefreshToken == "" {
+		return googleAccount{}, fmt.Errorf("refresh token is empty for account %s", clientKey)
 	}
-	return token, nil
+	return account, nil
 }
 
 func isRetryError(err error) bool {
