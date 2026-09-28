@@ -1,11 +1,14 @@
 package web
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/jyothri/hdd/collect"
@@ -28,6 +31,7 @@ func api(r *mux.Router) {
 	api.HandleFunc("/scans/requests/{account_key}", GetScanRequestsHandler).Methods("GET")
 	api.HandleFunc("/scans/accounts", GetAccountsHandler).Methods("GET")
 	api.HandleFunc("/scans/{scan_id}", DeleteScanHandler).Methods("DELETE")
+	api.HandleFunc("/scans/{scan_id}/summary", ScanSummaryHandler).Methods("GET")
 	api.HandleFunc("/scans", ListScansHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/scans", ListScansHandler).Methods("GET")
 	api.HandleFunc("/accounts", GetRequestAccountsHandler).Methods("GET")
@@ -59,6 +63,10 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 
 	var scanId int
 	userID := currentUser(r).ID
+	if status, msg := checkScanRequest(doScanRequest, userID); status != http.StatusOK {
+		http.Error(w, msg, status)
+		return
+	}
 	switch doScanRequest.ScanType {
 	case "Local":
 		scanId, err = collect.LocalDrive(doScanRequest.LocalScan, userID)
@@ -74,6 +82,11 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var requestErr *collect.RequestError
+	if errors.As(err, &requestErr) {
+		http.Error(w, requestErr.Message, http.StatusBadRequest)
+		return
+	}
 	if err != nil {
 		slog.Error("Failed to start scan",
 			"scan_type", doScanRequest.ScanType,
@@ -84,6 +97,51 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 
 	body := DoScanResponse{ScanId: scanId}
 	writeJSONResponse(w, body, http.StatusOK)
+}
+
+// maxQueryLength is the longest filter or query a scan can record
+// (scanmetadata.search_filter).
+const maxQueryLength = 2000
+
+// accountFor looks up a user's linked account; tests replace it.
+var accountFor = db.GetOAuthToken
+
+// checkScanRequest checks a Gmail or Drive request before any scan is
+// created: its query fits, and the account it names has granted access to
+// that service. It returns http.StatusOK, or a status and a message the
+// Request page can show as is.
+func checkScanRequest(req DoScanRequest, userID int64) (int, string) {
+	var query, clientKey, service, serviceName string
+	switch req.ScanType {
+	case "GMail":
+		query, clientKey, service, serviceName = req.GMailScan.Filter, req.GMailScan.ClientKey, db.ServiceGmail, "Gmail"
+	case "GDrive":
+		query, clientKey, service, serviceName = req.GDriveScan.QueryString, req.GDriveScan.ClientKey, db.ServiceDrive, "Google Drive"
+	default:
+		return http.StatusOK, ""
+	}
+	if len(query) > maxQueryLength {
+		return http.StatusBadRequest, fmt.Sprintf("The query is too long: %d characters, the most is %d.", len(query), maxQueryLength)
+	}
+	if folderId := req.GDriveScan.FolderId; req.ScanType == "GDrive" && folderId != "" && !collect.ValidFolderId(folderId) {
+		return http.StatusBadRequest, "That isn't a Google Drive folder ID."
+	}
+	if clientKey == "" {
+		// A raw RefreshToken instead; the collector checks it.
+		return http.StatusOK, ""
+	}
+	account, err := accountFor(userID, clientKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return http.StatusBadRequest, "This account isn't linked. Pick another, or link it again."
+	}
+	if err != nil {
+		slog.Error("Failed to look up linked account", "client_key", clientKey, "error", err)
+		return http.StatusInternalServerError, "Failed to look up the account"
+	}
+	if !db.HasService(account.Scope, service) {
+		return http.StatusBadRequest, fmt.Sprintf("This account hasn't granted %s access. Use \"Grant %s access\" first.", serviceName, strings.TrimPrefix(serviceName, "Google "))
+	}
+	return http.StatusOK, ""
 }
 
 func ListScansHandler(w http.ResponseWriter, r *http.Request) {
@@ -116,12 +174,12 @@ func GetRequestAccountsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetScanRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	accountKey := vars["account_key"]
-	accountRequests, err := db.GetScanRequestsFromDb(currentUser(r).ID, accountKey)
+	// A linked account's client_key.
+	clientKey := mux.Vars(r)["account_key"]
+	accountRequests, err := db.GetScanRequestsFromDb(currentUser(r).ID, clientKey)
 	if err != nil {
 		slog.Error("Failed to get scan requests from database",
-			"account_key", accountKey,
+			"client_key", clientKey,
 			"error", err)
 		http.Error(w, "Failed to retrieve scan requests", http.StatusInternalServerError)
 		return
@@ -238,6 +296,28 @@ func ListPhotosHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, body, http.StatusOK)
 }
 
+// ScanSummaryHandler answers a scan's details and totals.
+func ScanSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	scanId, ok := getIntFromMap(mux.Vars(r), "scan_id")
+	if !ok {
+		http.Error(w, "Invalid scan ID", http.StatusBadRequest)
+		return
+	}
+	if !checkScanOwner(w, r, scanId) {
+		return
+	}
+	summary, err := scanSummary(scanId)
+	if err != nil {
+		slog.Error("Failed to get scan summary", "scan_id", scanId, "error", err)
+		http.Error(w, "Failed to retrieve scan", http.StatusInternalServerError)
+		return
+	}
+	writeJSONResponse(w, summary, http.StatusOK)
+}
+
+// scanSummary reads a scan's summary; tests replace it.
+var scanSummary = db.GetScanSummary
+
 func ListScanDataHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	pageNo := getPageNumber(mux.Vars(r))
@@ -343,8 +423,8 @@ type ScansResponse struct {
 }
 
 type ScanDataResponse struct {
-	PageInfo PaginationInfo `json:"pagination_info"`
-	ScanData []db.ScanData  `json:"scan_data"`
+	PageInfo PaginationInfo   `json:"pagination_info"`
+	ScanData []db.ScanDataRow `json:"scan_data"`
 }
 
 type DoScanRequest struct {
@@ -360,8 +440,8 @@ type DoScanResponse struct {
 }
 
 type MessageMetadataResponse struct {
-	PageInfo        PaginationInfo           `json:"pagination_info"`
-	MessageMetadata []db.MessageMetadataRead `json:"message_metadata"`
+	PageInfo        PaginationInfo  `json:"pagination_info"`
+	MessageMetadata []db.MessageRow `json:"message_metadata"`
 }
 
 type PhotosMediaItemResponse struct {

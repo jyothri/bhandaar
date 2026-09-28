@@ -2,7 +2,6 @@ export interface GMailScan {
   Filter: string;
   ClientKey: string;
   RefreshToken: string;
-  Username: string;
 }
 
 export enum ScanType {
@@ -13,9 +12,21 @@ export enum ScanType {
   GPhotos = "GPhotos",
 }
 
+export interface GDriveScan {
+  // Drive's `q`; empty lists everything.
+  QueryString: string;
+  // A folder to scan instead of the whole Drive, and whether to include its
+  // subfolders.
+  FolderId: string;
+  Recursive: boolean;
+  ClientKey: string;
+  RefreshToken: string;
+}
+
 export type ScanMetadata = {
   ScanType?: ScanType;
   GMailScan?: GMailScan;
+  GDriveScan?: GDriveScan;
 };
 
 export type RequestScanResponse = {
@@ -42,6 +53,8 @@ export type ScanRequest = {
   name: string;
   scan_type: string;
   search_filter: string;
+  // A Drive folder scan's folder; empty otherwise.
+  search_path: string;
   scan_start_time: string;
   // Seconds as a decimal string, or "-1" while the scan has no end time.
   scan_duration_in_sec: string;

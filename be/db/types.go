@@ -5,7 +5,10 @@ import (
 )
 
 type FileData struct {
-	FilePath  string
+	FilePath string
+	// The file's ID where it lives, for cloud files (a Drive file ID);
+	// empty for local ones.
+	FileId    string
 	FileName  string
 	IsDir     bool
 	Size      uint

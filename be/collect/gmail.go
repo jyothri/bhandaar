@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jyothri/hdd/constants"
@@ -17,9 +16,6 @@ import (
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
 )
-
-var counter_processed atomic.Int64
-var counter_pending atomic.Int64
 
 // Built on first use, after main has parsed the OAuth flags.
 var gmailConfig = sync.OnceValue(func() *oauth2.Config {
@@ -35,12 +31,6 @@ const (
 	MaxRetryCount = 3
 	SleepTime     = 1 * time.Second
 )
-
-// resetCounters resets progress counters to zero for a new scan
-func resetCounters() {
-	counter_processed.Store(0)
-	counter_pending.Store(0)
-}
 
 func getGmailService(refreshToken string) (*gmail.Service, error) {
 	tokenSrc := oauth2.Token{
@@ -62,19 +52,20 @@ func Gmail(gMailScan GMailScan, userID int64) (int, error) {
 			gMailScan.ClientKey, gMailScan.Filter, err)
 	}
 
+	account, err := resolveAccount(userID, gMailScan.ClientKey, gMailScan.RefreshToken)
+	if err != nil {
+		return failStart(scanId, err)
+	}
+	gMailScan.RefreshToken = account.RefreshToken
+
 	// Save metadata in background
 	go func() {
-		if err := db.SaveScanMetadata(gMailScan.Username, "", gMailScan.Filter, scanId); err != nil {
+		if err := db.SaveScanMetadata(account.Name, account.ClientKey, "", gMailScan.Filter, scanId); err != nil {
 			slog.Error("Failed to save scan metadata",
 				"scan_id", scanId,
 				"error", err)
 		}
 	}()
-
-	gMailScan.RefreshToken, err = refreshToken(userID, gMailScan.ClientKey, gMailScan.RefreshToken)
-	if err != nil {
-		return failStart(scanId, err)
-	}
 
 	// Get Gmail service
 	gmailService, err := getGmailService(gMailScan.RefreshToken)
@@ -99,28 +90,9 @@ func Gmail(gMailScan GMailScan, userID int64) (int, error) {
 	}()
 
 	// Start processing messages in background
-	go db.SaveMessageMetadataToDb(scanId, gMailScan.Username, messageMetaData)
+	go db.SaveMessageMetadataToDb(scanId, account.Name, messageMetaData)
 
 	return scanId, nil
-}
-
-func GetIdentity(refreshToken string) (string, error) {
-	if refreshToken == "" {
-		return "", fmt.Errorf("refresh token is empty")
-	}
-
-	gmailService, err := getGmailService(refreshToken)
-	if err != nil {
-		return "", fmt.Errorf("failed to get gmail service: %w", err)
-	}
-
-	profile := gmailService.Users.GetProfile("me")
-	profileInfo, err := profile.Do()
-	if err != nil {
-		return "", fmt.Errorf("failed to get user profile from Gmail API: %w", err)
-	}
-
-	return profileInfo.EmailAddress, nil
 }
 
 func startGmailScan(gmailService *gmail.Service, scanId int, gMailScan GMailScan, messageMetaData chan<- db.MessageMetadata) error {
@@ -251,38 +223,8 @@ func getMessageInfo(gmailService *gmail.Service, id string, messageMetaData chan
 	// wg.Done() is handled by defer at function start
 }
 
-func logProgress(scanId int, ClientKey string, start time.Time, done <-chan bool, ticker *time.Ticker, notificationChannel chan<- notification.Progress) {
-	defer close(notificationChannel)
-	for {
-		select {
-		case <-done:
-			progress := notification.Progress{
-				ProcessedCount: int(counter_processed.Load()),
-				ActiveCount:    int(counter_pending.Load()),
-				ScanId:         scanId,
-				ClientKey:      ClientKey,
-				ElapsedInSec:   int(time.Since(start).Seconds()),
-				Status:         notification.StatusRunning,
-			}
-			notificationChannel <- progress
-			return
-		case <-ticker.C:
-			progress := notification.Progress{
-				ProcessedCount: int(counter_processed.Load()),
-				ActiveCount:    int(counter_pending.Load()),
-				ScanId:         scanId,
-				ClientKey:      ClientKey,
-				ElapsedInSec:   int(time.Since(start).Seconds()),
-				Status:         notification.StatusRunning,
-			}
-			notificationChannel <- progress
-		}
-	}
-}
-
 type GMailScan struct {
 	Filter       string
 	RefreshToken string
 	ClientKey    string
-	Username     string
 }

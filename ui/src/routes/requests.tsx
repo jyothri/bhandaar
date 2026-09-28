@@ -1,14 +1,24 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getScannedAccounts, getScanRequests } from "../api";
 import { queryKeys } from "../api/queryKeys";
-import { formatDateTime, formatDuration } from "../format";
+import { formatDateTime, formatDuration, scanTypeLabel } from "../format";
 import { Table, Td, Tr } from "../components/Table";
-import { useState } from "react";
+import { accountLabels } from "../accountLabels";
+import Breadcrumbs from "../components/Breadcrumbs";
 import { ScanRequest } from "../types/scans";
+
+type RequestsSearch = {
+  // The selected account's client key, so links (and Back) can return to it.
+  account?: string;
+};
 
 export const Route = createFileRoute("/requests")({
   component: Requests,
+  validateSearch: (search: Record<string, unknown>): RequestsSearch =>
+    typeof search.account === "string" && search.account !== ""
+      ? { account: search.account }
+      : {},
 });
 
 // Stop polling for a scan that has been open this long; it's stuck.
@@ -36,7 +46,9 @@ function mayStillFinish(scan: ScanRequest): boolean {
 }
 
 function Requests() {
-  const [selectedAccount, setSelectedAccount] = useState("none");
+  const { account } = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
+  const selectedAccount = account ?? "none";
 
   const {
     data: scannedAccounts,
@@ -64,12 +76,29 @@ function Requests() {
       query.state.data?.some(mayStillFinish) ? 10_000 : false,
   });
 
+  const labels = accountLabels(scannedAccounts ?? []);
+
   function handleSelectAccount(e: React.ChangeEvent<HTMLSelectElement>) {
-    setSelectedAccount(e.target.value);
+    const next = e.target.value;
+    navigate({ search: next === "none" ? {} : { account: next } });
   }
+
+  const accountLabel = account && labels.get(account);
 
   return (
     <div>
+      <Breadcrumbs
+        items={
+          accountLabel
+            ? [
+                <Link to="/requests" search={{}} className="underline">
+                  Request History
+                </Link>,
+                accountLabel,
+              ]
+            : ["Request History"]
+        }
+      />
       <h2 className="p-2 justify-self-center heading font-bold text-xl">
         Request history
       </h2>
@@ -100,8 +129,8 @@ function Requests() {
               <option value="none">Select One</option>
               {scannedAccounts &&
                 scannedAccounts.map((account) => (
-                  <option key={account} value={account}>
-                    {account}
+                  <option key={account.clientKey} value={account.clientKey}>
+                    {labels.get(account.clientKey)}
                   </option>
                 ))}
             </select>
@@ -131,9 +160,22 @@ function Requests() {
             {scanRequests.map((scanRequest) => (
               <Tr key={scanRequest.scan_id}>
                 <Td>{scanRequest.name}</Td>
-                <Td>{scanRequest.scan_type}</Td>
-                <Td>{scanRequest.scan_id}</Td>
-                <Td>{scanRequest.search_filter}</Td>
+                <Td>{scanTypeLabel(scanRequest.scan_type)}</Td>
+                <Td>
+                  <Link
+                    to="/scans/$scanId"
+                    params={{ scanId: String(scanRequest.scan_id) }}
+                    search={{ page: 1 }}
+                    className="underline"
+                  >
+                    {scanRequest.scan_id}
+                  </Link>
+                </Td>
+                <Td className="wrap-anywhere">
+                  {scanRequest.search_path
+                    ? `${scanRequest.search_path}: ${scanRequest.search_filter}`
+                    : scanRequest.search_filter}
+                </Td>
                 <Td>{formatDateTime(scanRequest.scan_start_time)}</Td>
                 <Td>{scanDuration(scanRequest)}</Td>
               </Tr>

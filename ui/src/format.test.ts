@@ -2,7 +2,12 @@
 // No DOM needed; skips starting jsdom for this file.
 
 import { describe, expect, it } from "vitest";
-import { formatDateTime, formatDuration } from "./format";
+import {
+  formatBytes,
+  formatDateTime,
+  formatDuration,
+  scanTypeLabel,
+} from "./format";
 
 describe("formatDuration", () => {
   it.each([
@@ -39,5 +44,26 @@ describe("formatDateTime", () => {
 
   it("returns unparseable input unchanged", () => {
     expect(formatDateTime("not a date")).toBe("not a date");
+  });
+});
+
+describe("formatBytes", () => {
+  it.each([
+    [0, "0 B"],
+    [1023, "1023 B"],
+    [1536, "1.5 KB"],
+    [6996060, "6.7 MB"],
+    [3961548800, "3.7 GB"],
+    [150 * 1024 ** 3, "150 GB"],
+  ])("formats %d as %s", (bytes, want) => {
+    expect(formatBytes(bytes)).toBe(want);
+  });
+});
+
+describe("scanTypeLabel", () => {
+  it("names the scan types, and passes others through", () => {
+    expect(scanTypeLabel("gmail")).toBe("Gmail");
+    expect(scanTypeLabel("google_drive")).toBe("Google Drive");
+    expect(scanTypeLabel("something_new")).toBe("something_new");
   });
 });

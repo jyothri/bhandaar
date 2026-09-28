@@ -25,7 +25,7 @@ func LocalDrive(localScan LocalScan, userID int64) (int, error) {
 
 	// Save metadata in background
 	go func() {
-		if err := db.SaveScanMetadata("", "dir="+path, "", scanId); err != nil {
+		if err := db.SaveScanMetadata("", "", "dir="+path, "", scanId); err != nil {
 			slog.Error("Failed to save scan metadata",
 				"scan_id", scanId,
 				"path", path,

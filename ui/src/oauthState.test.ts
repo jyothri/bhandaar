@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { consumeOAuthState, createOAuthState } from "./oauthState";
+import {
+  clearLinkService,
+  consumeOAuthState,
+  createOAuthState,
+  linkService,
+  rememberLinkService,
+} from "./oauthState";
 
 describe("OAuth state", () => {
   it("creates a fresh random value each time", () => {
@@ -24,5 +30,21 @@ describe("OAuth state", () => {
   it("rejects everything when no link was started", () => {
     expect(consumeOAuthState("")).toBe(false);
     expect(consumeOAuthState("anything")).toBe(false);
+  });
+});
+
+describe("link service", () => {
+  it("is remembered until cleared", () => {
+    expect(linkService()).toBeNull();
+    rememberLinkService("drive");
+    expect(linkService()).toBe("drive");
+    expect(linkService()).toBe("drive");
+    clearLinkService();
+    expect(linkService()).toBeNull();
+  });
+
+  it("ignores anything that isn't a service", () => {
+    sessionStorage.setItem("oauthLinkService", "photos");
+    expect(linkService()).toBeNull();
   });
 });

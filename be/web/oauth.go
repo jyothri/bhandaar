@@ -3,6 +3,9 @@ package web
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,7 +14,6 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/jyothri/hdd/collect"
 	"github.com/jyothri/hdd/constants"
 	"github.com/jyothri/hdd/db"
 	"golang.org/x/oauth2"
@@ -91,28 +93,63 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 		expiresIn = int16(time.Until(token.Expiry).Seconds())
 	}
 
-	client_key := generateRandomString(12)
-
-	email, err := collect.GetIdentity(token.RefreshToken)
+	rawIDToken, _ := token.Extra("id_token").(string)
+	identity, err := parseIDToken(rawIDToken)
 	if err != nil {
-		slog.Error("Failed to get user identity",
-			"error", err)
-		http.Error(w, "Failed to verify account", http.StatusInternalServerError)
+		slog.Warn("No usable id_token in token response", "error", err)
+		http.Error(w, "Google didn't identify the account; link it again, allowing access to your email address", http.StatusBadRequest)
 		return
 	}
 
-	display_name := getDisplayName(email, client_key)
-
-	err = db.SaveOAuthToken(currentUser(r).ID, token.AccessToken, token.RefreshToken, display_name, client_key, scope, expiresIn, token.TokenType)
+	newClientKey := generateRandomString(12)
+	clientKey, err := linkAccount(currentUser(r).ID, db.GoogleLink{
+		GoogleSub:    identity.Sub,
+		DisplayName:  getDisplayName(identity.Email, newClientKey),
+		AccessToken:  token.AccessToken,
+		RefreshToken: token.RefreshToken,
+		Scope:        scope,
+		ExpiresIn:    expiresIn,
+		TokenType:    token.TokenType,
+	}, newClientKey)
 	if err != nil {
-		slog.Error("Failed to save OAuth token",
-			"client_key", client_key,
-			"error", err)
+		slog.Error("Failed to save linked account", "error", err)
 		http.Error(w, "Failed to save account information", http.StatusInternalServerError)
 		return
 	}
 
-	http.Redirect(w, r, returnUrl, http.StatusFound)
+	http.Redirect(w, r, returnUrl+"?"+url.Values{"account": {clientKey}}.Encode(), http.StatusFound)
+}
+
+// linkAccount stores a linked account; tests replace it.
+var linkAccount = db.LinkAccount
+
+// googleIdentity is the part of an OpenID Connect ID token linking uses.
+type googleIdentity struct {
+	Sub   string `json:"sub"`
+	Email string `json:"email"`
+}
+
+// parseIDToken reads the claims of the id_token Google's token endpoint
+// returned. Its signature isn't checked: it came straight from Google over
+// TLS, in the code exchange, which is the case OpenID Connect (section
+// 3.1.3.7) and Google's docs exempt from validation.
+func parseIDToken(raw string) (googleIdentity, error) {
+	parts := strings.Split(raw, ".")
+	if len(parts) != 3 {
+		return googleIdentity{}, errors.New("id_token is missing or not a JWT")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
+	if err != nil {
+		return googleIdentity{}, fmt.Errorf("failed to decode id_token: %w", err)
+	}
+	var identity googleIdentity
+	if err := json.Unmarshal(payload, &identity); err != nil {
+		return googleIdentity{}, fmt.Errorf("failed to parse id_token: %w", err)
+	}
+	if identity.Sub == "" {
+		return googleIdentity{}, errors.New("id_token has no sub")
+	}
+	return identity, nil
 }
 
 // linkReturnURL checks that redirectUri belongs to a UI this backend serves

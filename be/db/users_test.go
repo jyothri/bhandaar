@@ -159,7 +159,8 @@ func TestScansAndAccountsBelongToTheirUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SaveOAuthToken(alice, "at", "rt", "al***ce@example.com", "key-a", "", 0, "Bearer"); err != nil {
+	if _, err := LinkAccount(alice, GoogleLink{GoogleSub: "sub-a", DisplayName: "al***ce@example.com",
+		AccessToken: "at", RefreshToken: "rt", TokenType: "Bearer"}, "key-a"); err != nil {
 		t.Fatal(err)
 	}
 

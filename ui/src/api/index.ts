@@ -1,5 +1,6 @@
 import { config } from "../config";
-import { Account } from "../types/accounts";
+import { Account, ScannedAccount } from "../types/accounts";
+import { MessagePage, ScanDataPage, ScanSummary } from "../types/results";
 import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 
 export const backend_url = config.backendUrl;
@@ -113,11 +114,23 @@ export const getAccounts = (): Promise<Account[]> =>
 /**
  * Function to get accounts for which requests were submitted.
  */
-export const getScannedAccounts = (): Promise<string[]> =>
+export const getScannedAccounts = (): Promise<ScannedAccount[]> =>
   fetchJson("/api/scans/accounts");
 
 /**
- * Function to get details for selected account.
+ * The scans of one account, by its client key.
  */
-export const getScanRequests = (accountKey: string): Promise<ScanRequest[]> =>
-  fetchJson(`/api/scans/requests/${encodeURIComponent(accountKey)}`);
+export const getScanRequests = (clientKey: string): Promise<ScanRequest[]> =>
+  fetchJson(`/api/scans/requests/${encodeURIComponent(clientKey)}`);
+
+/** A scan's details and totals. */
+export const getScanSummary = (scanId: number): Promise<ScanSummary> =>
+  fetchJson(`/api/scans/${scanId}/summary`);
+
+/** A page (from 1) of the files and folders a scan found. */
+export const getScanData = (scanId: number, page: number): Promise<ScanDataPage> =>
+  fetchJson(`/api/scans/${scanId}?page=${page}`);
+
+/** A page (from 1) of the messages a Gmail scan found. */
+export const getGmailData = (scanId: number, page: number): Promise<MessagePage> =>
+  fetchJson(`/api/gmaildata/${scanId}?page=${page}`);

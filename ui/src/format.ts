@@ -19,3 +19,29 @@ export function formatDateTime(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : dateTimeFormat.format(date);
 }
+
+const byteUnits = ["B", "KB", "MB", "GB", "TB"];
+
+/** Formats a byte count in binary units, e.g. 3.7 GB. */
+export function formatBytes(bytes: number): string {
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < byteUnits.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  const digits = unit === 0 || value >= 100 ? 0 : 1;
+  return `${value.toFixed(digits)} ${byteUnits[unit]}`;
+}
+
+const scanTypeLabels: Record<string, string> = {
+  gmail: "Gmail",
+  google_drive: "Google Drive",
+  local: "Local",
+  photos: "Google Photos",
+};
+
+/** A scan type as people read it, e.g. "Google Drive" for google_drive. */
+export function scanTypeLabel(scanType: string): string {
+  return scanTypeLabels[scanType] ?? scanType;
+}

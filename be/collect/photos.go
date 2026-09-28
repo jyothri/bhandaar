@@ -59,10 +59,11 @@ func Photos(photosScan GPhotosScan, userID int64) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to start photos scan (album=%s): %w", photosScan.AlbumId, err)
 	}
-	photosScan.RefreshToken, err = refreshToken(userID, photosScan.ClientKey, photosScan.RefreshToken)
+	account, err := resolveAccount(userID, photosScan.ClientKey, photosScan.RefreshToken)
 	if err != nil {
 		return failStart(scanId, err)
 	}
+	photosScan.RefreshToken = account.RefreshToken
 
 	// Validate photos client
 	_, err = getPhotosService(photosScan.RefreshToken)
@@ -72,7 +73,7 @@ func Photos(photosScan GPhotosScan, userID int64) (int, error) {
 
 	// Save metadata in background
 	go func() {
-		if err := db.SaveScanMetadata("", "", "", scanId); err != nil {
+		if err := db.SaveScanMetadata(account.Name, account.ClientKey, "", "", scanId); err != nil {
 			slog.Error("Failed to save scan metadata",
 				"scan_id", scanId,
 				"album_id", photosScan.AlbumId,

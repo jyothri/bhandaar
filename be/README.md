@@ -43,11 +43,4 @@ test
 | folder1   | 5    |
 | test      | 13   |
 
-- google drive & cloud storage only save it at directory level excluding sub-directories
-
-| directory | size |
-| --------- | ---- |
-| folder3   | 7    |
-| folder2   | 1    |
-| folder1   | 5    |
-| test      | 0    |
+- Google Drive used to save no folder rows at all. Since the Drive scans of `docs/specs/request-drive-scans.md`, it saves them recursively too, like local scans: a row per folder below the one scanned, with the total size and file count under it (the scanned folder itself gets none, in either). There's no Cloud Storage collector.

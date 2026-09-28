@@ -123,8 +123,10 @@ graph TB
 - Tailwind CSS (styling)
 
 **Key Components:**
-- `/routes/request.tsx` - Main scan request form and results display
-- `/routes/requests.tsx` - List view of scan requests by account
+- `/routes/request.tsx` - Scan request form for Gmail and Google Drive (`?type=gmail|drive`). An account without the chosen service gets a "Grant … access" button, which links it again for that service with Google's `login_hint`; the service being linked is kept in `sessionStorage` across the round trip. Drive fields build the Drive query (`driveQuery.ts`), which "Edit query" lets you replace, plus an optional folder (link or ID) with or without subfolders
+- `/routes/requests.tsx` - List view of scan requests by account, with readable scan types; each scan ID links to its results. The selected account is in the URL (`?account=<client_key>`), so links and Back return to it
+- `/components/Breadcrumbs.tsx` - The trail under the nav tabs on Request History and scan pages: `Request History › <account> › Scan N`. A scan's trail always goes through its account (the summary's `client_key`), however the scan was opened, and the Request History tab stays highlighted on it
+- `/routes/scans.$scanId.tsx` - One scan's results: its summary, then 10 rows a page: files and folders with their folder, size, file count, modified time and MD5, linked to Drive (Drive, local), or new messages (Gmail)
 - `/routes/oauth/glink.tsx` - OAuth callback handler
 - `/api/index.ts` - Backend API client
 - `/components/ScanProgress.tsx` - Real-time progress display
@@ -147,24 +149,27 @@ Every route but health and login/logout needs a logged-in user (see [Web authent
 | `/api/auth/login` | POST | Log in; sets the session cookie |
 | `/api/auth/logout` | POST | End the session |
 | `/api/auth/me` | GET | The logged-in user |
-| `/api/scans` | POST | Submit scan request |
+| `/api/scans` | POST | Submit scan request; a Gmail or Drive request's account must have granted that service, and its query must fit 2000 characters (else 400, before any scan is created) |
 | `/api/scans` | GET | List all scans (paginated) |
-| `/api/scans/requests/{account_key}` | GET | Get scan requests for account |
-| `/api/scans/{scan_id}` | GET | Get scan data |
+| `/api/scans/requests/{client_key}` | GET | The scans of one linked account, newest first |
+| `/api/scans/{scan_id}/summary` | GET | A scan's details and totals: file (or new-message) count and bytes, and folder count |
+| `/api/scans/{scan_id}` | GET | A page (10) of a scan's files and folders, in tree order (paths compared a segment at a time), with `file_id` for Drive |
 | `/api/scans/{scan_id}` | DELETE | Delete scan |
-| `/api/gmaildata/{scan_id}` | GET | Get Gmail scan results |
+| `/api/gmaildata/{scan_id}` | GET | A page (10) of a Gmail scan's new messages, newest first |
 | `/api/photos/{scan_id}` | GET | Get Photos scan results |
 | `/api/photos/albums` | GET | List photo albums |
-| `/api/accounts` | GET | List OAuth-authenticated accounts |
-| `/api/scans/accounts` | GET | List accounts with scans |
+| `/api/accounts` | GET | List linked Google accounts: `clientKey`, `displayName`, `services` (`gmail`, `drive`) and `loginHint` (the Google account ID, when known) |
+| `/api/scans/accounts` | GET | The accounts with scans, as `{clientKey, displayName}`, each named by its newest scan |
 
-#### OAuth Flow (`web/oauth.go`)
-- `/oauth/authorize` - Initiate Google OAuth2 flow
-- `/oauth/callback` - Handle OAuth callback, store refresh tokens
+#### Linking Google accounts (`web/oauth.go`)
+- The UI sends the user to Google asking for `openid email` plus a service's scope, with `include_granted_scopes=true` and `access_type=offline`, and Google returns to `/oauth/glink`, which hands the code to `GET /api/glink`.
+- `/api/glink` exchanges the code, and identifies the Google account by the `id_token`'s `sub` (its email gives the masked display name). It stores the scopes Google actually granted. The linked account is the user's row with that `sub`, else the user's newest row from before `sub`s were recorded with the same display name, else a new row; an existing row keeps its `client_key`. Then it redirects to `/request?account=<client_key>`.
+- See [specs/request-drive-scans.md](specs/request-drive-scans.md#identity-and-re-linking-beweboauthgo).
+- A Google scan is recorded (`scanmetadata`) under its linked account's `client_key` and `display_name`, both read from `privatetokens`, never taken from the request. Request History groups by `client_key`, since masked names can collide; the UI adds the start of the key to names two accounts share. Scans from before `client_key` was recorded get their user's newest account of the same name, at startup.
 
 #### Server-Sent Events (`web/sse.go`)
 - `/events` - Real-time scan progress updates
-- Broadcasts progress for Gmail scans, to the scan's owner only
+- Broadcasts progress for Gmail and Drive scans, to the scan's owner only
 
 #### Web authentication
 
@@ -181,10 +186,13 @@ Every route but health and login/logout needs a logged-in user (see [Web authent
 - Stores: filename, path, size, modification time, MD5 hash
 
 **Drive Scanner (`drive.go`):**
-- Uses Google Drive API
-- Scans cloud storage
-- Directory-level size calculation (non-recursive)
-- Authentication via service account or OAuth2
+- Uses the Google Drive API with a linked account's refresh token, and the `drive.metadata.readonly` scope: it reads metadata only
+- Lists the files matching the request's `QueryString` (Drive's `q`), across the whole Drive; folders are skipped, and Google Docs files have no size or MD5
+- Or, with `FolderId`, one folder: breadth first, one list call per folder, into subfolders when `Recursive`. The query applies to files; every subfolder is walked whether it matches or not, except trashed ones, and shortcuts aren't followed. The folder is checked (`files.get`) before the scan is recorded: a bad one is a 400, with no scan. `scanmetadata.search_path` records it as `<path> (<id>)`, plus ` and subfolders`
+- Saves, at the end, a row per folder below the scanned one (`is_dir`, with its Drive ID), with the total size and file count under it, as local scans do. Totals are tracked by folder ID, since a folder name can contain `/`. A whole-Drive scan saves only folders with scanned files under them; a folder scan, every subfolder it walked
+- Stores: file name, its full folder path as the Drive UI shows it (`My Drive/A/Desktop/Qns/q1.pdf`, or `Shared with me/<shared folder>/…`; a folder scan looks up its folder's parents first, one call per level), the Drive file ID (`scandata.file_id`), size, modification time, MD5. A whole-Drive scan lists every folder once first, to build the paths
+- Real-time progress updates via SSE (files so far), like Gmail
+- See [specs/request-drive-scans.md](specs/request-drive-scans.md#folder-scans)
 
 **Gmail Scanner (`gmail.go`):**
 - Uses Gmail API
@@ -224,7 +232,7 @@ scans (main scan records)
     ├── photometadata (photo-specific EXIF)
     └── videometadata (video-specific metadata)
 
-privatetokens (OAuth refresh tokens)
+privatetokens (linked Google accounts: refresh tokens, granted scope, google_sub)
 web_sessions (web login sessions)
 
 scans, privatetokens and web_sessions have a user_id → agent_users (agentserver's)
