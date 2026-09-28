@@ -15,7 +15,8 @@ function useSse<T>(
   });
 
   useEffect(() => {
-    const eventSource = new EventSource(url);
+    // withCredentials sends the session cookie to the backend's origin.
+    const eventSource = new EventSource(url, { withCredentials: true });
 
     // Handle incoming data
     eventSource.addEventListener(messageKey, (e) => {

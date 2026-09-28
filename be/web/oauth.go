@@ -103,7 +103,7 @@ func GoogleAccountLinkingHandler(w http.ResponseWriter, r *http.Request) {
 
 	display_name := getDisplayName(email, client_key)
 
-	err = db.SaveOAuthToken(token.AccessToken, token.RefreshToken, display_name, client_key, scope, expiresIn, token.TokenType)
+	err = db.SaveOAuthToken(currentUser(r).ID, token.AccessToken, token.RefreshToken, display_name, client_key, scope, expiresIn, token.TokenType)
 	if err != nil {
 		slog.Error("Failed to save OAuth token",
 			"client_key", client_key,

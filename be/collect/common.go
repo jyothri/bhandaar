@@ -19,6 +19,23 @@ func failStart(scanId int, err error) (int, error) {
 	return 0, err
 }
 
+// refreshToken returns the Google refresh token a scan uses: that of the
+// account clientKey, which userID must have linked, or else the token given
+// in the request.
+func refreshToken(userID int64, clientKey string, token string) (string, error) {
+	if clientKey != "" {
+		account, err := db.GetOAuthToken(userID, clientKey)
+		if err != nil {
+			return "", err
+		}
+		token = account.RefreshToken
+	}
+	if token == "" {
+		return "", fmt.Errorf("refresh token is empty for account %s", clientKey)
+	}
+	return token, nil
+}
+
 func isRetryError(err error) bool {
 	// Try Google API error
 	var googleErr *googleapi.Error

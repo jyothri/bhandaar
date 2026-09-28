@@ -128,13 +128,14 @@ func Close() error {
 	return nil
 }
 
-func LogStartScan(scanType string) (int, error) {
+// LogStartScan records a new running scan owned by userID.
+func LogStartScan(scanType string, userID int64) (int, error) {
 	insert_row := `insert into scans
-									(scan_type, created_on, scan_start_time, status)
+									(scan_type, created_on, scan_start_time, status, user_id)
 								values
-									($1, current_timestamp, current_timestamp, 'Running') RETURNING id`
+									($1, current_timestamp, current_timestamp, 'Running', $2) RETURNING id`
 	lastInsertId := 0
-	err := db.QueryRow(insert_row, scanType).Scan(&lastInsertId)
+	err := db.QueryRow(insert_row, scanType, userID).Scan(&lastInsertId)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert scan for type %s: %w", scanType, err)
 	}
@@ -361,56 +362,60 @@ func SaveStatToDb(scanId int, scanData <-chan FileData) {
 	}
 }
 
-func SaveOAuthToken(accessToken string, refreshToken string, displayName string, clientKey string, scope string, expiresIn int16, tokenType string) error {
+// SaveOAuthToken stores a Google account linked by userID.
+func SaveOAuthToken(userID int64, accessToken string, refreshToken string, displayName string, clientKey string, scope string, expiresIn int16, tokenType string) error {
 	insert_row := `insert into privatetokens
-			(access_token, refresh_token, display_name, client_key, scope, expires_in, token_type, created_on)
+			(access_token, refresh_token, display_name, client_key, scope, expires_in, token_type, created_on, user_id)
 		values
-			($1, $2, $3, $4, $5, $6, $7, current_timestamp) RETURNING id`
-	_, err := db.Exec(insert_row, accessToken, refreshToken, displayName, clientKey, scope, expiresIn, tokenType)
+			($1, $2, $3, $4, $5, $6, $7, current_timestamp, $8) RETURNING id`
+	_, err := db.Exec(insert_row, accessToken, refreshToken, displayName, clientKey, scope, expiresIn, tokenType, userID)
 	if err != nil {
 		return fmt.Errorf("failed to save OAuth token for client %s: %w", clientKey, err)
 	}
 	return nil
 }
 
-func GetOAuthToken(clientKey string) (PrivateToken, error) {
+// GetOAuthToken returns a Google account userID linked. Another user's
+// account is not found.
+func GetOAuthToken(userID int64, clientKey string) (PrivateToken, error) {
 	read_row :=
 		`select id, access_token, refresh_token, display_name, client_key, created_on, scope, expires_in, token_type
 		FROM privatetokens
-		WHERE client_key = $1`
+		WHERE client_key = $1 AND user_id = $2`
 	tokenData := PrivateToken{}
-	err := db.Get(&tokenData, read_row, clientKey)
+	err := db.Get(&tokenData, read_row, clientKey, userID)
 	if err != nil {
 		return PrivateToken{}, fmt.Errorf("failed to get OAuth token for client %s: %w", clientKey, err)
 	}
 	return tokenData, nil
 }
 
-func GetRequestAccountsFromDb() ([]Account, error) {
+func GetRequestAccountsFromDb(userID int64) ([]Account, error) {
 	read_row :=
 		`select distinct display_name, client_key from privatetokens p
-		`
+		where user_id = $1`
 	accounts := []Account{}
-	err := db.Select(&accounts, read_row)
+	err := db.Select(&accounts, read_row, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get request accounts: %w", err)
 	}
 	return accounts, nil
 }
 
-func GetAccountsFromDb() ([]string, error) {
-	read_row := `select distinct name  from scanmetadata
-			where name is not null
+func GetAccountsFromDb(userID int64) ([]string, error) {
+	read_row := `select distinct sm.name from scanmetadata sm
+			join scans s on s.id = sm.scan_id
+			where sm.name is not null and s.user_id = $1
 			order by 1 `
 	accounts := []string{}
-	err := db.Select(&accounts, read_row)
+	err := db.Select(&accounts, read_row, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get accounts: %w", err)
 	}
 	return accounts, nil
 }
 
-func GetScanRequestsFromDb(accountKey string) ([]ScanRequests, error) {
+func GetScanRequestsFromDb(userID int64, accountKey string) ([]ScanRequests, error) {
 	if len(strings.TrimSpace(accountKey)) == 0 {
 		return []ScanRequests{}, nil
 	}
@@ -421,21 +426,21 @@ func GetScanRequestsFromDb(accountKey string) ([]ScanRequests, error) {
 			COALESCE(s.status, 'Completed') as status
 			from scans s
 			join scanmetadata sm on sm.scan_id = s.id
-			where sm.name = $1
+			where sm.name = $1 and s.user_id = $2
 			group by sm.name, sm.search_filter, s.id, s.scan_start_time, s.scan_type, s.status
 			order by s.id desc`
 	scanRequests := []ScanRequests{}
-	err := db.Select(&scanRequests, read_row, accountKey)
+	err := db.Select(&scanRequests, read_row, accountKey, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get scan requests for account %s: %w", accountKey, err)
 	}
 	return scanRequests, nil
 }
 
-func GetScansFromDb(pageNo int) ([]Scan, int, error) {
+func GetScansFromDb(userID int64, pageNo int) ([]Scan, int, error) {
 	limit := 10
 	offset := limit * (pageNo - 1)
-	count_rows := `select count(*) from scans`
+	count_rows := `select count(*) from scans where user_id = $1`
 	read_row :=
 		`select S.id, scan_type,
 		 created_on,
@@ -444,15 +449,16 @@ func GetScansFromDb(pageNo int) ([]Scan, int, error) {
 		 date_trunc('millisecond', COALESCE(scan_end_time,current_timestamp)-scan_start_time) as duration
 	   from scans S LEFT JOIN scanmetadata SM
 		 ON S.id = SM.scan_id
+		 where S.user_id = $3
 		 order by id limit $1 OFFSET $2
 		`
 	scans := []Scan{}
 	var count int
-	err := db.Select(&scans, read_row, limit, offset)
+	err := db.Select(&scans, read_row, limit, offset, userID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get scans for page %d: %w", pageNo, err)
 	}
-	err = db.Get(&count, count_rows)
+	err = db.Get(&count, count_rows, userID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get scan count: %w", err)
 	}
@@ -657,7 +663,10 @@ func migrateDB() error {
 	if err := migrateDropCompletedAt(); err != nil {
 		return err
 	}
-	return migrateScanTimesToTimestamptz()
+	if err := migrateScanTimesToTimestamptz(); err != nil {
+		return err
+	}
+	return migrateUsers()
 }
 
 // migrateDropCompletedAt drops scans.completed_at. Nothing ever set it, so

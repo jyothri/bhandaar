@@ -139,9 +139,14 @@ graph TB
 
 #### API Endpoints (`web/api.go`)
 
+Every route but health and login/logout needs a logged-in user (see [Web authentication](#web-authentication)), and only shows that user's scans and linked accounts; another user's scan answers 404.
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/health` | GET | Health check |
+| `/api/auth/login` | POST | Log in; sets the session cookie |
+| `/api/auth/logout` | POST | End the session |
+| `/api/auth/me` | GET | The logged-in user |
 | `/api/scans` | POST | Submit scan request |
 | `/api/scans` | GET | List all scans (paginated) |
 | `/api/scans/requests/{account_key}` | GET | Get scan requests for account |
@@ -159,7 +164,13 @@ graph TB
 
 #### Server-Sent Events (`web/sse.go`)
 - `/events` - Real-time scan progress updates
-- Broadcasts progress for Gmail scans
+- Broadcasts progress for Gmail scans, to the scan's owner only
+
+#### Web authentication
+
+`be` has no users of its own: it logs web users in against `agentserver`'s `agent_users` table in the shared database (argon2id hashes, verified by `be/auth`), and shares its login lockout (`agent_login_failures`: 10 failures per username and client IP in 15 minutes). Users are managed only with `agentserver user …`; `user disable` also ends web sessions at once. A login creates a row in `web_sessions` (keyed on sha256 of a random token) and sets the `bhandaar_session` cookie (HttpOnly, SameSite=Lax, Secure when the UI is on https), valid for 30 days after last use. Requests that change state must come from a `-frontend_url` origin, since SameSite=Lax still lets sibling subdomains send the cookie. nginx no longer asks for basic auth.
+
+`scans.user_id` and `privatetokens.user_id` reference `agent_users`. Rows from before users are given to `-legacy_owner` (default `jyothri`) at startup, once that user exists.
 
 #### Collection Services (`collect/`)
 
@@ -214,6 +225,9 @@ scans (main scan records)
     └── videometadata (video-specific metadata)
 
 privatetokens (OAuth refresh tokens)
+web_sessions (web login sessions)
+
+scans, privatetokens and web_sessions have a user_id → agent_users (agentserver's)
 ```
 
 **Auto-Migration:**
@@ -223,7 +237,7 @@ privatetokens (OAuth refresh tokens)
 
 ### 4. Agent sync service (`agent/server/`, Go)
 
-A separate service for `driveagent` (the local drive-comparison agent in `agent/client/`), designed in [`specs/remote-sync.md`](specs/remote-sync.md). It shares the Postgres database but only uses its own `agent_*` tables, created by its own numbered migrations (`agentserver_schema_migrations`); `be` and `agentserver` never call each other. nginx routes `/agent/` to it on port 8091, without basic auth.
+A separate service for `driveagent` (the local drive-comparison agent in `agent/client/`), designed in [`specs/remote-sync.md`](specs/remote-sync.md). It shares the Postgres database but only uses its own `agent_*` tables, created by its own numbered migrations (`agentserver_schema_migrations`); `be` and `agentserver` never call each other, but `be` reads its users (see [Web authentication](#web-authentication)). nginx routes `/agent/` to it on port 8091.
 
 Implemented (rollout steps 1 and 4): `GET /agent/health`, `POST /agent/v1/handshake` (version negotiation), username/password login with JWT access tokens and rotating refresh tokens, `PUT`/`GET /agent/v1/drives` (a drive's upload stream, acked version ranges, and linking copies of one physical drive by filesystem ID and serial), and `POST /agent/v1/drives/{id}/changes` (gzip JSON batches of the agent's change feed, applied with higher-version-wins and tombstones, so batches can arrive in any order). Plus the `agentserver user` admin commands and hourly housekeeping. Uploaded data lives in `agent_files`, `agent_dir_listings` and `agent_scan_runs`, keyed on a hash of the raw path. On the agent side, every `driveagent scan` uploads what it writes as it goes (step 6), and `driveagent sync` (step 5) uploads the rest of each drive's pending change feed from `state.db`. Data flow: `driveagent` → nginx `/agent/` → `agentserver` → Postgres.
 

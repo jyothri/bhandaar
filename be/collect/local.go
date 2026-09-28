@@ -14,9 +14,9 @@ import (
 	"github.com/jyothri/hdd/db"
 )
 
-func LocalDrive(localScan LocalScan) (int, error) {
+func LocalDrive(localScan LocalScan, userID int64) (int, error) {
 	// Phase 1: Create scan record (synchronous)
-	scanId, err := db.LogStartScan("local")
+	scanId, err := db.LogStartScan("local", userID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to start local scan (path=%s): %w", localScan.Path, err)
 	}

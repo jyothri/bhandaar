@@ -1,7 +1,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderRoute, stubEventSource } from "./renderRoute";
+import { loggedIn, renderRoute, stubEventSource } from "./renderRoute";
 
 // The request form, rendered through the real router with the backend faked.
 
@@ -20,6 +20,9 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (input, init) => {
     const url = new URL(String(input));
+    if (url.pathname === "/api/auth/me") {
+      return loggedIn();
+    }
     if (url.pathname === "/api/accounts") {
       return json(200, [{ clientKey: "k1", displayName: "alice" }]);
     }

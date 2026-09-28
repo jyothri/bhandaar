@@ -1,6 +1,7 @@
 // TanStack Query keys, defined in one place so that invalidation can't
 // drift from the keys the queries actually use.
 export const queryKeys = {
+  me: ["me"] as const,
   accounts: ["accounts"] as const,
   scannedAccounts: ["scannedAccounts"] as const,
   // Prefix of every scanRequests(accountKey) key, for invalidating them all.

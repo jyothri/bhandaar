@@ -175,6 +175,8 @@ An hourly goroutine (first run 5 minutes after start), and `agentserver housekee
 
 ## Admin CLI
 
+These users also log in to the web UI: `be` reads `agent_users` and shares the lockout table (see [`architecture.md`](../architecture.md#web-authentication)). A disabled user's web sessions end at once; `passwd` doesn't end them.
+
 Inside the container (`docker exec -it <container> …`):
 - `agentserver user add --username NAME`, `user passwd --username NAME`: the password is prompted twice with no echo, at least 12 characters.
 - `agentserver user disable --username NAME`: also revokes the user's refresh tokens.

@@ -21,6 +21,9 @@ func sse(r *mux.Router) {
 
 func scanProgressHandler(w http.ResponseWriter, r *http.Request) {
 	setHeaders(w)
+	userID := currentUser(r).ID
+	// Scans' owners never change, so each scan is looked up once.
+	owned := map[int]bool{}
 	subscriber, unsubscribe := notification.SubscribeAll()
 	defer unsubscribe()
 	rc := http.NewResponseController(w)
@@ -41,6 +44,18 @@ func scanProgressHandler(w http.ResponseWriter, r *http.Request) {
 				}
 				rc.Flush()
 				return
+			}
+			isOwn, seen := owned[progress.ScanId]
+			if !seen {
+				var err error
+				if isOwn, err = scanOwnedBy(progress.ScanId, userID); err != nil {
+					slog.Warn("[scan events] Unable to check scan owner", "scan_id", progress.ScanId, "error", err)
+					continue
+				}
+				owned[progress.ScanId] = isOwn
+			}
+			if !isOwn {
+				continue
 			}
 			slog.Info(fmt.Sprintf("[scan events] Got progress notification: %v", progress))
 			serializedBody, err := json.Marshal(progress)
