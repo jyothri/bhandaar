@@ -6,6 +6,7 @@ import {
   BrowseSource,
   FolderPage,
 } from "../types/browse";
+import { PhotosPick } from "../types/photos";
 import { MessagePage, ScanDataPage, ScanSummary } from "../types/results";
 import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 
@@ -110,6 +111,29 @@ export const requestScan = (
     },
     body: JSON.stringify(scanData),
   });
+
+/** Starts picking in Google Photos for a linked account. */
+export const startPhotosPick = (clientKey: string): Promise<PhotosPick> =>
+  fetchJson("/api/photos/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientKey }),
+  });
+
+/** The user's pick that is waiting or scanning, if any. */
+export const getActivePhotosPick = (): Promise<PhotosPick | null> =>
+  fetchJson("/api/photos/sessions");
+
+/** A pick's state, and its scan once picked. */
+export const getPhotosPick = (sessionKey: string): Promise<PhotosPick> =>
+  fetchJson(`/api/photos/sessions/${encodeURIComponent(sessionKey)}`);
+
+/** Cancels a pick the user hasn't picked in yet. */
+export const cancelPhotosPick = async (sessionKey: string): Promise<void> => {
+  await fetchBackend(`/api/photos/sessions/${encodeURIComponent(sessionKey)}`, {
+    method: "DELETE",
+  });
+};
 
 /**
  * Function to get list of accounts.

@@ -175,6 +175,21 @@ func GetPickerSession(userID int64, sessionKey string) (PickerSession, error) {
 	return s, nil
 }
 
+// ActivePickerSession returns userID's session that is waiting or
+// scanning, or ErrNotFound.
+func ActivePickerSession(userID int64) (PickerSession, error) {
+	var s PickerSession
+	err := db.Get(&s, `SELECT session_key, picker_id, user_id, client_key, picker_uri, state, pick_by, scan_id
+		FROM photos_picker_sessions WHERE user_id = $1 AND state IN ('waiting', 'scanning')`, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PickerSession{}, ErrNotFound
+	}
+	if err != nil {
+		return PickerSession{}, fmt.Errorf("failed to get the active Photos picking session: %w", err)
+	}
+	return s, nil
+}
+
 // MovePickerSession moves session sessionKey from state from to state to,
 // and reports whether it was in state from. scanId, when not 0, is
 // recorded too.

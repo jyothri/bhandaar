@@ -52,7 +52,7 @@ The application consists of:
 
 - **src/routes/**: TanStack Router route components
   - `index.tsx`: Browse, the landing page: pick a Google account (then Google Drive or Gmail) or an agent drive, and see a collapsible folder tree (`components/FolderTree.tsx`, one folder loaded at a time) or the account's messages; `?source=google:<client_key>|agent:<id>&service=&folder=`
-  - `request.tsx`: Scan request form for Gmail and Google Drive (`?type=gmail|drive`): account linking per service (`googleLink.ts`), the Drive query builder (`driveQuery.ts`), and live progress
+  - `request.tsx`: Scan request form for Gmail, Google Drive and Google Photos (`?type=gmail|drive|photos`; Photos picks in Google Photos, `components/PhotosPick.tsx`): account linking per service (`googleLink.ts`), the Drive query builder (`driveQuery.ts`), and live progress
   - `requests.tsx`: List view of scan requests by account (`?account=<client_key>`); each scan ID links to its results. It and a scan's page show a trail under the nav tabs (`components/Breadcrumbs.tsx`): Request History › account › Scan N
   - `scans.$scanId.tsx`: One scan's results: summary (with a link to Browse the account), then a page of files and folders (Drive, local) or new messages (Gmail)
   - `oauth/glink.tsx`: OAuth callback handler
@@ -255,8 +255,9 @@ All but health and login/logout need the session cookie.
 - `GET /api/scans/{scan_id}/summary` - A scan's details and totals (files or new messages, bytes, folders)
 - `GET /api/scans/{scan_id}` - A page of a scan's files and folders, in tree order
 - `GET /api/gmaildata/{scan_id}` - Get Gmail scan results
-- `POST /api/photos/sessions` - `{clientKey}` → `{sessionKey, pickerUri, pickBy}`: starts picking in Google Photos (one pick at a time per user); the scan starts once the user has picked
-- `GET /api/photos/sessions/{session_key}` - `{state, scanId?, pickBy}`, `state` one of `waiting`, `scanning`, `done`, `expired`, `cancelled`
+- `POST /api/photos/sessions` - `{clientKey}` → the pick (as below): starts picking in Google Photos (one pick at a time per user); the scan starts once the user has picked
+- `GET /api/photos/sessions` - The user's pick that is waiting or scanning, or `null`
+- `GET /api/photos/sessions/{session_key}` - `{sessionKey, pickerUri, state, scanId?, pickBy}`, `state` one of `waiting`, `scanning`, `done`, `expired`, `cancelled`
 - `DELETE /api/photos/sessions/{session_key}` - Cancels a waiting pick
 - `GET /api/photos/{scan_id}?page=` - A page (10) of a Photos scan's picked items
 - `GET /api/accounts` - List linked Google accounts, with the `services` each has granted (`gmail`, `drive`)

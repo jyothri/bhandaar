@@ -21,11 +21,11 @@ import (
 func photosRouter(t *testing.T, start func(int64, string) (db.PickerSession, error)) *mux.Router {
 	t.Helper()
 	fakeSessions(t)
-	originalAccount, originalStart, originalCancel, originalSession, originalItems, originalOwner :=
-		accountFor, startPhotosPick, cancelPhotosPick, pickerSession, pickedItems, scanOwnedBy
+	originalAccount, originalStart, originalCancel, originalSession, originalActive, originalItems, originalOwner :=
+		accountFor, startPhotosPick, cancelPhotosPick, pickerSession, activePick, pickedItems, scanOwnedBy
 	t.Cleanup(func() {
-		accountFor, startPhotosPick, cancelPhotosPick, pickerSession, pickedItems, scanOwnedBy =
-			originalAccount, originalStart, originalCancel, originalSession, originalItems, originalOwner
+		accountFor, startPhotosPick, cancelPhotosPick, pickerSession, activePick, pickedItems, scanOwnedBy =
+			originalAccount, originalStart, originalCancel, originalSession, originalActive, originalItems, originalOwner
 	})
 	accountFor = func(userID int64, clientKey string) (db.PrivateToken, error) {
 		scopes := map[string]string{
@@ -51,8 +51,11 @@ func photosRouter(t *testing.T, start func(int64, string) (db.PickerSession, err
 		if userID != 7 || key != "k1" {
 			return db.PickerSession{}, db.ErrNotFound
 		}
-		return db.PickerSession{SessionKey: "k1", PickerId: "secret-picker-id", State: db.PickScanning,
+		return db.PickerSession{SessionKey: "k1", PickerId: "secret-picker-id", PickerUri: "https://photos.google.com/p/1", State: db.PickScanning,
 			ScanId: sql.NullInt64{Int64: 42, Valid: true}, PickBy: time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)}, nil
+	}
+	activePick = func(userID int64) (db.PickerSession, error) {
+		return pickerSession(userID, "k1")
 	}
 	pickedItems = func(scanId int, page int) (db.PickedItemPage, error) {
 		return db.PickedItemPage{Items: []db.PickedItem{{MediaItemId: "m1"}}, Page: page, Total: 1}, nil
@@ -120,9 +123,18 @@ func TestStartPhotosPickOneAtATime(t *testing.T) {
 func TestPhotosPickState(t *testing.T) {
 	r := photosRouter(t, nil)
 	rec := serve(r, withSession(httptest.NewRequest(http.MethodGet, "/api/photos/sessions/k1", nil), "good"))
-	want := `{"state":"scanning","scanId":42,"pickBy":"2026-09-28T12:00:00Z"}`
+	want := `{"sessionKey":"k1","pickerUri":"https://photos.google.com/p/1","state":"scanning","scanId":42,"pickBy":"2026-09-28T12:00:00Z"}`
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != want {
 		t.Errorf("GET k1: %d %s, want %s", rec.Code, rec.Body, want)
+	}
+	rec = serve(r, withSession(httptest.NewRequest(http.MethodGet, "/api/photos/sessions", nil), "good"))
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != want {
+		t.Errorf("GET the active pick: %d %s, want %s", rec.Code, rec.Body, want)
+	}
+	activePick = func(int64) (db.PickerSession, error) { return db.PickerSession{}, db.ErrNotFound }
+	rec = serve(r, withSession(httptest.NewRequest(http.MethodGet, "/api/photos/sessions", nil), "good"))
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "null" {
+		t.Errorf("GET the active pick, with none: %d %s, want null", rec.Code, rec.Body)
 	}
 	rec = serve(r, withSession(httptest.NewRequest(http.MethodGet, "/api/photos/sessions/other", nil), "good"))
 	if rec.Code != http.StatusNotFound {

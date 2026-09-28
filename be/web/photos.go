@@ -18,6 +18,7 @@ import (
 
 func photosRoutes(api *mux.Router) {
 	api.HandleFunc("/photos/sessions", StartPhotosPickHandler).Methods("POST")
+	api.HandleFunc("/photos/sessions", ActivePhotosPickHandler).Methods("GET")
 	api.HandleFunc("/photos/sessions/{session_key}", PhotosPickHandler).Methods("GET")
 	api.HandleFunc("/photos/sessions/{session_key}", CancelPhotosPickHandler).Methods("DELETE")
 	api.HandleFunc("/photos/{scan_id}", PickedItemsHandler).Methods("GET")
@@ -28,6 +29,7 @@ var (
 	startPhotosPick  = collect.StartPhotosPick
 	cancelPhotosPick = collect.CancelPhotosPick
 	pickerSession    = db.GetPickerSession
+	activePick       = db.ActivePickerSession
 	pickedItems      = db.PickedItems
 )
 
@@ -35,17 +37,23 @@ type startPhotosPickRequest struct {
 	ClientKey string `json:"clientKey"`
 }
 
-type startPhotosPickResponse struct {
+// photosPickResponse is a picking session as the UI sees it; Google's
+// session ID stays here.
+type photosPickResponse struct {
 	SessionKey string `json:"sessionKey"`
 	// Where the user picks; the UI appends "/autoclose".
 	PickerUri string    `json:"pickerUri"`
+	State     string    `json:"state"`
+	ScanId    *int64    `json:"scanId,omitempty"`
 	PickBy    time.Time `json:"pickBy"`
 }
 
-type photosPickResponse struct {
-	State  string    `json:"state"`
-	ScanId *int64    `json:"scanId,omitempty"`
-	PickBy time.Time `json:"pickBy"`
+func pickResponse(s db.PickerSession) photosPickResponse {
+	body := photosPickResponse{SessionKey: s.SessionKey, PickerUri: s.PickerUri, State: s.State, PickBy: s.PickBy}
+	if s.ScanId.Valid {
+		body.ScanId = &s.ScanId.Int64
+	}
+	return body
 }
 
 // StartPhotosPickHandler starts a picking session for one of the user's
@@ -75,8 +83,23 @@ func StartPhotosPickHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to start picking in Google Photos", http.StatusBadGateway)
 		return
 	}
-	writeJSONResponse(w, startPhotosPickResponse{SessionKey: session.SessionKey, PickerUri: session.PickerUri,
-		PickBy: session.PickBy}, http.StatusOK)
+	writeJSONResponse(w, pickResponse(session), http.StatusOK)
+}
+
+// ActivePhotosPickHandler answers the user's pick that is waiting or
+// scanning, or null, so a reloaded page can pick it up again.
+func ActivePhotosPickHandler(w http.ResponseWriter, r *http.Request) {
+	session, err := activePick(currentUser(r).ID)
+	if errors.Is(err, db.ErrNotFound) {
+		writeJSONResponse(w, nil, http.StatusOK)
+		return
+	}
+	if err != nil {
+		slog.Error("Failed to get the active Photos pick", "error", err)
+		http.Error(w, "Failed to look up the pick", http.StatusInternalServerError)
+		return
+	}
+	writeJSONResponse(w, pickResponse(session), http.StatusOK)
 }
 
 // PhotosPickHandler answers a picking session's state, and its scan once
@@ -92,11 +115,7 @@ func PhotosPickHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to look up the pick", http.StatusInternalServerError)
 		return
 	}
-	body := photosPickResponse{State: session.State, PickBy: session.PickBy}
-	if session.ScanId.Valid {
-		body.ScanId = &session.ScanId.Int64
-	}
-	writeJSONResponse(w, body, http.StatusOK)
+	writeJSONResponse(w, pickResponse(session), http.StatusOK)
 }
 
 // CancelPhotosPickHandler cancels a picking session the user hasn't picked

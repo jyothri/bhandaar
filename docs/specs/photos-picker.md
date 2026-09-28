@@ -268,7 +268,10 @@ One PR for the whole feature (branch `photos-picker`), with a commit per step. E
    - `POST /api/photos/sessions` answers 409 while a pick is active, and 502 when Google refuses the session. `DELETE` answers 204, or 409 once the pick is past `waiting`.
    - `GET /api/photos/{scan_id}` pages 10 items at a time, like the other results routes. `GET /api/photos/albums` now answers 400 ("albums" isn't a scan ID).
    - A failed poll is retried until 10 fail in a row; a 4xx from `sessions.get` ends the pick as `expired`.
-4. **Request page:** the Photos tab, picking, waiting, progress, and the UI tests.
+4. **Request page** (done): the Photos tab, picking, waiting, progress, and the UI tests. Where it differs from the design above:
+   - `GET /api/photos/sessions` answers the user's pick that is `waiting` or `scanning` (or `null`), and every pick route answers the same shape, `{sessionKey, pickerUri, state, scanId?, pickBy}`. The page takes up a pick already under way, so a reload, or another tab, doesn't leave the user stuck behind the one-pick-at-a-time rule until it expires.
+   - The Photos panel is `ui/src/components/PhotosPick.tsx`. It checks a pick's state every 3 s while it's `waiting` or `scanning`, and replaces the Submit row. "Open Google Photos" stays as a link while waiting, for a closed or blocked window. A finished pick shows its outcome next to the **Pick in Google Photos** button, which starts the next pick.
+   - The popup opens blank on the click, then goes to `pickerUri/autoclose` with `opener` cleared.
 5. **Results view and Browse:** the results view for both types, the Browse route and totals, the Photos tab enabled, and the tests.
 6. **Docs:** `architecture.md` (Photos back in the diagrams, routes, scopes and tables), `README.md`, `CLAUDE.md` (routes, `photos.go`, tests), and this spec's status to implemented, with an "As built" section. Then move it to `docs/archive/`, and move 7.15 to `codebase-review-history.md` with a change-log row.
 

@@ -57,6 +57,12 @@ func TestPickerSessions(t *testing.T) {
 	if active, err := HasActivePick(bob); err != nil || active {
 		t.Errorf("HasActivePick(bob) = %v, %v; want false", active, err)
 	}
+	if s, err := ActivePickerSession(alice); err != nil || s.SessionKey != "k1" {
+		t.Errorf("ActivePickerSession(alice) = %+v, %v; want k1", s, err)
+	}
+	if _, err := ActivePickerSession(bob); !errors.Is(err, ErrNotFound) {
+		t.Errorf("ActivePickerSession(bob) err = %v, want ErrNotFound", err)
+	}
 	if _, err := GetPickerSession(bob, "k1"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("GetPickerSession(bob, alice's) err = %v, want ErrNotFound", err)
 	}
