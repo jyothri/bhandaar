@@ -2,7 +2,7 @@ import { ReactNode } from "react";
 import Icon from "./Icon";
 
 /**
- * Previous · Page n of m · Next. link renders a link to a page, with the
+ * Previous · Page n of m · Next, above the table it pages. link renders a link to a page, with the
  * given content and class; pages out of range show disabled.
  */
 export default function Pager({
@@ -27,7 +27,7 @@ export default function Pager({
   return (
     <nav
       aria-label="Pages"
-      className="flex items-center justify-between gap-2 pt-3 sm:justify-end"
+      className="flex items-center justify-between gap-2 pb-3 sm:justify-end"
     >
       {step(
         page - 1,

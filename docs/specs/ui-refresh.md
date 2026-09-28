@@ -66,7 +66,7 @@ In `ui/src/components/ui/`, one file each, styled with the tokens:
 | `Switch` | the Mask switch | the existing `role="switch"` look, generalised |
 | `Badge` | status text | Completed, Running, Failed, Interrupted, "linked copy" |
 | `Table` | `Table.tsx` | compact cells (`px-3 py-2`), sticky header, right-aligned numbers; below `sm` each row becomes a stacked card (see [Phones](#phones)) |
-| `Pager` | the two hand-written pagers | Previous · Page n of m · Next |
+| `Pager` | the two hand-written pagers | Previous · Page n of m · Next, above the table it pages |
 | `EmptyState`, `ErrorState`, `Skeleton` | "Loading…" and red `<p>`s | one message style; skeleton rows while a table or tree loads |
 | `Icon` | — | inline SVGs, `currentColor`, 16 and 20 px; the set in [File-type icons](#file-type-icons) plus a few for the UI (chevron, external link, menu, user, check, warning) |
 
@@ -115,7 +115,7 @@ A slim top bar on `surface`, 56 px high, with a bottom border, above a centred c
   - "Updating totals…" becomes a `warning`-coloured badge on the card.
 - **Service tabs:** `Tabs`, under the source picker and above the summary card, each with its totals as a sub-line; Photos disabled with "Soon".
 - **Tree:** in a `Card`. Rows are 36 px high, 40 px on touch, with a hover background. Each row: chevron (folders), icon, name, size bar, size, then file count (folders) or modified date (files). "More" is a secondary `Button` under the rows. The Drive ↗ link becomes the external-link icon, shown on row hover and always on touch.
-- **Gmail:** the list in a `Card`, with the sort as a two-item segmented control and the Mask `Switch` in the card's header, and a `Pager` below.
+- **Gmail:** the list in a `Card`, with the sort as a two-item segmented control and the Mask `Switch` in the card's header, and a `Pager` above the table.
 
 ### Request
 
@@ -131,13 +131,13 @@ A slim top bar on `surface`, 56 px high, with a bottom border, above a centred c
 
 ### Request History
 
-- The account list becomes a list of `Card`s or a `Select` on phones; the chosen account's scans are a `Table`: Scan (link), Type, Filter or folder, Started, Duration, Status (`Badge`).
-- Running scans show a spinner in their Status badge; polling is unchanged.
+- A "Request History" heading, then a `Card` with the account `Select`, labelled "Select an account" beside it (above it on phones), so the label and the dropdown share a row.
+- The chosen account's scans in a "Scans" `Card`, as a `Table`: Scan (a link; "Scan N" as the card title on phones), Type, Filter (monospace, with the folder for folder scans), Started, Duration, and Status as a `Badge` (a spinner while Running). The account's masked name, already chosen above, is no longer a column. Polling is unchanged.
 
 ### A scan's results
 
-- The summary becomes a `Card`: title "Scan N · Google Drive", the fields as a two-column definition list (one column on phones), status as a `Badge`, and "Browse this account's …" as a secondary `Button`.
-- Files and messages: `Table` and `Pager`, as in Browse; Drive rows get file-type icons. Messages keep the Mask switch.
+- The summary is a `Card` titled "Scan N · Google Drive", with the status `Badge` and "Browse this account's …" as a small secondary button in its header, and the fields as a definition list (one column on phones; queries in monospace).
+- Files and folders, or new messages, in a second `Card`: `Pager` above a `Table`. Drive and local rows get file-type icons (folders in `accent`), with Name as the title on phones. Messages keep the Mask switch in their card's header.
 
 ### Login
 

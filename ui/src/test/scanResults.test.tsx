@@ -116,7 +116,7 @@ describe("scan results", () => {
     renderRoute("/scans/11");
 
     expect(
-      await screen.findByRole("heading", { name: "Scan 11: Google Drive" })
+      await screen.findByRole("heading", { name: "Scan 11 · Google Drive" })
     ).toBeVisible();
     expect(
       screen.getByText("My Drive/from Apple Mac (0B8F) and subfolders")

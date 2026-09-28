@@ -663,6 +663,19 @@ function Messages({
         <p className="text-sm text-muted">Loading messages…</p>
       ) : (
         <>
+          <Pager
+            page={page}
+            pages={pages}
+            link={(to, children, className) => (
+              <Link
+                from={Route.fullPath}
+                search={(prev) => ({ ...prev, page: to > 1 ? to : undefined })}
+                className={className}
+              >
+                {children}
+              </Link>
+            )}
+          />
           <Table
             rowKey={(m) => m.message_metadata_id}
             rows={data.messages}
@@ -716,19 +729,6 @@ function Messages({
                 ),
               },
             ]}
-          />
-          <Pager
-            page={page}
-            pages={pages}
-            link={(to, children, className) => (
-              <Link
-                from={Route.fullPath}
-                search={(prev) => ({ ...prev, page: to > 1 ? to : undefined })}
-                className={className}
-              >
-                {children}
-              </Link>
-            )}
           />
         </>
       )}
