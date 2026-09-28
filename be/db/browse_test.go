@@ -183,6 +183,12 @@ func TestAgentChildrenAndTotals(t *testing.T) {
 	if got := entries(t, page, err); !equal(got, want) || !page.Updating {
 		t.Errorf("root before the build = %v (updating %v), want %v", got, page.Updating, want)
 	}
+	if page.Totals != (FolderTotals{5, 355}) {
+		t.Errorf("root's own totals before the build = %+v, want 5 files, 355 bytes", page.Totals)
+	}
+	if page, _ := AgentChildren(drive, "Photos", 1); page.Totals != (FolderTotals{2, 300}) {
+		t.Errorf("Photos' own totals before the build = %+v", page.Totals)
+	}
 
 	checkTotals(context.Background())
 	page, err = AgentChildren(drive, "", 1)
@@ -192,6 +198,9 @@ func TestAgentChildrenAndTotals(t *testing.T) {
 	page, err = AgentChildren(drive, "Photos", 1)
 	if got := entries(t, page, err); !equal(got, []string{"2024/ 1 200", "a.jpg 100"}) {
 		t.Errorf("Photos = %v", got)
+	}
+	if page.Totals != (FolderTotals{2, 300}) {
+		t.Errorf("Photos' own totals = %+v", page.Totals)
 	}
 	if len(page.Path) != 1 || page.Path[0].Id != "Photos" {
 		t.Errorf("Photos path = %+v", page.Path)
@@ -305,13 +314,16 @@ func TestDriveChildrenAndTotals(t *testing.T) {
 	if got := entries(t, page, err); !equal(got, []string{"My Drive/ 3 31", "Shared with me/ 1 7"}) || page.Updating {
 		t.Errorf("roots = %v (updating %v)", got, page.Updating)
 	}
+	if page.Totals != (FolderTotals{4, 38}) {
+		t.Errorf("the roots' totals = %+v, want the account's", page.Totals)
+	}
 	page, err = DriveChildren("k1", myDrive, 1)
 	if got := entries(t, page, err); !equal(got, []string{"A/ 2 30", "Empty/ 0 0", "top 1"}) {
 		t.Errorf("My Drive = %v", got)
 	}
 	page, err = DriveChildren("k1", "B", 1)
-	if got := entries(t, page, err); !equal(got, []string{"b1 20"}) {
-		t.Errorf("B = %v", got)
+	if got := entries(t, page, err); !equal(got, []string{"b1 20"}) || page.Totals != (FolderTotals{1, 20}) {
+		t.Errorf("B = %v, totals %+v", got, page.Totals)
 	}
 	var path []string
 	for _, p := range page.Path {
@@ -321,8 +333,8 @@ func TestDriveChildrenAndTotals(t *testing.T) {
 		t.Errorf("B's path = %v", path)
 	}
 	page, err = DriveChildren("k1", SharedWithMe, 1)
-	if got := entries(t, page, err); !equal(got, []string{"s1 7"}) {
-		t.Errorf("Shared with me = %v", got)
+	if got := entries(t, page, err); !equal(got, []string{"s1 7"}) || page.Totals != (FolderTotals{1, 7}) {
+		t.Errorf("Shared with me = %v, totals %+v", got, page.Totals)
 	}
 	if _, err := DriveChildren("k1", "a1", 1); err != ErrNotFound {
 		t.Errorf("a file as a folder: err = %v, want ErrNotFound", err)
@@ -333,8 +345,9 @@ func TestDriveChildrenAndTotals(t *testing.T) {
 		t.Fatal(err)
 	}
 	page, err = DriveChildren("k1", myDrive, 1)
-	if got := entries(t, page, err); !equal(got, []string{"A/ 2 30", "Empty/ 0 0", "top 1"}) || !page.Updating {
-		t.Errorf("My Drive, live = %v (updating %v)", got, page.Updating)
+	if got := entries(t, page, err); !equal(got, []string{"A/ 2 30", "Empty/ 0 0", "top 1"}) || !page.Updating ||
+		page.Totals != (FolderTotals{3, 31}) {
+		t.Errorf("My Drive, live = %v (updating %v, totals %+v)", got, page.Updating, page.Totals)
 	}
 	checkTotals(context.Background())
 	if state, _ := getTotalsState(driveSource("k1")); !state.Built {

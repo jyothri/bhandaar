@@ -1,5 +1,28 @@
 @import "tailwindcss";
 
+/* Design tokens (docs/archive/ui-refresh.md, "Design tokens"). Components
+   use these, never raw palette colours, so each theme is set here once.
+   Dark values follow the system theme, below. */
+@theme {
+  --color-canvas: var(--color-gray-50);
+  --color-surface: var(--color-white);
+  --color-surface-muted: var(--color-gray-100);
+  --color-line: var(--color-gray-200);
+  --color-fg: var(--color-gray-900);
+  --color-muted: var(--color-gray-500);
+  /* Links, selection, focus rings, size bars. */
+  --color-accent: var(--color-blue-600);
+  --color-accent-soft: var(--color-blue-50);
+  /* Filled primary buttons, white text on it in both themes. */
+  --color-accent-solid: var(--color-blue-600);
+  --color-accent-solid-hover: var(--color-blue-700);
+  --color-danger: var(--color-red-600);
+  /* Filled danger buttons, white text on it in both themes. */
+  --color-danger-solid: var(--color-red-600);
+  --color-success: var(--color-green-600);
+  --color-warning: var(--color-amber-600);
+}
+
 @layer base {
   /* Follow the system theme; native controls (date pickers, selects,
      checkboxes, progress bars) pick it up from color-scheme. */
@@ -7,7 +30,36 @@
     color-scheme: light dark;
   }
 
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-canvas: var(--color-gray-950);
+      --color-surface: var(--color-gray-900);
+      --color-surface-muted: var(--color-gray-800);
+      --color-line: var(--color-gray-800);
+      --color-fg: var(--color-gray-100);
+      --color-muted: var(--color-gray-400);
+      --color-accent: var(--color-blue-400);
+      --color-accent-soft: var(--color-blue-950);
+      --color-danger: var(--color-red-400);
+      --color-success: var(--color-green-400);
+      --color-warning: var(--color-amber-400);
+    }
+  }
+
   body {
-    @apply bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100;
+    @apply bg-canvas text-fg antialiased;
+  }
+
+  /* One focus ring for everything focusable. */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0s !important;
+    }
   }
 }

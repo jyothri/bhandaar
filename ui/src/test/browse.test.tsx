@@ -221,7 +221,7 @@ describe("Browse", () => {
         name: /Google Drive\s*504 files · 3.7 GB/,
       })
     ).toHaveAttribute("aria-selected", "true");
-    const myDrive = await screen.findByRole("link", { name: "My Drive/" });
+    const myDrive = await screen.findByRole("link", { name: "My Drive" });
     // Expanding My Drive loads it, inline.
     await user.click(
       myDrive.closest("summary")!.firstElementChild!.firstElementChild!
@@ -229,7 +229,9 @@ describe("Browse", () => {
     expect(
       await screen.findByRole("link", { name: "notes.txt" })
     ).toHaveAttribute("href", "https://drive.google.com/file/d/f1/view");
-    expect(screen.getByText("from Apple Mac/")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "from Apple Mac" })
+    ).toBeInTheDocument();
   });
 
   it("moves the trail to a folder whose name is clicked", async () => {
@@ -238,7 +240,7 @@ describe("Browse", () => {
       "/?source=google:JVVYZFCI0PaW&service=drive&folder=root-id"
     );
     await user.click(
-      await screen.findByRole("link", { name: "from Apple Mac/" })
+      await screen.findByRole("link", { name: "from Apple Mac" })
     );
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({ folder: "mac-id" })
@@ -300,8 +302,10 @@ describe("Browse", () => {
   it("shows an agent drive's totals, status and tree, a page at a time", async () => {
     const user = userEvent.setup();
     renderRoute("/?source=agent:1");
-    expect(await screen.findByText(/888,902 files/)).toBeInTheDocument();
-    expect(screen.getByText("updating totals…")).toBeInTheDocument();
+    expect(
+      await screen.findByText(/^888,902 files · Updated/)
+    ).toBeInTheDocument();
+    expect(screen.getByText("Updating totals…")).toBeInTheDocument();
     expect(
       await screen.findByText(/^Last scan .* · synced /)
     ).toBeInTheDocument();

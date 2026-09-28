@@ -1,6 +1,9 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { backend_url } from "../../api";
 import { consumeOAuthState } from "../../oauthState";
+import Card from "../../components/ui/Card";
+import Icon from "../../components/ui/Icon";
+import { buttonClasses } from "../../components/ui/styles";
 
 type oauthCode = {
   code: string;
@@ -54,9 +57,14 @@ function RouteComponent() {
     message = `Account linking failed: Google returned "${error}".`;
   }
   return (
-    <div>
-      <p>{message}</p>
-      <Link to="/request">Try again</Link>
-    </div>
+    <Card className="mx-auto max-w-sm">
+      <p className="flex items-start gap-2 text-sm">
+        <Icon name="warning" className="mt-0.5 shrink-0 text-danger" />
+        {message}
+      </p>
+      <Link to="/request" className={`${buttonClasses("primary")} mt-4 w-full`}>
+        Try again
+      </Link>
+    </Card>
   );
 }

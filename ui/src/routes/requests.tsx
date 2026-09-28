@@ -3,7 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import { getScannedAccounts, getScanRequests } from "../api";
 import { queryKeys } from "../api/queryKeys";
 import { formatDateTime, formatDuration, scanTypeLabel } from "../format";
-import { Table, Td, Tr } from "../components/Table";
+import ScanStatus from "../components/ScanStatus";
+import Card from "../components/ui/Card";
+import Field from "../components/ui/Field";
+import Select from "../components/ui/Select";
+import Table from "../components/ui/Table";
 import { accountLabels } from "../accountLabels";
 import Breadcrumbs from "../components/Breadcrumbs";
 import { ScanRequest } from "../types/scans";
@@ -27,13 +31,7 @@ const MAX_POLL_AGE_MS = 6 * 60 * 60 * 1000;
 // The backend sends "-1" for a scan without an end time.
 function scanDuration(scan: ScanRequest): string {
   const seconds = Number(scan.scan_duration_in_sec);
-  if (scan.status === "Failed") {
-    return seconds < 0 ? "Failed" : `Failed after ${formatDuration(seconds)}`;
-  }
-  if (seconds < 0) {
-    return scan.status === "Running" ? "Running" : "Not finished";
-  }
-  return formatDuration(seconds);
+  return seconds < 0 ? "—" : formatDuration(seconds);
 }
 
 // A scan that may still finish: no end time, not failed, and recent.
@@ -91,7 +89,7 @@ function Requests() {
         items={
           accountLabel
             ? [
-                <Link to="/requests" search={{}} className="underline">
+                <Link to="/requests" search={{}}>
                   Request History
                 </Link>,
                 accountLabel,
@@ -99,88 +97,98 @@ function Requests() {
             : ["Request History"]
         }
       />
-      <h2 className="p-2 justify-self-center heading font-bold text-xl">
-        Request history
-      </h2>
-      <div
-        id="container"
-        className="border-8 border-gray-200 dark:border-gray-700 gap-2"
-      >
-        <div className="grid grid-cols-2 ">
-          {isLoading && (
-            <div className="flex justify-center items-center sm:rounded-lg dark:text-gray-300">
-              Fetching data..
-            </div>
-          )}
+      <div className="space-y-4">
+        <h1 className="text-xl font-semibold">Request History</h1>
+        <Card>
+          <Field label="Select an account" id="selectAccount" inline>
+            {(control) => (
+              <Select
+                {...control}
+                value={selectedAccount}
+                onChange={handleSelectAccount}
+                disabled={isLoading}
+                className="w-full sm:w-80"
+              >
+                <option value="none">
+                  {isLoading ? "Loading accounts…" : "Select one"}
+                </option>
+                {scannedAccounts &&
+                  scannedAccounts.map((account) => (
+                    <option key={account.clientKey} value={account.clientKey}>
+                      {labels.get(account.clientKey)}
+                    </option>
+                  ))}
+              </Select>
+            )}
+          </Field>
           {accountsError && (
-            <div className="flex justify-center items-center sm:rounded-lg text-red-500">
+            <p className="mt-3 text-sm text-danger">
               Couldn't load accounts: {accountsError.message}
-            </div>
+            </p>
           )}
-          <div className="justify-self-end pl-3">
-            <label htmlFor="selectAccount">Select an account</label>
-          </div>
-          <div className="pl-3">
-            <select
-              id="selectAccount"
-              value={selectedAccount}
-              onChange={handleSelectAccount}
-            >
-              <option value="none">Select One</option>
-              {scannedAccounts &&
-                scannedAccounts.map((account) => (
-                  <option key={account.clientKey} value={account.clientKey}>
-                    {labels.get(account.clientKey)}
-                  </option>
-                ))}
-            </select>
-          </div>
-        </div>
-        {scanRequestsLoading && <p className="p-3">Loading scans…</p>}
-        {scanRequestsError && (
-          <p className="p-3 text-red-500">
-            Couldn't load scans: {scanRequestsError.message}
-          </p>
-        )}
-        {scanRequests?.length === 0 && (
-          <p className="p-3">No scans for this account.</p>
-        )}
-        {scanRequests !== undefined && scanRequests.length > 0 && (
-          <Table
-            className="w-7/8"
-            headers={[
-              "Name",
-              "Scan Type",
-              "Scan id",
-              "Search Filter",
-              "Scan start",
-              "Duration",
-            ]}
-          >
-            {scanRequests.map((scanRequest) => (
-              <Tr key={scanRequest.scan_id}>
-                <Td>{scanRequest.name}</Td>
-                <Td>{scanTypeLabel(scanRequest.scan_type)}</Td>
-                <Td>
-                  <Link
-                    to="/scans/$scanId"
-                    params={{ scanId: String(scanRequest.scan_id) }}
-                    search={{ page: 1 }}
-                    className="underline"
-                  >
-                    {scanRequest.scan_id}
-                  </Link>
-                </Td>
-                <Td className="wrap-anywhere">
-                  {scanRequest.search_path
-                    ? `${scanRequest.search_path}: ${scanRequest.search_filter}`
-                    : scanRequest.search_filter}
-                </Td>
-                <Td>{formatDateTime(scanRequest.scan_start_time)}</Td>
-                <Td>{scanDuration(scanRequest)}</Td>
-              </Tr>
-            ))}
-          </Table>
+        </Card>
+
+        {selectedAccount !== "none" && (
+          <Card title="Scans">
+            {scanRequestsLoading && (
+              <p className="text-sm text-muted">Loading scans…</p>
+            )}
+            {scanRequestsError && (
+              <p className="text-sm text-danger">
+                Couldn't load scans: {scanRequestsError.message}
+              </p>
+            )}
+            {scanRequests?.length === 0 && (
+              <p className="text-sm text-muted">No scans for this account.</p>
+            )}
+            {scanRequests !== undefined && scanRequests.length > 0 && (
+              <Table
+                rowKey={(r) => r.scan_id}
+                rows={scanRequests}
+                columns={[
+                  {
+                    header: "Scan",
+                    primary: true,
+                    cell: (r) => (
+                      <>
+                        <span className="sm:hidden">Scan </span>
+                        <Link
+                          to="/scans/$scanId"
+                          params={{ scanId: String(r.scan_id) }}
+                          search={{ page: 1 }}
+                          className="font-medium text-accent hover:underline"
+                        >
+                          {r.scan_id}
+                        </Link>
+                      </>
+                    ),
+                  },
+                  { header: "Type", cell: (r) => scanTypeLabel(r.scan_type) },
+                  {
+                    header: "Filter",
+                    cell: (r) => (
+                      <span className="font-mono text-xs wrap-anywhere">
+                        {r.search_path
+                          ? `${r.search_path}: ${r.search_filter}`
+                          : r.search_filter}
+                      </span>
+                    ),
+                    className: "sm:max-w-md",
+                  },
+                  {
+                    header: "Started",
+                    cell: (r) => formatDateTime(r.scan_start_time),
+                    className: "sm:whitespace-nowrap",
+                  },
+                  { header: "Duration", numeric: true, cell: scanDuration },
+                  {
+                    header: "Status",
+                    cell: (r) => <ScanStatus status={r.status} />,
+                  },
+                ]}
+              />
+            )}
+          </Card>
         )}
       </div>
     </div>

@@ -13,7 +13,15 @@ import { accountLabels } from "../accountLabels";
 import Breadcrumbs from "../components/Breadcrumbs";
 import Masked, { MaskToggle } from "../components/Masked";
 import FolderTree from "../components/FolderTree";
-import { Table, Td, Tr } from "../components/Table";
+import Badge from "../components/ui/Badge";
+import Card from "../components/ui/Card";
+import Icon, { IconName } from "../components/ui/Icon";
+import Pager from "../components/ui/Pager";
+import Select from "../components/ui/Select";
+import Spinner from "../components/ui/Spinner";
+import Table from "../components/ui/Table";
+import Tabs from "../components/ui/Tabs";
+import { buttonClasses } from "../components/ui/styles";
 import { formatAgo, formatBytes, formatCount, formatDateTime } from "../format";
 import { BrowseSource, ServiceTotals } from "../types/browse";
 
@@ -98,26 +106,33 @@ function Browse() {
 
   if (error) {
     return (
-      <p className="p-3 text-red-500">
+      <p className="py-6 text-sm text-danger">
         Couldn't load what you can browse: {error.message}
       </p>
     );
   }
   if (!sources) {
-    return <p className="p-3">Loading…</p>;
+    return <p className="py-6 text-sm text-muted">Loading…</p>;
   }
   if (sources.length === 0) {
     return (
-      <div className="p-3 space-y-2">
-        <p>Nothing to browse yet.</p>
-        <p>
-          <Link to="/request" search={{}} className="underline">
-            Link a Google account
-          </Link>{" "}
-          on the Request page, or upload a drive's scans with{" "}
-          <code>driveagent</code>.
+      <Card className="mt-6 text-center">
+        <p className="font-semibold">Nothing to browse yet</p>
+        <p className="mt-1 text-sm text-muted">
+          Link a Google account and scan it, or upload a drive's scans with{" "}
+          <code className="rounded bg-surface-muted px-1 py-0.5 text-xs">
+            driveagent
+          </code>
+          .
         </p>
-      </div>
+        <Link
+          to="/request"
+          search={{}}
+          className={`${buttonClasses("primary")} mt-4`}
+        >
+          Link a Google account
+        </Link>
+      </Card>
     );
   }
   // The source in the URL, else the last one used, else the first.
@@ -174,13 +189,13 @@ function SourceView({
         service={service}
         folder={folder}
       />
-      <div className="p-2 space-y-3">
-        <label className="flex items-center gap-2">
-          <span className="font-semibold">Source</span>
-          <select
+      <div className="space-y-4">
+        <label className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+          <span className="text-sm font-medium">Source</span>
+          <Select
             value={id}
             onChange={(e) => navigate({ search: { source: e.target.value } })}
-            className="border rounded p-1 dark:bg-gray-800"
+            className="w-full sm:w-80"
           >
             <optgroup label="Google accounts">
               {sources
@@ -200,11 +215,12 @@ function SourceView({
                   </option>
                 ))}
             </optgroup>
-          </select>
+          </Select>
         </label>
         {source.kind === "google" ? (
           <GoogleAccount
             source={source}
+            label={label(source)}
             service={service}
             folder={folder}
             search={search}
@@ -241,27 +257,23 @@ function Trail({
   const serviceSearch = source.kind === "google" ? { service } : {};
 
   const items: ReactNode[] = [
-    <Link to="/" search={{}} className="underline">
+    <Link to="/" search={{}}>
       Browse
     </Link>,
-    <Link to="/" search={{ source: id }} className="underline">
+    <Link to="/" search={{ source: id }}>
       {label}
     </Link>,
   ];
   if (source.kind === "google") {
     items.push(
-      <Link to="/" search={{ source: id, service }} className="underline">
+      <Link to="/" search={{ source: id, service }}>
         {serviceNames[service]}
       </Link>
     );
   }
   for (const part of path) {
     items.push(
-      <Link
-        to="/"
-        search={{ source: id, ...serviceSearch, folder: part.id }}
-        className="underline"
-      >
+      <Link to="/" search={{ source: id, ...serviceSearch, folder: part.id }}>
         {part.name}
       </Link>
     );
@@ -277,93 +289,160 @@ function Trail({
   return <Breadcrumbs items={items} />;
 }
 
+// "504 files", "1 message".
+function count(n: number, noun: string): string {
+  return `${formatCount(n)} ${noun}${n === 1 ? "" : "s"}`;
+}
+
 // "504 files · 3.7 GB"
 function totals(files: number, bytes: number, noun = "file"): string {
-  return `${formatCount(files)} ${noun}${files === 1 ? "" : "s"} · ${formatBytes(bytes)}`;
+  return `${count(files, noun)} · ${formatBytes(bytes)}`;
 }
 
 function Updating() {
-  return <span className="ml-2 text-sm text-gray-500">updating totals…</span>;
+  return (
+    <Badge tone="warning">
+      <Spinner size={12} />
+      Updating totals…
+    </Badge>
+  );
+}
+
+// A source's totals at a glance: its name, the total size large, and
+// the count and when it was last updated.
+function SummaryCard({
+  icon,
+  name,
+  kind,
+  badges,
+  children,
+  footer,
+}: {
+  icon: IconName;
+  name: string;
+  kind: string;
+  badges?: ReactNode;
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  return (
+    <Card>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
+            <Icon name={icon} size={20} />
+          </span>
+          <div className="min-w-0">
+            <h2 className="truncate font-semibold">{name}</h2>
+            <p className="text-xs text-muted">{kind}</p>
+          </div>
+        </div>
+        {badges && <div className="flex flex-wrap gap-2">{badges}</div>}
+      </div>
+      <div className="mt-4">{children}</div>
+      {footer && <div className="mt-4 border-t border-line pt-3">{footer}</div>}
+    </Card>
+  );
+}
+
+// The big number and the line under it.
+function Figures({
+  bytes,
+  files,
+  noun,
+  updatedAt,
+}: {
+  bytes: number;
+  files: number;
+  noun: string;
+  updatedAt?: string;
+}) {
+  return (
+    <>
+      <p className="text-3xl font-semibold tracking-tight tabular-nums">
+        {formatBytes(bytes)}
+      </p>
+      <p className="mt-1 text-sm text-muted">
+        {count(files, noun)}
+        {updatedAt && ` · Updated ${formatAgo(updatedAt)}`}
+      </p>
+    </>
+  );
 }
 
 function GoogleAccount({
   source,
+  label,
   service,
   folder,
   search,
 }: {
   source: BrowseSource;
+  label: string;
   service: BrowseService;
   folder: string;
   search: BrowseSearch;
 }) {
   const navigate = useNavigate({ from: Route.fullPath });
   const services = source.services!;
-  const tab = (name: BrowseService, st: ServiceTotals) => {
-    const selected = name === service;
-    return (
-      <button
-        key={name}
-        type="button"
-        role="tab"
-        aria-selected={selected}
-        onClick={() =>
-          navigate({ search: { source: sourceId(source), service: name } })
-        }
-        className={`border rounded px-3 py-1 text-left ${selected ? "font-bold border-gray-700 dark:border-gray-300" : ""}`}
-      >
-        {serviceNames[name]}
-        <span className="block text-sm font-normal text-gray-500">
-          {st.files !== undefined && st.bytes !== undefined
-            ? totals(st.files, st.bytes, name === "gmail" ? "message" : "file")
-            : st.granted
-              ? "Not scanned"
-              : "Not granted"}
-        </span>
-      </button>
-    );
-  };
+  const sub = (name: BrowseService, st: ServiceTotals) =>
+    st.files !== undefined && st.bytes !== undefined
+      ? totals(st.files, st.bytes, name === "gmail" ? "message" : "file")
+      : st.granted
+        ? "Not scanned"
+        : "Not granted";
   const current = services[service];
+  const recorded = current.files !== undefined && current.bytes !== undefined;
   return (
     <>
-      <div role="tablist" className="flex flex-wrap gap-2">
-        {tab("drive", services.drive)}
-        {tab("gmail", services.gmail)}
-        <button
-          type="button"
-          role="tab"
-          aria-selected={false}
-          disabled
-          className="border rounded px-3 py-1 text-left text-gray-400"
-        >
-          Google Photos
-          <span className="block text-sm">
-            Not available yet (review item 7.15)
-          </span>
-        </button>
-      </div>
-      {current.files === undefined ? (
-        <NotRecorded
-          source={source}
-          service={service}
-          granted={current.granted}
-        />
-      ) : service === "drive" ? (
-        <>
-          <p className="text-sm text-gray-500">
-            As of the last scan, {formatAgo(current.updated_at!)}.
-            {current.updating && <Updating />}
-          </p>
-          <FolderTree
-            source={{ kind: "google", key: source.key }}
-            folder={folder}
-            onOpen={(f) =>
-              navigate({
-                search: { source: sourceId(source), service, folder: f },
-              })
-            }
+      <Tabs<BrowseService | "photos">
+        label="Service"
+        value={service}
+        onChange={(name) =>
+          name !== "photos" &&
+          navigate({ search: { source: sourceId(source), service: name } })
+        }
+        items={[
+          {
+            id: "drive",
+            label: "Google Drive",
+            sub: sub("drive", services.drive),
+          },
+          { id: "gmail", label: "Gmail", sub: sub("gmail", services.gmail) },
+          { id: "photos", label: "Google Photos", sub: "Soon", disabled: true },
+        ]}
+      />
+      <SummaryCard
+        icon={service === "gmail" ? "mail" : "cloud"}
+        name={label}
+        kind={`Google account · ${serviceNames[service]}`}
+        badges={service === "drive" && current.updating && <Updating />}
+      >
+        {recorded ? (
+          <Figures
+            bytes={current.bytes!}
+            files={current.files!}
+            noun={service === "gmail" ? "message" : "file"}
+            updatedAt={current.updated_at}
           />
-        </>
+        ) : (
+          <NotRecorded
+            source={source}
+            service={service}
+            granted={current.granted}
+          />
+        )}
+      </SummaryCard>
+      {!recorded ? null : service === "drive" ? (
+        <FolderTree
+          source={{ kind: "google", key: source.key }}
+          folder={folder}
+          onOpen={(f) =>
+            navigate({
+              search: { source: sourceId(source), service, folder: f },
+            })
+          }
+        />
       ) : (
         <Messages
           clientKey={source.key}
@@ -386,19 +465,20 @@ function NotRecorded({
   granted: boolean;
 }) {
   return (
-    <p className="p-2">
-      {granted
-        ? `This account's ${serviceNames[service]} hasn't been scanned yet. `
-        : `This account hasn't granted ${serviceNames[service]} access yet. `}
+    <div className="flex flex-col items-start gap-3">
+      <p className="text-sm text-muted">
+        {granted
+          ? `This account's ${serviceNames[service]} hasn't been scanned yet.`
+          : `This account hasn't granted ${serviceNames[service]} access yet.`}
+      </p>
       <Link
         to="/request"
         search={{ type: service, account: source.key }}
-        className="underline"
+        className={buttonClasses("primary")}
       >
         {granted ? "Scan it" : "Grant access"} on the Request page
       </Link>
-      .
-    </p>
+    </div>
   );
 }
 
@@ -412,18 +492,29 @@ function AgentDrive({
   const navigate = useNavigate({ from: Route.fullPath });
   return (
     <>
-      <div>
-        <p>
-          {totals(source.files ?? 0, source.bytes ?? 0)}
-          {source.updating && <Updating />}
-        </p>
-        {source.physical_drive !== undefined && (
-          <p className="text-sm text-gray-500">
-            Linked copy of physical drive {source.physical_drive}
-          </p>
-        )}
-        <AgentStatus driveKey={source.key} />
-      </div>
+      <SummaryCard
+        icon="hardDrive"
+        name={source.name}
+        kind="Drive, uploaded by driveagent"
+        badges={
+          <>
+            {source.physical_drive !== undefined && (
+              <Badge tone="accent">
+                Linked copy of physical drive {source.physical_drive}
+              </Badge>
+            )}
+            {source.updating && <Updating />}
+          </>
+        }
+        footer={<AgentStatus driveKey={source.key} />}
+      >
+        <Figures
+          bytes={source.bytes ?? 0}
+          files={source.files ?? 0}
+          noun="file"
+          updatedAt={source.updated_at}
+        />
+      </SummaryCard>
       <FolderTree
         source={{ kind: "agent", key: source.key }}
         folder={folder}
@@ -443,13 +534,13 @@ function AgentStatus({ driveKey }: { driveKey: string }) {
   });
   if (error) {
     return (
-      <p className="text-sm text-red-500">
+      <p className="text-sm text-danger">
         Couldn't load the drive's status: {error.message}
       </p>
     );
   }
   if (!status) {
-    return null;
+    return <p className="text-sm text-muted">Loading status…</p>;
   }
   const run = status.last_scan;
   const summary = [
@@ -458,34 +549,43 @@ function AgentStatus({ driveKey }: { driveKey: string }) {
       ? `synced ${formatAgo(status.last_synced_at)}`
       : "never synced",
   ].join(" · ");
-  const outcome = !run
-    ? ""
-    : run.finished_at === null
-      ? run.interrupted
-        ? "interrupted"
-        : "running or cut off"
-      : run.interrupted
-        ? "interrupted"
-        : "completed";
+  const outcome = !run ? null : run.finished_at === null ? (
+    run.interrupted ? (
+      <Badge tone="danger">Interrupted</Badge>
+    ) : (
+      <Badge tone="warning">Running or cut off</Badge>
+    )
+  ) : run.interrupted ? (
+    <Badge tone="danger">Interrupted</Badge>
+  ) : (
+    <Badge tone="success">Completed</Badge>
+  );
   return (
-    <details className="text-sm">
-      <summary className="cursor-pointer text-gray-600 dark:text-gray-300">
+    <details className="group text-sm">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 text-muted hover:text-fg [&::-webkit-details-marker]:hidden">
+        <Icon
+          name="chevronRight"
+          className="transition-transform group-open:rotate-90"
+        />
         {summary}
       </summary>
-      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 p-2">
+      <dl className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-[max-content_1fr]">
         {run && (
           <>
-            <dt className="font-semibold">Last scan</dt>
-            <dd>
+            <dt className="text-muted">Last scan</dt>
+            <dd className="flex flex-wrap items-center gap-2">
               {formatDateTime(run.started_at)}
-              {run.finished_at &&
-                ` to ${formatDateTime(run.finished_at)}`}, {outcome}
-              {run.files_seen !== null &&
-                `, ${formatCount(run.files_seen)} files seen`}
+              {run.finished_at && ` to ${formatDateTime(run.finished_at)}`}
+              {outcome}
+              {run.files_seen !== null && (
+                <span className="text-muted">
+                  {count(run.files_seen, "file")} seen
+                </span>
+              )}
             </dd>
           </>
         )}
-        <dt className="font-semibold">Last sync</dt>
+        <dt className="text-muted">Last sync</dt>
         <dd>
           {status.last_synced_at
             ? formatDateTime(status.last_synced_at)
@@ -493,7 +593,7 @@ function AgentStatus({ driveKey }: { driveKey: string }) {
         </dd>
         {status.physical_drive !== null && (
           <>
-            <dt className="font-semibold">Physical drive</dt>
+            <dt className="text-muted">Physical drive</dt>
             <dd>Linked copy of physical drive {status.physical_drive}</dd>
           </>
         )}
@@ -516,88 +616,118 @@ function Messages({
     queryFn: () => getAccountMessages(clientKey, sort, page),
     placeholderData: keepPreviousData,
   });
-  const sortLink = (to: "size" | "date", text: string) =>
-    to === sort ? (
-      <span className="font-semibold">{text}</span>
-    ) : (
-      <Link
-        from={Route.fullPath}
-        search={(prev) => ({ ...prev, sort: to, page: undefined })}
-        className="underline"
+  // A two-way segmented control of links, so each order has its URL.
+  const sortLink = (to: "size" | "date", text: string) => (
+    <Link
+      from={Route.fullPath}
+      search={(prev) => ({ ...prev, sort: to, page: undefined })}
+      aria-current={to === sort ? "true" : undefined}
+      className={`rounded px-2.5 py-1 ${
+        to === sort
+          ? "bg-surface font-medium text-fg shadow-sm"
+          : "text-muted hover:text-fg"
+      }`}
+    >
+      {text}
+    </Link>
+  );
+  const actions = (
+    <>
+      <div
+        role="group"
+        aria-label="Order"
+        className="inline-flex rounded-md bg-surface-muted p-0.5 text-sm"
       >
-        {text}
-      </Link>
-    );
-  if (error) {
-    return (
-      <p className="p-3 text-red-500">
-        Couldn't load messages: {error.message}
-      </p>
-    );
-  }
-  if (!data) {
-    return <p className="p-3">Loading messages…</p>;
-  }
-  const pages = Math.max(1, Math.ceil(data.total / data.page_size));
-  const pageLink = (to: number, text: string) =>
-    to >= 1 && to <= pages ? (
-      <Link
-        from={Route.fullPath}
-        search={(prev) => ({ ...prev, page: to > 1 ? to : undefined })}
-        className="underline"
-      >
-        {text}
-      </Link>
-    ) : (
-      <span className="text-gray-400">{text}</span>
-    );
+        {sortLink("size", "Largest first")}
+        {sortLink("date", "Newest first")}
+      </div>
+      <MaskToggle />
+    </>
+  );
+  const pages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
   return (
-    <div>
-      <p className="text-sm text-gray-500">
+    <Card title="Messages" actions={actions}>
+      <p className="mb-3 text-xs text-muted">
         Every message this account's Gmail scans found. Messages deleted in
         Gmail since are still listed.
       </p>
-      <p className="flex flex-wrap items-center gap-3 pt-2">
-        {sortLink("size", "Largest first")} {sortLink("date", "Newest first")}
-        <MaskToggle />
-      </p>
-      <Table
-        className="w-full"
-        headers={["From", "Subject", "Date", "Size", "Labels", "Scan"]}
-      >
-        {data.messages.map((m) => (
-          <Tr key={m.message_metadata_id}>
-            <Td className="wrap-anywhere">
-              <Masked text={m.from} />
-            </Td>
-            <Td className="wrap-anywhere">
-              <Masked text={m.subject} />
-            </Td>
-            <Td>{m.date ? formatDateTime(m.date) : ""}</Td>
-            <Td>{formatBytes(m.size_estimate)}</Td>
-            <Td className="wrap-anywhere text-xs">
-              {m.labels.split(",").join(", ")}
-            </Td>
-            <Td>
+      {error ? (
+        <p className="text-sm text-danger">
+          Couldn't load messages: {error.message}
+        </p>
+      ) : !data ? (
+        <p className="text-sm text-muted">Loading messages…</p>
+      ) : (
+        <>
+          <Pager
+            page={page}
+            pages={pages}
+            link={(to, children, className) => (
               <Link
-                to="/scans/$scanId"
-                params={{ scanId: String(m.scan_id) }}
-                search={{ page: 1 }}
-                className="underline"
+                from={Route.fullPath}
+                search={(prev) => ({ ...prev, page: to > 1 ? to : undefined })}
+                className={className}
               >
-                {m.scan_id}
+                {children}
               </Link>
-            </Td>
-          </Tr>
-        ))}
-      </Table>
-      <nav className="flex items-center gap-4 p-2" aria-label="Pages">
-        {pageLink(page - 1, "Previous")}
-        <span>
-          Page {page} of {pages}
-        </span>
-        {pageLink(page + 1, "Next")}
-      </nav>
-    </div>
+            )}
+          />
+          <Table
+            rowKey={(m) => m.message_metadata_id}
+            rows={data.messages}
+            columns={[
+              {
+                header: "Subject",
+                primary: true,
+                cell: (m) => <Masked text={m.subject} />,
+                className: "wrap-anywhere",
+              },
+              {
+                header: "From",
+                cell: (m) => <Masked text={m.from} />,
+                className: "wrap-anywhere",
+              },
+              {
+                header: "Date",
+                cell: (m) => (m.date ? formatDateTime(m.date) : ""),
+                className: "sm:whitespace-nowrap",
+              },
+              {
+                header: "Size",
+                numeric: true,
+                cell: (m) => formatBytes(m.size_estimate),
+              },
+              {
+                header: "Labels",
+                cell: (m) => (
+                  <span className="flex flex-wrap justify-end gap-1 sm:justify-start">
+                    {m.labels
+                      .split(",")
+                      .filter(Boolean)
+                      .map((l) => (
+                        <Badge key={l}>{l}</Badge>
+                      ))}
+                  </span>
+                ),
+              },
+              {
+                header: "Scan",
+                numeric: true,
+                cell: (m) => (
+                  <Link
+                    to="/scans/$scanId"
+                    params={{ scanId: String(m.scan_id) }}
+                    search={{ page: 1 }}
+                    className="text-accent hover:underline"
+                  >
+                    {m.scan_id}
+                  </Link>
+                ),
+              },
+            ]}
+          />
+        </>
+      )}
+    </Card>
   );
 }

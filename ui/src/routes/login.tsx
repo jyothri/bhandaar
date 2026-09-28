@@ -3,6 +3,11 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { login } from "../api";
 import { setSession } from "../api/session";
+import Button from "../components/ui/Button";
+import Card from "../components/ui/Card";
+import Field from "../components/ui/Field";
+import Icon from "../components/ui/Icon";
+import Input from "../components/ui/Input";
 import { safeRedirect } from "../safeRedirect";
 
 type LoginSearch = { redirect: string };
@@ -13,9 +18,6 @@ export const Route = createFileRoute("/login")({
     redirect: safeRedirect(String(search.redirect ?? "/")),
   }),
 });
-
-const inputClass =
-  "p-2 border border-gray-300 rounded-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white";
 
 function Login() {
   const { redirect } = Route.useSearch();
@@ -33,53 +35,63 @@ function Login() {
   });
 
   return (
-    <form
-      className="flex flex-col gap-3 max-w-sm mx-auto p-4"
-      onSubmit={(e) => {
-        e.preventDefault();
-        mutate();
-      }}
-    >
-      <h2 className="font-bold text-xl">Log in</h2>
-      <p className="text-sm">
-        Use your driveagent account (set up with{" "}
-        <code>agentserver user add</code>).
-      </p>
-      <label className="flex flex-col gap-1">
-        Username
-        <input
-          className={inputClass}
-          name="username"
-          autoComplete="username"
-          required
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-        />
-      </label>
-      <label className="flex flex-col gap-1">
-        Password
-        <input
-          className={inputClass}
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </label>
-      {error && (
-        <p role="alert" className="text-red-600">
-          {error.message}
-        </p>
-      )}
-      <button
-        type="submit"
-        disabled={isPending}
-        className="p-2 bg-blue-700 text-white rounded-sm disabled:opacity-50"
+    <Card className="mx-auto max-w-sm">
+      <form
+        className="grid gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          mutate();
+        }}
       >
-        {isPending ? "Logging in…" : "Log in"}
-      </button>
-    </form>
+        <div className="grid gap-1">
+          <h1 className="text-xl font-semibold">Log in</h1>
+          <p className="text-sm text-muted">
+            Use your driveagent account (set up with{" "}
+            <code className="rounded bg-surface-muted px-1 py-0.5 text-xs">
+              agentserver user add
+            </code>
+            ).
+          </p>
+        </div>
+        <Field label="Username">
+          {(control) => (
+            <Input
+              {...control}
+              name="username"
+              autoComplete="username"
+              required
+              autoFocus
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Password">
+          {(control) => (
+            <Input
+              {...control}
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          )}
+        </Field>
+        {error && (
+          <p
+            role="alert"
+            className="flex items-start gap-2 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger"
+          >
+            <Icon name="warning" className="mt-0.5 shrink-0" />
+            {error.message}
+          </p>
+        )}
+        <Button type="submit" loading={isPending} className="w-full">
+          {isPending ? "Logging in…" : "Log in"}
+        </Button>
+      </form>
+    </Card>
   );
 }
