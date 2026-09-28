@@ -113,18 +113,21 @@ A slim top bar on `surface`, 56 px high, with a bottom border, above a centred c
   - A Google account: its name, then for the selected service the total size (large) and file or message count, and "Updated <ago>". A service not granted or not scanned shows the reason and a primary button to the Request page instead of totals.
   - An agent drive: name and host, total size and file count, "Updated <ago>" (last sync), a "Linked copy of physical drive N" badge when linked, and the status line (`<details>`) as its footer.
   - "Updating totals…" becomes a `warning`-coloured badge on the card.
-- **Service tabs:** `Tabs`, each with its totals as a sub-line; Photos disabled with "Soon".
+- **Service tabs:** `Tabs`, under the source picker and above the summary card, each with its totals as a sub-line; Photos disabled with "Soon".
 - **Tree:** in a `Card`. Rows are 36 px high, 40 px on touch, with a hover background. Each row: chevron (folders), icon, name, size bar, size, then file count (folders) or modified date (files). "More" is a secondary `Button` under the rows. The Drive ↗ link becomes the external-link icon, shown on row hover and always on touch.
 - **Gmail:** the list in a `Card`, with the sort as a two-item segmented control and the Mask `Switch` in the card's header, and a `Pager` below.
 
 ### Request
 
-- The scan type (Gmail, Google Drive) becomes `Tabs` at the top of one `Card`.
-- The account row: the account `Select`, and "Link another account" as a secondary `Button`. Google's own branded button (`web_neutral_rd_ctn.svg`) stays wherever Google's guidelines require it.
-- The filters become `Field`s in one column on phones and two from `md`: Gmail's Inbox, Unread, date range and query; Drive's owned by me, file types (a wrapping row of `Checkbox`es), modified range, trash, folder and query.
-- The generated query shows read-only in a monospace box, with its edit checkbox, as now.
-- "Scan" is the primary `Button`, full width on phones. Messages under it use `danger` or `accent` text.
-- Live progress (`ScanProgress`) becomes a `Card` under the form: a progress bar when a total is known, the counts, elapsed and ETA, and a `Badge` for the status.
+- The scan type (Gmail, Google Drive) becomes `Tabs` at the top of one `Card`, under a "New request" heading.
+- The account row: the account `Select`, and "Link another Google account" as a secondary `Button`. A service the account hasn't granted shows in a tinted box, with "Grant … access" as the primary button.
+- Every row is a `Field` (or, for checkboxes, a `FieldGroup`), with its label beside the control from `sm` and above it on phones:
+  - Gmail: Messages (Inbox, Unread), Date range, and Query filter.
+  - Drive: Files (Owned by me, Include trash), File types (a wrapping row of `Checkbox`es), Modified (hint: dates are in UTC), Folder (hint on what to paste; Include subfolders beside it), and Query.
+- The queries show in monospace, read-only until "Edit query" is ticked, as now.
+- "Submit" is the primary `Button`, full width on phones, in the card's footer, with the result beside it: `danger` with a warning icon, or `success` with a check and "View results".
+- Live progress (`ScanProgress`) becomes a `Card` under the form, titled "Scan N" with a status `Badge` (Running, Completed, Failed). It shows the bar (indeterminate until a percentage arrives), or the outcome that replaces it, then Elapsed, Processed and Processing as figures.
+- The OAuth callback's error (linking cancelled, or a state mismatch) is a small card with "Try again" as the primary button.
 
 ### Request History
 

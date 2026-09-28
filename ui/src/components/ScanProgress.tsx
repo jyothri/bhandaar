@@ -4,7 +4,10 @@ import { useState } from "react";
 import { Progress } from "../types/scans";
 import { formatDuration } from "../format";
 import { describeScanError, mergeProgress } from "../progress";
-import { Table, Td, Tr } from "./Table";
+import Badge from "./ui/Badge";
+import Card from "./ui/Card";
+import Icon from "./ui/Icon";
+import Spinner from "./ui/Spinner";
 
 export default function ScanProgress() {
   const [sseData, setSseData] = useState<Progress | null>(null);
@@ -19,63 +22,78 @@ export default function ScanProgress() {
   // Shown even before the first update, so a stream that fails right away
   // isn't silent.
   const errorLine = sseError && (
-    <div className="text-red-500">Scan progress unavailable: {sseError}</div>
+    <p className="text-sm text-danger">Scan progress unavailable: {sseError}</p>
   );
 
   if (!sseData) {
     return errorLine || null;
   }
 
+  const stats: [string, string | number][] = [
+    ["Elapsed", formatDuration(sseData.elapsed_in_sec)],
+    ["Processed", sseData.processed_count],
+    ["Processing", sseData.active_count],
+  ];
   return (
-    <div>
-      <h4 className="p-2 justify-self-center font-bold text-lg">
-        Scan Progress
-      </h4>
-      <div
-        id="container"
-        className="border-2 border-gray-200 dark:border-gray-700 gap-2"
-      >
-        <Table
-          className="w-5/8"
-          headers={[
-            "Scan Id",
-            "Elapsed",
-            "Processed",
-            "Processing",
-            "Progress",
-          ]}
-        >
-          <Tr key={sseData.scan_id}>
-            <Td>{sseData.scan_id}</Td>
-            <Td>{formatDuration(sseData.elapsed_in_sec)}</Td>
-            <Td>{sseData.processed_count}</Td>
-            <Td>{sseData.active_count}</Td>
-            <Td>
-              <ProgressBar progress={sseData} />
-            </Td>
-          </Tr>
-        </Table>
-        {errorLine}
+    <Card
+      title={`Scan ${sseData.scan_id}`}
+      actions={<StatusBadge progress={sseData} />}
+    >
+      <div role="status" className="grid gap-4">
+        <Outcome progress={sseData} />
+        <dl className="grid grid-cols-3 gap-4">
+          {stats.map(([label, value]) => (
+            <div key={label}>
+              <dt className="text-xs text-muted">{label}</dt>
+              <dd className="text-lg font-semibold tabular-nums">{value}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
-    </div>
+      {errorLine}
+    </Card>
   );
 }
+
+function StatusBadge({ progress }: { progress: Progress }) {
+  if (progress.status === "Completed") {
+    return <Badge tone="success">Completed</Badge>;
+  }
+  if (progress.status === "Failed") {
+    return <Badge tone="danger">Failed</Badge>;
+  }
+  return (
+    <Badge tone="warning">
+      <Spinner size={12} />
+      Running
+    </Badge>
+  );
+}
+
+const bar = "h-2 w-full accent-accent-solid";
 
 // Once the scan ends, its outcome replaces the bar. While it runs, the
 // backend doesn't send completion_pct yet (review item 7.6), so the bar is
 // indeterminate, and switches to a percentage once one arrives. ETA is
 // hidden for the same reason.
-function ProgressBar({ progress }: { progress: Progress }) {
+function Outcome({ progress }: { progress: Progress }) {
   if (progress.status === "Completed") {
     return (
-      <span className="text-green-600 dark:text-green-400">Completed</span>
+      <p className="flex items-center gap-2 text-sm text-success">
+        <Icon name="check" />
+        Completed
+      </p>
     );
   }
   if (progress.status === "Failed") {
     return (
-      <span className="text-red-500 wrap-anywhere" title={progress.error}>
+      <p
+        className="flex items-start gap-2 text-sm text-danger wrap-anywhere"
+        title={progress.error}
+      >
+        <Icon name="warning" className="mt-0.5 shrink-0" />
         Failed: {describeScanError(progress.error)}
-      </span>
+      </p>
     );
   }
   if (progress.completion_pct > 0) {
@@ -84,11 +102,12 @@ function ProgressBar({ progress }: { progress: Progress }) {
         max={100}
         value={progress.completion_pct}
         aria-label={`${Math.round(progress.completion_pct)}% complete`}
+        className={bar}
       />
     );
   }
   if (progress.status === "Running" || progress.active_count > 0) {
-    return <progress aria-label="Scan in progress" />;
+    return <progress aria-label="Scan in progress" className={bar} />;
   }
-  return <span>—</span>;
+  return <span className="text-muted">—</span>;
 }

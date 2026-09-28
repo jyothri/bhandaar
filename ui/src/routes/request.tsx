@@ -17,7 +17,14 @@ import { clearLinkService, linkService } from "../oauthState";
 import { Service } from "../types/accounts";
 import { ScanMetadata, ScanType } from "../types/scans";
 import ScanProgress from "../components/ScanProgress";
-import Input from "../components/Input";
+import Button from "../components/ui/Button";
+import Card from "../components/ui/Card";
+import Checkbox from "../components/ui/Checkbox";
+import Field, { FieldGroup } from "../components/ui/Field";
+import Icon from "../components/ui/Icon";
+import Input from "../components/ui/Input";
+import Select from "../components/ui/Select";
+import Tabs from "../components/ui/Tabs";
 
 type RequestSearch = {
   // The service to scan; Gmail when missing.
@@ -82,8 +89,6 @@ const initialForm: RequestForm = {
   editQuery: false,
   rawQuery: "",
 };
-
-const labelCell = "justify-self-end pl-3 flex items-center";
 
 function Request() {
   const queryClient = useQueryClient();
@@ -172,7 +177,11 @@ function Request() {
     }
     return {
       ScanType: ScanType.GMail,
-      GMailScan: { Filter: queryFilter, ClientKey: clientKey, RefreshToken: "" },
+      GMailScan: {
+        Filter: queryFilter,
+        ClientKey: clientKey,
+        RefreshToken: "",
+      },
     };
   }
 
@@ -240,289 +249,279 @@ function Request() {
   }
 
   const { full, short } = serviceNames[service];
+  const dateRange = (
+    from: { id: string; value: string; label?: string },
+    to: { id: string; value: string; label: string },
+    onFrom: (v: string) => void,
+    onTo: (v: string) => void,
+    disabled = false
+  ) => (
+    <div className="flex flex-wrap items-center gap-2">
+      <Input
+        id={from.id}
+        type="date"
+        value={from.value}
+        disabled={disabled}
+        onChange={(e) => onFrom(e.target.value)}
+        className="w-auto flex-1 sm:w-44 sm:flex-none"
+      />
+      <span className="text-sm text-muted">to</span>
+      <Input
+        id={to.id}
+        aria-label={to.label}
+        type="date"
+        value={to.value}
+        disabled={disabled}
+        onChange={(e) => onTo(e.target.value)}
+        className="w-auto flex-1 sm:w-44 sm:flex-none"
+      />
+    </div>
+  );
 
   return (
-    <div>
-      <h2 className="p-2 justify-self-center heading font-bold text-xl">
-        Make new Request
-      </h2>
-      <div
-        id="container"
-        className="grid grid-cols-2 border-8 border-gray-200 dark:border-gray-700 gap-2"
-      >
-        <fieldset className="justify-self-center col-span-2 flex gap-4 p-2">
-          <legend className="sr-only">Scan</legend>
-          <span>Scan:</span>
-          {(["gmail", "drive"] as const).map((s) => (
-            <label key={s} className="flex items-center gap-1">
-              <input
-                type="radio"
-                name="service"
-                value={s}
-                checked={service === s}
-                onChange={() => selectService(s)}
-              />
-              {serviceNames[s].full}
-            </label>
-          ))}
-        </fieldset>
+    <div className="space-y-4 pt-6">
+      <h1 className="text-xl font-semibold">New request</h1>
+      <Card>
+        <Tabs<Service>
+          label="Scan"
+          value={service}
+          onChange={selectService}
+          items={[
+            { id: "gmail", label: serviceNames.gmail.full },
+            { id: "drive", label: serviceNames.drive.full },
+          ]}
+        />
+        <div className="mt-5 grid gap-5">
+          <Field label="Accounts" inline>
+            {(control) => (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Select
+                  {...control}
+                  value={account?.clientKey ?? "none"}
+                  onChange={handleSelectAccount}
+                  className="w-full sm:w-80"
+                >
+                  <option value="none">Select one</option>
+                  {accounts &&
+                    accounts.map((account) => (
+                      <option key={account.clientKey} value={account.clientKey}>
+                        {labels.get(account.clientKey)}
+                      </option>
+                    ))}
+                </Select>
+                <Button
+                  variant="secondary"
+                  onClick={() => linkGoogleAccount(service)}
+                >
+                  Link another Google account
+                </Button>
+              </div>
+            )}
+          </Field>
 
-        <div className="justify-self-end pl-3">
-          <label htmlFor="scanClientKey">Accounts</label>
-        </div>
-        <div className="pl-3 flex flex-wrap items-center gap-2">
-          <select
-            id="scanClientKey"
-            value={account?.clientKey ?? "none"}
-            onChange={handleSelectAccount}
-          >
-            <option value="none">Select One</option>
-            {accounts &&
-              accounts.map((account) => (
-                <option key={account.clientKey} value={account.clientKey}>
-                  {labels.get(account.clientKey)}
-                </option>
-              ))}
-          </select>
-          <button
-            type="button"
-            className="underline"
-            onClick={() => linkGoogleAccount(service)}
-          >
-            Link another Google account
-          </button>
-        </div>
-
-        {missingService && (
-          <div className="col-span-2 justify-self-center p-2" role="status">
-            This account hasn't granted {full} access.{" "}
-            <button
-              type="button"
-              className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded"
-              onClick={() => linkGoogleAccount(service, account.loginHint)}
-            >
-              Grant {short} access
-            </button>
-          </div>
-        )}
-
-        {!missingService && service === "gmail" && (
-          <>
-            <div className={labelCell}>
-              <label htmlFor="inbox">Inbox</label>
-            </div>
-            <div className="pl-3">
-              <input
-                type="checkbox"
-                id="inbox"
-                name="inbox"
-                checked={form.inbox}
-                onChange={(e) => updateForm({ inbox: e.target.checked })}
-              />
-            </div>
-
-            <div className={labelCell}>
-              <label htmlFor="unread">Unread</label>
-            </div>
-            <div className="pl-3">
-              <input
-                type="checkbox"
-                id="unread"
-                name="unread"
-                checked={form.unread}
-                onChange={(e) => updateForm({ unread: e.target.checked })}
-              />
-            </div>
-
-            <div className={labelCell}>
-              <label htmlFor="datepicker-range-start">Date range</label>
-            </div>
-            <div className="pl-3">
-              <Input
-                id="datepicker-range-start"
-                name="start"
-                type="date"
-                placeholder="Select date start"
-                value={form.startDate}
-                onChange={(e) => updateForm({ startDate: e.target.value })}
-              />
-              <span className="mx-4 text-gray-500">to</span>
-              <Input
-                id="datepicker-range-end"
-                name="end"
-                type="date"
-                placeholder="Select date end"
-                value={form.endDate}
-                onChange={(e) => updateForm({ endDate: e.target.value })}
-              />
-            </div>
-            <div className="justify-self-end pl-3">
-              <label htmlFor="filter">Query filter</label>
-            </div>
-            <div className="pl-3">
-              <Input
-                id="filter"
-                type="text"
-                disabled={true}
-                value={queryFilter}
-                className="w-10/12"
-              />
-            </div>
-          </>
-        )}
-
-        {!missingService && service === "drive" && (
-          <>
-            <div className={labelCell}>
-              <label htmlFor="ownedByMe">Owned by me</label>
-            </div>
-            <div className="pl-3">
-              <input
-                type="checkbox"
-                id="ownedByMe"
-                checked={form.ownedByMe}
-                disabled={form.editQuery}
-                onChange={(e) => updateForm({ ownedByMe: e.target.checked })}
-              />
-            </div>
-
-            <div className={labelCell}>
-              <span id="fileTypesLabel">File types</span>
-            </div>
+          {missingService && (
             <div
-              className="pl-3 flex flex-wrap gap-3"
-              role="group"
-              aria-labelledby="fileTypesLabel"
+              role="status"
+              className="flex flex-col items-start gap-3 rounded-md bg-accent-soft px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
             >
-              {driveFileTypes.map(({ value, label }) => (
-                <label key={value} className="flex items-center gap-1">
-                  <input
-                    type="checkbox"
+              <span>This account hasn't granted {full} access.</span>
+              <Button
+                onClick={() => linkGoogleAccount(service, account.loginHint)}
+              >
+                Grant {short} access
+              </Button>
+            </div>
+          )}
+
+          {!missingService && service === "gmail" && (
+            <>
+              <FieldGroup label="Messages">
+                <Checkbox
+                  id="inbox"
+                  name="inbox"
+                  label="Inbox"
+                  checked={form.inbox}
+                  onChange={(e) => updateForm({ inbox: e.target.checked })}
+                />
+                <Checkbox
+                  id="unread"
+                  name="unread"
+                  label="Unread"
+                  checked={form.unread}
+                  onChange={(e) => updateForm({ unread: e.target.checked })}
+                />
+              </FieldGroup>
+              <Field label="Date range" id="datepicker-range-start" inline>
+                {({ id }) =>
+                  dateRange(
+                    { id, value: form.startDate },
+                    {
+                      id: "datepicker-range-end",
+                      value: form.endDate,
+                      label: "Date range end",
+                    },
+                    (v) => updateForm({ startDate: v }),
+                    (v) => updateForm({ endDate: v })
+                  )
+                }
+              </Field>
+              <Field label="Query filter" inline>
+                {(control) => (
+                  <Input
+                    {...control}
+                    type="text"
+                    readOnly
+                    disabled
+                    value={queryFilter}
+                    className="font-mono text-xs"
+                  />
+                )}
+              </Field>
+            </>
+          )}
+
+          {!missingService && service === "drive" && (
+            <>
+              <FieldGroup label="Files">
+                <Checkbox
+                  id="ownedByMe"
+                  label="Owned by me"
+                  checked={form.ownedByMe}
+                  disabled={form.editQuery}
+                  onChange={(e) => updateForm({ ownedByMe: e.target.checked })}
+                />
+                <Checkbox
+                  id="includeTrash"
+                  label="Include trash"
+                  checked={form.includeTrash}
+                  disabled={form.editQuery}
+                  onChange={(e) =>
+                    updateForm({ includeTrash: e.target.checked })
+                  }
+                />
+              </FieldGroup>
+
+              <FieldGroup label="File types">
+                {driveFileTypes.map(({ value, label }) => (
+                  <Checkbox
+                    key={value}
+                    label={label}
                     checked={form.fileTypes.includes(value)}
                     disabled={form.editQuery}
                     onChange={(e) => toggleFileType(value, e.target.checked)}
                   />
-                  {label}
-                </label>
-              ))}
-            </div>
+                ))}
+              </FieldGroup>
 
-            <div className={labelCell}>
-              <label htmlFor="drive-modified-start">Modified</label>
-            </div>
-            <div className="pl-3">
-              <Input
+              <Field
+                label="Modified"
                 id="drive-modified-start"
-                type="date"
-                value={form.modifiedFrom}
-                disabled={form.editQuery}
-                onChange={(e) => updateForm({ modifiedFrom: e.target.value })}
-              />
-              <span className="mx-4 text-gray-500">to</span>
-              <Input
-                id="drive-modified-end"
-                aria-label="Modified to"
-                type="date"
-                value={form.modifiedTo}
-                disabled={form.editQuery}
-                onChange={(e) => updateForm({ modifiedTo: e.target.value })}
-              />
-              <span className="ml-2 text-gray-500">(UTC)</span>
-            </div>
-
-            <div className={labelCell}>
-              <label htmlFor="includeTrash">Include trash</label>
-            </div>
-            <div className="pl-3">
-              <input
-                type="checkbox"
-                id="includeTrash"
-                checked={form.includeTrash}
-                disabled={form.editQuery}
-                onChange={(e) => updateForm({ includeTrash: e.target.checked })}
-              />
-            </div>
-
-            <div className={labelCell}>
-              <label htmlFor="driveFolder">Folder</label>
-            </div>
-            <div className="pl-3 flex flex-wrap items-center gap-3">
-              <Input
-                id="driveFolder"
-                type="text"
-                placeholder="Paste a folder link or ID; empty for the whole Drive"
-                value={form.folder}
-                onChange={(e) => updateForm({ folder: e.target.value })}
-                className="w-8/12"
-              />
-              {form.folder.trim() !== "" && (
-                <label className="flex items-center gap-1">
-                  <input
-                    type="checkbox"
-                    checked={form.recursive}
-                    onChange={(e) =>
-                      updateForm({ recursive: e.target.checked })
-                    }
-                  />
-                  Include subfolders
-                </label>
-              )}
-            </div>
-
-            <div className="justify-self-end pl-3">
-              <label htmlFor="driveQuery">Query</label>
-            </div>
-            <div className="pl-3">
-              <Input
-                id="driveQuery"
-                type="text"
-                disabled={!form.editQuery}
-                value={driveQuery}
-                onChange={(e) => updateForm({ rawQuery: e.target.value })}
-                className="w-10/12"
-              />
-              <label className="flex items-center gap-1 pt-1">
-                <input
-                  type="checkbox"
-                  checked={form.editQuery}
-                  onChange={(e) => toggleEditQuery(e.target.checked)}
-                />
-                Edit query
-              </label>
-            </div>
-          </>
-        )}
-
-        <div className="justify-self-center col-span-2 p-3">
-          <input
-            className="items-center justify-center bg-blue-500 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded"
-            type="button"
-            value={isPending ? "Submitting…" : "Submit"}
-            disabled={isPending || missingService}
-            onClick={submitRequest}
-          />
-        </div>
-      </div>
-      {message && (
-        <div
-          className={`${message.kind === "error" ? "text-red-500" : "text-blue-400"} h-1/5 text-lg`}
-        >
-          <span>{message.text}</span>
-          {message.scanId !== undefined && (
-            <>
-              {" "}
-              <Link
-                to="/scans/$scanId"
-                params={{ scanId: String(message.scanId) }}
-                search={{ page: 1 }}
-                className="underline"
+                hint="Dates are in UTC."
+                inline
               >
-                View results
-              </Link>
+                {({ id }) =>
+                  dateRange(
+                    { id, value: form.modifiedFrom },
+                    {
+                      id: "drive-modified-end",
+                      value: form.modifiedTo,
+                      label: "Modified to",
+                    },
+                    (v) => updateForm({ modifiedFrom: v }),
+                    (v) => updateForm({ modifiedTo: v }),
+                    form.editQuery
+                  )
+                }
+              </Field>
+
+              <Field
+                label="Folder"
+                hint="Paste a folder link or ID; leave empty for the whole Drive."
+                inline
+              >
+                {(control) => (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+                    <Input
+                      {...control}
+                      type="text"
+                      placeholder="https://drive.google.com/drive/folders/…"
+                      value={form.folder}
+                      onChange={(e) => updateForm({ folder: e.target.value })}
+                    />
+                    {form.folder.trim() !== "" && (
+                      <Checkbox
+                        label="Include subfolders"
+                        checked={form.recursive}
+                        onChange={(e) =>
+                          updateForm({ recursive: e.target.checked })
+                        }
+                        className="shrink-0"
+                      />
+                    )}
+                  </div>
+                )}
+              </Field>
+
+              <Field label="Query" inline>
+                {(control) => (
+                  <div className="grid gap-2">
+                    <Input
+                      {...control}
+                      type="text"
+                      disabled={!form.editQuery}
+                      value={driveQuery}
+                      onChange={(e) => updateForm({ rawQuery: e.target.value })}
+                      className="font-mono text-xs"
+                    />
+                    <Checkbox
+                      label="Edit query"
+                      checked={form.editQuery}
+                      onChange={(e) => toggleEditQuery(e.target.checked)}
+                    />
+                  </div>
+                )}
+              </Field>
             </>
           )}
         </div>
-      )}
+
+        <div className="mt-6 flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-center">
+          <Button
+            loading={isPending}
+            disabled={missingService}
+            onClick={submitRequest}
+            className="w-full sm:w-auto"
+          >
+            {isPending ? "Submitting…" : "Submit"}
+          </Button>
+          {message && (
+            <p
+              className={`flex items-start gap-2 text-sm ${message.kind === "error" ? "text-danger" : "text-success"}`}
+            >
+              <Icon
+                name={message.kind === "error" ? "warning" : "check"}
+                className="mt-0.5 shrink-0"
+              />
+              <span>
+                {message.text}
+                {message.scanId !== undefined && (
+                  <>
+                    {" "}
+                    <Link
+                      to="/scans/$scanId"
+                      params={{ scanId: String(message.scanId) }}
+                      search={{ page: 1 }}
+                      className="font-medium text-accent hover:underline"
+                    >
+                      View results
+                    </Link>
+                  </>
+                )}
+              </span>
+            </p>
+          )}
+        </div>
+      </Card>
 
       <ScanProgress />
     </div>

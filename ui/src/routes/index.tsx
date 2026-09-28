@@ -399,6 +399,23 @@ function GoogleAccount({
   const recorded = current.files !== undefined && current.bytes !== undefined;
   return (
     <>
+      <Tabs<BrowseService | "photos">
+        label="Service"
+        value={service}
+        onChange={(name) =>
+          name !== "photos" &&
+          navigate({ search: { source: sourceId(source), service: name } })
+        }
+        items={[
+          {
+            id: "drive",
+            label: "Google Drive",
+            sub: sub("drive", services.drive),
+          },
+          { id: "gmail", label: "Gmail", sub: sub("gmail", services.gmail) },
+          { id: "photos", label: "Google Photos", sub: "Soon", disabled: true },
+        ]}
+      />
       <SummaryCard
         icon={service === "gmail" ? "mail" : "cloud"}
         name={label}
@@ -420,23 +437,6 @@ function GoogleAccount({
           />
         )}
       </SummaryCard>
-      <Tabs<BrowseService | "photos">
-        label="Service"
-        value={service}
-        onChange={(name) =>
-          name !== "photos" &&
-          navigate({ search: { source: sourceId(source), service: name } })
-        }
-        items={[
-          {
-            id: "drive",
-            label: "Google Drive",
-            sub: sub("drive", services.drive),
-          },
-          { id: "gmail", label: "Gmail", sub: sub("gmail", services.gmail) },
-          { id: "photos", label: "Google Photos", sub: "Soon", disabled: true },
-        ]}
-      />
       {!recorded ? null : service === "drive" ? (
         <FolderTree
           source={{ kind: "google", key: source.key }}

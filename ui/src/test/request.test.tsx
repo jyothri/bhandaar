@@ -249,7 +249,10 @@ describe("request form", () => {
     await waitFor(() =>
       expect(router.state.location.search).toEqual({ type: "drive" })
     );
-    expect(screen.getByLabelText("Google Drive")).toBeChecked();
+    expect(screen.getByRole("tab", { name: "Google Drive" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
     expect(screen.getByLabelText("Accounts")).toHaveValue("k2");
     expect(sessionStorage.getItem("oauthLinkService")).toBeNull();
   });
@@ -272,7 +275,7 @@ describe("request form, Google Drive", () => {
     const { user, router } = await openForm();
     await user.selectOptions(screen.getByLabelText("Accounts"), "k2");
 
-    await user.click(screen.getByLabelText("Google Drive"));
+    await user.click(screen.getByRole("tab", { name: "Google Drive" }));
 
     await waitFor(() =>
       expect(router.state.location.search).toEqual({ type: "drive" })
@@ -292,7 +295,9 @@ describe("request form, Google Drive", () => {
     expect(screen.queryByLabelText("Owned by me")).toBeNull();
     expect(submit()).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: "Grant Drive access" }));
+    await user.click(
+      screen.getByRole("button", { name: "Grant Drive access" })
+    );
 
     const url = googleUrl();
     expect(url.searchParams.get("scope")).toBe(
@@ -307,7 +312,9 @@ describe("request form, Google Drive", () => {
     const googleUrl = stubGoogleRedirect();
     const { user } = await openDrive("k3");
 
-    await user.click(screen.getByRole("button", { name: "Grant Drive access" }));
+    await user.click(
+      screen.getByRole("button", { name: "Grant Drive access" })
+    );
 
     expect(googleUrl().searchParams.get("login_hint")).toBe("99");
   });

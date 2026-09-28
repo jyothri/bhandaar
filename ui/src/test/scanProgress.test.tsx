@@ -42,8 +42,8 @@ const counts = {
   eta_in_sec: 0,
 };
 
-const progressCell = () =>
-  screen.getAllByRole("cell")[4] as HTMLTableCellElement;
+// The bar, or the outcome that replaces it, and the counts.
+const progressCell = () => screen.getByRole("status");
 
 describe("ScanProgress", () => {
   it("shows a running scan with an indeterminate bar", () => {
