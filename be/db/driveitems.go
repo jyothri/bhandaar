@@ -9,7 +9,7 @@ import (
 
 // The living record of each linked account's Drive: one row per file and
 // folder, keyed by Drive file ID, updated by every Drive scan. See
-// docs/specs/browse.md, "Drive: a living record per account".
+// docs/archive/browse.md, "Drive: a living record per account".
 
 // DriveItem is a Drive file or folder, as the record keeps it.
 type DriveItem struct {

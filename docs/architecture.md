@@ -153,12 +153,12 @@ Every route but health and login/logout needs a logged-in user (see [Web authent
 | `/api/browse/agent/{id}/status` | GET | An agent drive's last scan run, last sync, physical drive, and whether its folder totals are being rebuilt |
 | `/api/browse/google/{client_key}/gmail/messages` | GET | A page (50) of the account's messages across its Gmail scans (`?sort=size|date`), each with the scan that found it |
 
-Browse routes answer 404 for a source that isn't the user's. See [specs/browse.md](specs/browse.md).
+Browse routes answer 404 for a source that isn't the user's. See [archive/browse.md](archive/browse.md).
 
 #### Linking Google accounts (`web/oauth.go`)
 - The UI sends the user to Google asking for `openid email` plus a service's scope, with `include_granted_scopes=true` and `access_type=offline`, and Google returns to `/oauth/glink`, which hands the code to `GET /api/glink`.
 - `/api/glink` exchanges the code, and identifies the Google account by the `id_token`'s `sub` (its email gives the masked display name). It stores the scopes Google actually granted. The linked account is the user's row with that `sub`, else the user's newest row from before `sub`s were recorded with the same display name, else a new row; an existing row keeps its `client_key`. Then it redirects to `/request?account=<client_key>`.
-- See [specs/request-drive-scans.md](specs/request-drive-scans.md#identity-and-re-linking-beweboauthgo).
+- See [archive/request-drive-scans.md](archive/request-drive-scans.md#identity-and-re-linking-beweboauthgo).
 - A Google scan is recorded (`scanmetadata`) under its linked account's `client_key` and `display_name`, both read from `privatetokens`, never taken from the request. Request History groups by `client_key`, since masked names can collide; the UI adds the start of the key to names two accounts share. Scans from before `client_key` was recorded get their user's newest account of the same name, at startup.
 
 #### Server-Sent Events (`web/sse.go`)
@@ -186,8 +186,8 @@ Browse routes answer 404 for a source that isn't the user's. See [specs/browse.m
 - Saves, at the end, a row per folder below the scanned one (`is_dir`, with its Drive ID), with the total size and file count under it, as local scans do. Totals are tracked by folder ID, since a folder name can contain `/`. A whole-Drive scan saves only folders with scanned files under them; a folder scan, every subfolder it walked
 - Stores: file name, its full folder path as the Drive UI shows it (`My Drive/A/Desktop/Qns/q1.pdf`, or `Shared with me/<shared folder>/…`; a folder scan looks up its folder's parents first, one call per level), the Drive file ID (`scandata.file_id`), size, modification time, MD5. A whole-Drive scan lists every folder once first, to build the paths
 - Real-time progress updates via SSE (files so far), like Gmail
-- A scan of a linked account also updates the account's living record, `drive_items` (one row per file and folder, keyed by Drive ID, with its parent's ID), in the goroutine that writes `scandata`: every file and folder it saves, lists or looks up is upserted. A complete scan whose query is one of the Request page's unfiltered defaults then deletes what it didn't see in its scope; other scans only add and update. Then the account's folder totals are rebuilt. See [specs/browse.md](specs/browse.md#drive-a-living-record-per-account)
-- See [specs/request-drive-scans.md](specs/request-drive-scans.md#folder-scans)
+- A scan of a linked account also updates the account's living record, `drive_items` (one row per file and folder, keyed by Drive ID, with its parent's ID), in the goroutine that writes `scandata`: every file and folder it saves, lists or looks up is upserted. A complete scan whose query is one of the Request page's unfiltered defaults then deletes what it didn't see in its scope; other scans only add and update. Then the account's folder totals are rebuilt. See [archive/browse.md](archive/browse.md#drive-a-living-record-per-account)
+- See [archive/request-drive-scans.md](archive/request-drive-scans.md#folder-scans)
 
 **Gmail Scanner (`gmail.go`):**
 - Uses Gmail API

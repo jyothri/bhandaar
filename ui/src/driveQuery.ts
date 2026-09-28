@@ -1,5 +1,5 @@
 // Builds the Google Drive query (`q`) for a scan request from the form's
-// options. See docs/specs/request-drive-scans.md, "Drive query builder".
+// options. See docs/archive/request-drive-scans.md, "Drive query builder".
 
 export type DriveFileType = "images" | "videos" | "audio" | "pdfs" | "googleDocs";
 

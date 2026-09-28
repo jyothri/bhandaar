@@ -26,7 +26,7 @@ import { formatAgo, formatBytes, formatCount, formatDateTime } from "../format";
 import { BrowseSource, ServiceTotals } from "../types/browse";
 
 // Browse: what you have, by Google account and by agent drive. See
-// docs/specs/browse.md, "Browse page".
+// docs/archive/browse.md, "Browse page".
 
 type BrowseService = "drive" | "gmail";
 

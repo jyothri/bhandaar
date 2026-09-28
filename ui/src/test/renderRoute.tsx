@@ -7,6 +7,7 @@ import {
 import { render } from "@testing-library/react";
 import { vi } from "vitest";
 import { routeTree } from "../routeTree.gen";
+import { activeRouters } from "./routers";
 
 /**
  * Renders the app's real route tree at `path`, with a fresh query cache.
@@ -22,6 +23,7 @@ export function renderRoute(path: string) {
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: [path] }),
   });
+  activeRouters.add(router);
   render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />

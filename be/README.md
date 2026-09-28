@@ -43,4 +43,4 @@ test
 | folder1   | 5    |
 | test      | 13   |
 
-- Google Drive used to save no folder rows at all. Since the Drive scans of `docs/specs/request-drive-scans.md`, it saves them recursively too, like local scans: a row per folder below the one scanned, with the total size and file count under it (the scanned folder itself gets none, in either). There's no Cloud Storage collector.
+- Google Drive used to save no folder rows at all. Since the Drive scans of `docs/archive/request-drive-scans.md`, it saves them recursively too, like local scans: a row per folder below the one scanned, with the total size and file count under it (the scanned folder itself gets none, in either). There's no Cloud Storage collector.
