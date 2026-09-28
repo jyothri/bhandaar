@@ -41,8 +41,13 @@ function RootLayout() {
     <>
       <Header />
       <div className="p-2 flex gap-2">
-        <Link to="/" className="[&.active]:font-bold">
-          Data
+        <Link
+          to="/"
+          search={{}}
+          activeOptions={{ exact: true, includeSearch: false }}
+          className="[&.active]:font-bold"
+        >
+          Browse
         </Link>
         <Link to="/request" className="[&.active]:font-bold">
           Request

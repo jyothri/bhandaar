@@ -9,6 +9,7 @@ import {
 } from "../api";
 import { accountLabels } from "../accountLabels";
 import Breadcrumbs from "../components/Breadcrumbs";
+import Masked, { MaskToggle } from "../components/Masked";
 import { queryKeys } from "../api/queryKeys";
 import { formatBytes, formatDateTime, formatDuration, scanTypeLabel } from "../format";
 import { Table, Td, Tr } from "../components/Table";
@@ -144,17 +145,33 @@ function Summary({ summary }: { summary: ScanSummary }) {
     ["Duration", seconds < 0 ? "Not finished" : formatDuration(seconds)],
     ["Found", `${items}, ${formatBytes(summary.total_bytes)}${folders}`],
   ];
+  // Browse shows what all the account's scans of the service found.
+  const service =
+    summary.scan_type === "gmail" ? "gmail" : summary.scan_type === "google_drive" ? "drive" : null;
   return (
-    <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 p-2">
-      {rows
-        .filter(([, value]) => value !== "")
-        .map(([label, value]) => (
-          <div key={label} className="contents">
-            <dt className="font-semibold">{label}</dt>
-            <dd className="wrap-anywhere">{value}</dd>
-          </div>
-        ))}
-    </dl>
+    <>
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 p-2">
+        {rows
+          .filter(([, value]) => value !== "")
+          .map(([label, value]) => (
+            <div key={label} className="contents">
+              <dt className="font-semibold">{label}</dt>
+              <dd className="wrap-anywhere">{value}</dd>
+            </div>
+          ))}
+      </dl>
+      {service && summary.client_key && (
+        <p className="p-2">
+          <Link
+            to="/"
+            search={{ source: `google:${summary.client_key}`, service }}
+            className="underline"
+          >
+            Browse this account's {service === "gmail" ? "Gmail" : "Google Drive"}
+          </Link>
+        </p>
+      )}
+    </>
   );
 }
 
@@ -269,11 +286,18 @@ function Messages({ scanId, page }: { scanId: number; page: number }) {
   }
   return (
     <>
+      <p className="px-2 pt-2">
+        <MaskToggle />
+      </p>
       <Table className="w-full" headers={["From", "Subject", "Date", "Size"]}>
         {data.message_metadata.map((m: MessageRow) => (
           <Tr key={m.message_metadata_id}>
-            <Td className="wrap-anywhere">{m.from}</Td>
-            <Td className="wrap-anywhere">{m.subject}</Td>
+            <Td className="wrap-anywhere">
+              <Masked text={m.from} />
+            </Td>
+            <Td className="wrap-anywhere">
+              <Masked text={m.subject} />
+            </Td>
             <Td>{m.date ? formatDateTime(m.date) : ""}</Td>
             <Td>{formatBytes(m.size_estimate)}</Td>
           </Tr>

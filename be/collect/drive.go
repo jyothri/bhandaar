@@ -23,7 +23,7 @@ import (
 )
 
 // List of fields to be retreived on file resource from the drive API.
-var fields []string = []string{"size", "id", "name", "mimeType", "parents", "modifiedTime", "md5Checksum", "trashed"}
+var fields []string = []string{"size", "id", "name", "mimeType", "parents", "modifiedTime", "md5Checksum", "trashed", "ownedByMe"}
 var paginationFields []string = []string{"nextPageToken", "incompleteSearch"}
 
 const pageSize = 1000
@@ -83,15 +83,24 @@ func CloudDrive(driveScan GDriveScan, userID int64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	rootId, err := myDriveId(driveService)
+	if err != nil {
+		return 0, err
+	}
 	searchPath, folderPath := "", ""
+	// Folders the scan knows before it starts: the one scanned and those
+	// above it.
+	var known []*drive.File
 	if driveScan.FolderId != "" {
 		folder, err := checkFolder(driveService, driveScan.FolderId)
 		if err != nil {
 			return 0, err
 		}
-		if folderPath, err = pathOfFolder(driveService, folder); err != nil {
+		var above []*drive.File
+		if folderPath, above, err = pathOfFolder(driveService, folder, rootId); err != nil {
 			return 0, err
 		}
+		known = append(above, folder)
 		searchPath = fmt.Sprintf("%s (%s)", folderPath, folder.Id)
 		if driveScan.Recursive {
 			searchPath += " and subfolders"
@@ -119,7 +128,7 @@ func CloudDrive(driveScan GDriveScan, userID int64) (int, error) {
 	go func() {
 		defer close(scanData)
 
-		err := startCloudDrive(driveService, scanId, driveScan, folderPath, account.ClientKey, scanData)
+		err := startCloudDrive(driveService, scanId, driveScan, folderPath, account.ClientKey, rootId, known, scanData)
 		if err != nil {
 			slog.Error("Google Drive scan collection failed",
 				"scan_id", scanId,
@@ -131,9 +140,45 @@ func CloudDrive(driveScan GDriveScan, userID int64) (int, error) {
 	}()
 
 	// Start processing file data in background
-	go db.SaveStatToDb(scanId, scanData)
+	go db.SaveDriveScanToDb(scanId, driveRecord(driveScan, account.ClientKey, rootId), scanData)
 
 	return scanId, nil
+}
+
+// unfilteredQueries are the Request page's default Drive queries, which
+// match everything in a scan's scope that isn't trashed (and, with 'me' in
+// owners, that the account owns). Only a scan with one of these deletes
+// from the account's record what it didn't see. See docs/specs/browse.md,
+// "Updating it".
+var unfilteredQueries = map[string]bool{
+	"mimeType != '" + folderMimeType + "' and trashed = false":                    false,
+	"mimeType != '" + folderMimeType + "' and trashed = false and 'me' in owners": true,
+}
+
+// driveRecord is what a scan updates in its account's record; nil for a
+// scan by refresh token, which has no linked account.
+func driveRecord(driveScan GDriveScan, clientKey string, rootId string) *db.DriveRecord {
+	if clientKey == "" {
+		return nil
+	}
+	ownedOnly, sawAll := unfilteredQueries[driveScan.QueryString]
+	return &db.DriveRecord{
+		ClientKey: clientKey,
+		MyDriveId: rootId,
+		FolderId:  driveScan.FolderId,
+		Recursive: driveScan.Recursive || driveScan.FolderId == "",
+		SawAll:    sawAll,
+		OwnedOnly: ownedOnly,
+	}
+}
+
+// myDriveId is the ID of the account's My Drive folder.
+func myDriveId(driveService *drive.Service) (string, error) {
+	root, err := driveService.Files.Get("root").Fields("id").Do()
+	if err != nil {
+		return "", fmt.Errorf("failed to look up the My Drive folder: %w", err)
+	}
+	return root.Id, nil
 }
 
 // checkFolder returns the folder id, or a RequestError when the account
@@ -142,7 +187,7 @@ func checkFolder(driveService *drive.Service, id string) (*drive.File, error) {
 	if !ValidFolderId(id) {
 		return nil, &RequestError{Message: "That isn't a Google Drive folder ID."}
 	}
-	folder, err := driveService.Files.Get(id).Fields("id, name, mimeType, trashed, parents").Do()
+	folder, err := driveService.Files.Get(id).Fields("id, name, mimeType, trashed, parents, modifiedTime, ownedByMe").Do()
 	var apiErr *googleapi.Error
 	if errors.As(err, &apiErr) && apiErr.Code == http.StatusNotFound {
 		return nil, &RequestError{Message: "Folder not found, or this account can't see it."}
@@ -163,8 +208,9 @@ func checkFolder(driveService *drive.Service, id string) (*drive.File, error) {
 // path: under folderPath (the folder's own path) for a folder scan, or
 // under "My Drive" for the whole Drive. Then it saves a row for each
 // folder below that, with the total size and file count under it, as local
-// scans do.
-func startCloudDrive(driveService *drive.Service, scanId int, driveScan GDriveScan, folderPath string, clientKey string, scanData chan<- db.FileData) error {
+// scans do. Every folder it lists, and the known ones, go to the account's
+// record only. rootId is the My Drive folder's ID.
+func startCloudDrive(driveService *drive.Service, scanId int, driveScan GDriveScan, folderPath string, clientKey string, rootId string, known []*drive.File, scanData chan<- db.FileData) error {
 	lock.Lock()
 	defer lock.Unlock()
 	resetCounters()
@@ -178,6 +224,9 @@ func startCloudDrive(driveService *drive.Service, scanId int, driveScan GDriveSc
 
 	// Drive allows about 12,000 calls a minute per user; stay well below.
 	throttler := rate.NewLimiter(20, 5)
+	for _, folder := range known {
+		recordFolder(folder, scanData)
+	}
 	var folders []*folderNode
 	if driveScan.FolderId != "" {
 		var err error
@@ -185,9 +234,12 @@ func startCloudDrive(driveService *drive.Service, scanId int, driveScan GDriveSc
 			return err
 		}
 	} else {
-		tree, err := listFolders(driveService, throttler)
+		tree, err := listFolders(driveService, rootId, throttler)
 		if err != nil {
 			return err
+		}
+		for _, folder := range tree.folders {
+			recordFolder(folder, scanData)
 		}
 		err = listFiles(driveService, driveScan.QueryString, throttler, func(file *drive.File) {
 			if file.MimeType != folderMimeType {
@@ -253,19 +305,16 @@ type driveFolders struct {
 	created               []*folderNode
 }
 
-// listFolders lists every folder the account can see.
-func listFolders(driveService *drive.Service, throttler *rate.Limiter) (*driveFolders, error) {
-	root, err := driveService.Files.Get("root").Fields("id").Do()
-	if err != nil {
-		return nil, fmt.Errorf("failed to look up the My Drive folder: %w", err)
-	}
+// listFolders lists every folder the account can see. rootId is My
+// Drive's.
+func listFolders(driveService *drive.Service, rootId string, throttler *rate.Limiter) (*driveFolders, error) {
 	tree := &driveFolders{
 		folders:      map[string]*drive.File{},
-		myDrive:      &folderNode{id: root.Id, path: myDrivePath},
+		myDrive:      &folderNode{id: rootId, path: myDrivePath},
 		sharedWithMe: &folderNode{path: sharedWithMePath},
 	}
-	tree.nodes = map[string]*folderNode{root.Id: tree.myDrive}
-	err = listFiles(driveService, fmt.Sprintf("mimeType = '%s'", folderMimeType), throttler, func(file *drive.File) {
+	tree.nodes = map[string]*folderNode{rootId: tree.myDrive}
+	err := listFiles(driveService, fmt.Sprintf("mimeType = '%s'", folderMimeType), throttler, func(file *drive.File) {
 		tree.folders[file.Id] = file
 	})
 	if err != nil {
@@ -303,36 +352,36 @@ func (t *driveFolders) node(id string, depth int) *folderNode {
 }
 
 // pathOfFolder is folder's full path: its parents' names, looked up one
-// level at a time, up to My Drive, or up to the first parent the account
-// can't see, which puts it under "Shared with me".
-func pathOfFolder(driveService *drive.Service, folder *drive.File) (string, error) {
-	root, err := driveService.Files.Get("root").Fields("id").Do()
-	if err != nil {
-		return "", fmt.Errorf("failed to look up the My Drive folder: %w", err)
-	}
-	if folder.Id == root.Id {
-		return myDrivePath, nil
+// level at a time, up to My Drive (rootId), or up to the first parent the
+// account can't see, which puts it under "Shared with me". It also returns
+// the parents looked up, below My Drive.
+func pathOfFolder(driveService *drive.Service, folder *drive.File, rootId string) (string, []*drive.File, error) {
+	if folder.Id == rootId {
+		return myDrivePath, nil, nil
 	}
 	path := folder.Name
+	var above []*drive.File
 	for depth := 0; depth < 100; depth++ { // guards against a loop of parents
 		if len(folder.Parents) == 0 {
 			break
 		}
-		if folder.Parents[0] == root.Id {
-			return myDrivePath + "/" + path, nil
+		if folder.Parents[0] == rootId {
+			return myDrivePath + "/" + path, above, nil
 		}
-		parent, err := driveService.Files.Get(folder.Parents[0]).Fields("id, name, parents").Do()
+		parent, err := driveService.Files.Get(folder.Parents[0]).
+			Fields("id, name, parents, mimeType, modifiedTime, ownedByMe, trashed").Do()
 		var apiErr *googleapi.Error
 		if errors.As(err, &apiErr) && apiErr.Code == http.StatusNotFound {
 			break
 		}
 		if err != nil {
-			return "", fmt.Errorf("failed to look up folder %s: %w", folder.Parents[0], err)
+			return "", nil, fmt.Errorf("failed to look up folder %s: %w", folder.Parents[0], err)
 		}
 		path = parent.Name + "/" + path
+		above = append(above, parent)
 		folder = parent
 	}
-	return sharedWithMePath + "/" + path, nil
+	return sharedWithMePath + "/" + path, above, nil
 }
 
 // walkFolder saves the files in driveScan's folder that match its query,
@@ -354,6 +403,7 @@ func walkFolder(driveService *drive.Service, driveScan GDriveScan, folderPath st
 				saveFile(file, folder, scanData)
 				return
 			}
+			recordFolder(file, scanData)
 			if driveScan.Recursive && !file.Trashed && !visited[file.Id] {
 				visited[file.Id] = true
 				sub := folder.child(file)
@@ -412,8 +462,35 @@ func saveFile(file *drive.File, folder *folderNode, scanData chan<- db.FileData)
 		ModTime:   parseTime(file.ModifiedTime),
 		Md5Hash:   file.Md5Checksum,
 		FileCount: 1,
+		Drive:     driveItem(file),
 	}
 	counter_processed.Add(1)
+}
+
+// recordFolder saves a folder to the account's record only.
+func recordFolder(folder *drive.File, scanData chan<- db.FileData) {
+	scanData <- db.FileData{RecordOnly: true, Drive: driveItem(folder)}
+}
+
+// driveItem is file as the account's record keeps it.
+func driveItem(file *drive.File) *db.DriveItem {
+	item := &db.DriveItem{
+		FileId:    file.Id,
+		Name:      file.Name,
+		IsDir:     file.MimeType == folderMimeType,
+		MimeType:  file.MimeType,
+		Size:      file.Size,
+		Md5:       file.Md5Checksum,
+		OwnedByMe: file.OwnedByMe,
+		Trashed:   file.Trashed,
+	}
+	if len(file.Parents) > 0 {
+		item.ParentId = file.Parents[0]
+	}
+	if file.ModifiedTime != "" {
+		item.Modified = parseTime(file.ModifiedTime)
+	}
+	return item
 }
 
 func addPrefix(in []string, prefix string) []string {

@@ -6,7 +6,7 @@ Bhandaar is a storage analyzer application that scans and analyzes data across m
 
 ## Architecture Diagram
 
-The whole system as built. Google Photos is left out: its scanner can't work since Google's 2025 API change (review item 7.15). The proposed Browse page ([specs/browse.md](specs/browse.md)) isn't built yet.
+The whole system as built. Google Photos is left out: its scanner can't work since Google's 2025 API change (review item 7.15).
 
 ```mermaid
 graph TB
@@ -17,17 +17,17 @@ graph TB
 
     subgraph "Prod box"
         Nginx["nginx<br/>TLS, rate limits (web_login, agent_auth)"]
-        UI["UI: React SPA<br/>Vite, TanStack Router + Query<br/>Request, Request History, scan results"]
+        UI["UI: React SPA<br/>Vite, TanStack Router + Query<br/>Browse, Request, Request History, scan results"]
 
         subgraph BE["be: Go web app :8090"]
             MW["Middleware<br/>CORS, body limits,<br/>session check + origin check"]
             AuthH["auth.go<br/>/api/auth/login, logout, me"]
-            ApiH["api.go<br/>/api/scans, /api/accounts,<br/>/api/scans/{id}/summary, results"]
+            ApiH["api.go, browse.go<br/>/api/scans, /api/accounts,<br/>/api/scans/{id}/summary, results,<br/>/api/browse"]
             OAuthH["oauth.go<br/>/api/glink: link accounts"]
             SseH["sse.go<br/>/sse/scanprogress"]
             Collect["Collectors<br/>drive.go, gmail.go, local.go<br/>one scan at a time"]
             Hub["notification hub<br/>progress events"]
-            DBL["db layer<br/>database.go, users.go,<br/>accounts.go, results.go"]
+            DBL["db layer<br/>database.go, users.go, accounts.go,<br/>results.go, driveitems.go, browse.go,<br/>totals.go (folder totals checker)"]
         end
 
         subgraph AS["agentserver: Go :8091"]
@@ -36,7 +36,7 @@ graph TB
         end
 
         subgraph PG["PostgreSQL :5432 (one database)"]
-            BeTables[("be tables<br/>scans, scanmetadata, scandata,<br/>messagemetadata, privatetokens,<br/>web_sessions")]
+            BeTables[("be tables<br/>scans, scanmetadata, scandata,<br/>messagemetadata, privatetokens,<br/>web_sessions, drive_items, drive_accounts,<br/>browse_folder_totals, browse_totals_state")]
             AgentTables[("agentserver tables<br/>agent_users, agent_login_failures,<br/>agent_agents, agent_drives, agent_files,<br/>agent_dir_listings, agent_scan_runs, …")]
         end
     end
@@ -144,6 +144,13 @@ Every route but health and login/logout needs a logged-in user (see [Web authent
 | `/api/photos/albums` | GET | List photo albums |
 | `/api/accounts` | GET | List linked Google accounts: `clientKey`, `displayName`, `services` (`gmail`, `drive`) and `loginHint` (the Google account ID, when known) |
 | `/api/scans/accounts` | GET | The accounts with scans, as `{clientKey, displayName}`, each named by its newest scan |
+| `/api/browse/sources` | GET | What the user can browse: each linked account, with each service's grant and recorded totals, and each of their agents' drives (`<drive_id> (<hostname>)`), with totals, last sync and linked physical drive |
+| `/api/browse/google/{client_key}/drive/children` | GET | A page (200) of a folder of the account's Drive record (`?folder=<id>`; empty for the roots, My Drive and Shared with me): its path, subfolders with totals, then files, each largest first |
+| `/api/browse/agent/{id}/children` | GET | The same for an agent drive (`?folder=<path>`, relative to the drive's root) |
+| `/api/browse/agent/{id}/status` | GET | An agent drive's last scan run, last sync, physical drive, and whether its folder totals are being rebuilt |
+| `/api/browse/google/{client_key}/gmail/messages` | GET | A page (50) of the account's messages across its Gmail scans (`?sort=size|date`), each with the scan that found it |
+
+Browse routes answer 404 for a source that isn't the user's. See [specs/browse.md](specs/browse.md).
 
 #### Linking Google accounts (`web/oauth.go`)
 - The UI sends the user to Google asking for `openid email` plus a service's scope, with `include_granted_scopes=true` and `access_type=offline`, and Google returns to `/oauth/glink`, which hands the code to `GET /api/glink`.
@@ -176,6 +183,7 @@ Every route but health and login/logout needs a logged-in user (see [Web authent
 - Saves, at the end, a row per folder below the scanned one (`is_dir`, with its Drive ID), with the total size and file count under it, as local scans do. Totals are tracked by folder ID, since a folder name can contain `/`. A whole-Drive scan saves only folders with scanned files under them; a folder scan, every subfolder it walked
 - Stores: file name, its full folder path as the Drive UI shows it (`My Drive/A/Desktop/Qns/q1.pdf`, or `Shared with me/<shared folder>/…`; a folder scan looks up its folder's parents first, one call per level), the Drive file ID (`scandata.file_id`), size, modification time, MD5. A whole-Drive scan lists every folder once first, to build the paths
 - Real-time progress updates via SSE (files so far), like Gmail
+- A scan of a linked account also updates the account's living record, `drive_items` (one row per file and folder, keyed by Drive ID, with its parent's ID), in the goroutine that writes `scandata`: every file and folder it saves, lists or looks up is upserted. A complete scan whose query is one of the Request page's unfiltered defaults then deletes what it didn't see in its scope; other scans only add and update. Then the account's folder totals are rebuilt. See [specs/browse.md](specs/browse.md#drive-a-living-record-per-account)
 - See [specs/request-drive-scans.md](specs/request-drive-scans.md#folder-scans)
 
 **Gmail Scanner (`gmail.go`):**
