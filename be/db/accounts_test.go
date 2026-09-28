@@ -8,12 +8,14 @@ import (
 func TestServices(t *testing.T) {
 	tests := map[string][]string{
 		"": {ServiceGmail}, // linked before scopes were per service
-		"https://www.googleapis.com/auth/gmail.readonly":                                                         {ServiceGmail},
-		"openid https://www.googleapis.com/auth/drive.metadata.readonly":                                         {ServiceDrive},
-		"https://www.googleapis.com/auth/drive.readonly":                                                         {ServiceDrive},
-		"https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/gmail.readonly": {ServiceGmail, ServiceDrive},
-		"openid https://www.googleapis.com/auth/userinfo.email":                                                  {},
-		"https://www.googleapis.com/auth/photoslibrary.readonly":                                                 {},
+		"https://www.googleapis.com/auth/gmail.readonly":                                                                  {ServiceGmail},
+		"openid https://www.googleapis.com/auth/drive.metadata.readonly":                                                  {ServiceDrive},
+		"https://www.googleapis.com/auth/drive.readonly":                                                                  {ServiceDrive},
+		"https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/gmail.readonly":          {ServiceGmail, ServiceDrive},
+		"openid https://www.googleapis.com/auth/userinfo.email":                                                           {},
+		"https://www.googleapis.com/auth/photoslibrary.readonly":                                                          {},
+		"https://www.googleapis.com/auth/photospicker.mediaitems.readonly":                                                {ServicePhotos},
+		"https://www.googleapis.com/auth/photospicker.mediaitems.readonly https://www.googleapis.com/auth/gmail.readonly": {ServiceGmail, ServicePhotos},
 	}
 	for scope, want := range tests {
 		if got := Services(scope); !reflect.DeepEqual(got, want) {

@@ -11,6 +11,8 @@ export const serviceScopes: Record<Service, string> = {
   gmail: "https://www.googleapis.com/auth/gmail.readonly",
   // Metadata only: the scan never reads file contents.
   drive: "https://www.googleapis.com/auth/drive.metadata.readonly",
+  // Only what the user picks; see docs/specs/photos-picker.md.
+  photos: "https://www.googleapis.com/auth/photospicker.mediaitems.readonly",
 };
 
 /**

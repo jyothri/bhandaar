@@ -257,11 +257,11 @@ Each `media_item_id` appears once, from its latest scan (`DISTINCT ON (media_ite
 
 ## Implementation plan
 
-One PR per step. Each leaves `main` working.
+One PR for the whole feature (branch `photos-picker`), with a commit per step. Each step leaves the branch working.
 
 0. **Check before building** (done 2026-09-28; see [Step 0 findings](#step-0-findings)). A throwaway script, not merged: with a test account, create a session, pick a few photos and a video, and record: whether `HEAD` on `=d` and `=dv` answers `200` with a `Content-Length`; how the sizes compare with the originals (checked by hand in Google Photos); how long a `=dv` download takes; the real `pollingConfig` values. Count old `photos` scans in production with the read-only query recipe. Record the findings in this spec.
 1. **Remove the dead code and tables** (done on branch `photos-picker`; tested by `TestPhotosLibraryAPIIsGone` and `TestMigrateDropsPhotosLibraryTables`): `ListAlbums`, the albums route, the Library API listing and sizing, `photosConfig`, `ListPhotosHandler` and `GET /api/photos/{scan_id}`, the old save and read functions, `DeleteScan`'s three Photos deletions, and the three tables (`DROP TABLE IF EXISTS videometadata, photometadata, photosmediaitem` at startup, next to the `CREATE`s, which go). `POST /api/scans` refuses `GPhotos`. Close gap 12 here. Step 3 brings `GET /api/photos/{scan_id}` back for Picker scans.
-2. **Photos as a linkable service:** `ServicePhotos`, the scope map, the UI `Service` type, `serviceScopes`, and the tests. Enable the Picker API in the Cloud project.
+2. **Photos as a linkable service** (done; the Picker API was enabled on 2026-09-28 for step 0): `ServicePhotos`, the scope map, the UI `Service` type, `serviceScopes`, and the tests. Enable the Picker API in the Cloud project.
 3. **Backend Picker scan:** the tables, the collector, the session routes, the startup cleanup, `DeleteScan`, `GetScanSummary`, `/api/photos/{scan_id}` for `google_photos`, and the backend tests.
 4. **Request page:** the Photos tab, picking, waiting, progress, and the UI tests.
 5. **Results view and Browse:** the results view for both types, the Browse route and totals, the Photos tab enabled, and the tests.

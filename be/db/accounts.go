@@ -13,8 +13,9 @@ import (
 
 // Services a linked account can be scanned for, as GET /api/accounts names them.
 const (
-	ServiceGmail = "gmail"
-	ServiceDrive = "drive"
+	ServiceGmail  = "gmail"
+	ServiceDrive  = "drive"
+	ServicePhotos = "photos"
 )
 
 // scopeServices maps each Google scope to the service it allows.
@@ -23,6 +24,8 @@ var scopeServices = map[string]string{
 	"https://www.googleapis.com/auth/drive.metadata.readonly": ServiceDrive,
 	"https://www.googleapis.com/auth/drive.readonly":          ServiceDrive,
 	"https://www.googleapis.com/auth/drive":                   ServiceDrive,
+	// Picked items only; the Library API's scopes no longer read a library.
+	"https://www.googleapis.com/auth/photospicker.mediaitems.readonly": ServicePhotos,
 }
 
 // Services lists the services a granted scope (Google's space-separated
@@ -39,7 +42,7 @@ func Services(scope string) []string {
 		}
 	}
 	services := []string{}
-	for _, service := range []string{ServiceGmail, ServiceDrive} {
+	for _, service := range []string{ServiceGmail, ServiceDrive, ServicePhotos} {
 		if granted[service] {
 			services = append(services, service)
 		}
