@@ -25,7 +25,9 @@ beforeEach(() => {
       case "/api/auth/me":
         return session
           ? loggedIn()
-          : json(401, { error: { code: "UNAUTHENTICATED", message: "log in first" } });
+          : json(401, {
+              error: { code: "UNAUTHENTICATED", message: "log in first" },
+            });
       case "/api/auth/login": {
         const { username, password } = JSON.parse(init?.body as string);
         if (username === "alice" && password === "correct horse battery") {
@@ -33,7 +35,10 @@ beforeEach(() => {
           return json(200, { username });
         }
         return json(401, {
-          error: { code: "INVALID_CREDENTIALS", message: "invalid username or password" },
+          error: {
+            code: "INVALID_CREDENTIALS",
+            message: "invalid username or password",
+          },
         });
       }
       case "/api/auth/logout":
@@ -64,8 +69,12 @@ describe("login", () => {
 
     await logIn("correct horse battery");
 
-    await waitFor(() => expect(router.state.location.pathname).toBe("/requests"));
-    expect(await screen.findByText("Signed in as alice")).toBeVisible();
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/requests")
+    );
+    expect(
+      await screen.findByRole("button", { name: "Signed in as alice" })
+    ).toBeVisible();
     // The session cookie goes along with every request.
     for (const [, init] of fetchMock.mock.calls) {
       expect(init?.credentials).toBe("include");
@@ -84,7 +93,9 @@ describe("login", () => {
   });
 
   it("never redirects off the site after logging in", async () => {
-    const { router } = renderRoute("/login?redirect=%2F%2Fevil.example.com%2Fx");
+    const { router } = renderRoute(
+      "/login?redirect=%2F%2Fevil.example.com%2Fx"
+    );
 
     await logIn("correct horse battery");
 
@@ -96,10 +107,37 @@ describe("login", () => {
     const { router } = renderRoute("/");
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("button", { name: "Log out" }));
+    // Log out is in the user menu.
+    await user.click(
+      await screen.findByRole("button", { name: "Signed in as alice" })
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Log out" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
     expect(session).toBe(false);
-    expect(screen.queryByText("Signed in as alice")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Signed in as alice" })
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("app shell", () => {
+  it("opens the phone menu, and closes it on Escape", async () => {
+    session = true;
+    renderRoute("/");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Menu" }));
+    expect(screen.getAllByRole("navigation", { name: "Main" })).toHaveLength(2);
+    await user.keyboard("{Escape}");
+    expect(screen.getAllByRole("navigation", { name: "Main" })).toHaveLength(1);
+  });
+
+  it("names the page in the browser tab", async () => {
+    session = true;
+    renderRoute("/requests");
+    await waitFor(() =>
+      expect(document.title).toBe("Request History · Bhandaar")
+    );
   });
 });

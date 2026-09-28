@@ -1,15 +1,15 @@
 import { QueryClient } from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
-  Link,
   Outlet,
   redirect,
   useRouterState,
 } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { getMe } from "../api";
 import { queryKeys } from "../api/queryKeys";
-import Header from "../components/Header";
+import Header, { Brand } from "../components/Header";
 
 export type RouterContext = { queryClient: QueryClient };
 
@@ -35,35 +35,47 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
 });
 
+// The page's name in the browser tab: "<page> · Bhandaar".
+function pageTitle(pathname: string): string {
+  const scan = pathname.match(/^\/scans\/([^/]+)/);
+  const page =
+    pathname === "/"
+      ? "Browse"
+      : pathname === "/request"
+        ? "Request"
+        : pathname === "/requests"
+          ? "Request History"
+          : pathname === "/login"
+            ? "Log in"
+            : scan
+              ? `Scan ${scan[1]}`
+              : "";
+  return page ? `${page} · Bhandaar` : "Bhandaar";
+}
+
 function RootLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  useEffect(() => {
+    document.title = pageTitle(pathname);
+  }, [pathname]);
+
+  if (publicPaths.includes(pathname)) {
+    // Login and the OAuth callback: just the name, above their content.
+    return (
+      <main className="mx-auto max-w-6xl px-4 py-10">
+        <div className="mb-6 flex justify-center">
+          <Brand />
+        </div>
+        <Outlet />
+      </main>
+    );
+  }
   return (
     <>
       <Header />
-      <div className="p-2 flex gap-2">
-        <Link
-          to="/"
-          search={{}}
-          activeOptions={{ exact: true, includeSearch: false }}
-          className="[&.active]:font-bold"
-        >
-          Browse
-        </Link>
-        <Link to="/request" className="[&.active]:font-bold">
-          Request
-        </Link>
-        <Link
-          to="/requests"
-          // A scan's page is part of Request History.
-          className={
-            pathname.startsWith("/scans/") ? "font-bold" : "[&.active]:font-bold"
-          }
-        >
-          Request History
-        </Link>
-      </div>
-      <hr />
-      <Outlet />
+      <main className="mx-auto max-w-6xl px-4 pb-10">
+        <Outlet />
+      </main>
       <TanStackRouterDevtools />
     </>
   );

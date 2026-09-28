@@ -83,7 +83,10 @@ beforeEach(() => {
               : [driveRow(13, "My Drive/from Apple Mac/z.txt")],
         });
       case "/api/scans/6/summary":
-        return json(200, summary(6, "gmail", { item_count: 1, total_bytes: 2048 }));
+        return json(
+          200,
+          summary(6, "gmail", { item_count: 1, total_bytes: 2048 })
+        );
       case "/api/gmaildata/6":
         return json(200, {
           pagination_info: { size: 1, page },
@@ -118,9 +121,7 @@ describe("scan results", () => {
     expect(
       screen.getByText("My Drive/from Apple Mac (0B8F) and subfolders")
     ).toBeVisible();
-    expect(
-      screen.getByText("12 files, 3.7 GB, 1 folder")
-    ).toBeVisible();
+    expect(screen.getByText("12 files, 3.7 GB, 1 folder")).toBeVisible();
 
     const folder = await screen.findByRole("link", { name: "Desktop/" });
     expect(folder).toHaveAttribute(
@@ -128,9 +129,14 @@ describe("scan results", () => {
       "https://drive.google.com/drive/folders/folder1"
     );
     const file = screen.getByRole("link", { name: "q1.pdf" });
-    expect(file).toHaveAttribute("href", "https://drive.google.com/file/d/f2/view");
+    expect(file).toHaveAttribute(
+      "href",
+      "https://drive.google.com/file/d/f2/view"
+    );
     const fileRow = file.closest("tr")!;
-    expect(within(fileRow).getByText("My Drive/from Apple Mac/Desktop")).toBeVisible();
+    expect(
+      within(fileRow).getByText("My Drive/from Apple Mac/Desktop")
+    ).toBeVisible();
     expect(within(fileRow).getByText("2.0 KB")).toBeVisible();
     expect(within(fileRow).getByText("01234567")).toHaveAttribute(
       "title",
@@ -193,9 +199,10 @@ describe("scan results", () => {
       "page"
     );
     // The Request History tab stays highlighted.
+    const nav = screen.getByRole("navigation", { name: "Main" });
     expect(
-      screen.getAllByRole("link", { name: "Request History" })[0]
-    ).toHaveClass("font-bold");
+      within(nav).getByRole("link", { name: "Request History" })
+    ).toHaveAttribute("aria-current", "page");
 
     await user.click(account);
     await waitFor(() =>
