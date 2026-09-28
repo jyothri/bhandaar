@@ -257,27 +257,23 @@ function Trail({
   const serviceSearch = source.kind === "google" ? { service } : {};
 
   const items: ReactNode[] = [
-    <Link to="/" search={{}} className="underline">
+    <Link to="/" search={{}}>
       Browse
     </Link>,
-    <Link to="/" search={{ source: id }} className="underline">
+    <Link to="/" search={{ source: id }}>
       {label}
     </Link>,
   ];
   if (source.kind === "google") {
     items.push(
-      <Link to="/" search={{ source: id, service }} className="underline">
+      <Link to="/" search={{ source: id, service }}>
         {serviceNames[service]}
       </Link>
     );
   }
   for (const part of path) {
     items.push(
-      <Link
-        to="/"
-        search={{ source: id, ...serviceSearch, folder: part.id }}
-        className="underline"
-      >
+      <Link to="/" search={{ source: id, ...serviceSearch, folder: part.id }}>
         {part.name}
       </Link>
     );

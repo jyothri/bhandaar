@@ -100,13 +100,16 @@ graph TB
 ### 1. Frontend Layer (React + TypeScript)
 
 **Technology Stack:**
-- React 18 with TypeScript
+- React 19 with TypeScript
 - Vite (build tool)
 - TanStack Router (routing)
 - TanStack Query (data fetching)
-- Tailwind CSS (styling)
+- Tailwind CSS v4 (styling): design tokens in `App.css` (`@theme`), light and dark from the system theme; no component library ([specs/ui-refresh.md](specs/ui-refresh.md))
 
 **Key Components:**
+- `/routes/__root.tsx` and `/components/Header.tsx` - The app shell: a top bar with the Bhandaar name, the nav tabs (Browse · Request · Request History; a menu on phones) and the user menu (Log out); page titles `<page> · Bhandaar`. Login and the OAuth callback show just the name
+- `/components/ui/` - The shared components (Button, Card, Field, Input, Select, Checkbox, Tabs, Switch, Badge, Table, Pager, Icon, Spinner), styled only with the tokens; `Table` stacks rows into cards on phones
+- `/routes/index.tsx` - Browse: source picker, service tabs, a summary card per source, and the folder tree (`/components/FolderTree.tsx`: file-type icons from `fileTypes.ts`, size bars for each entry's share of its folder) or the account's messages
 - `/routes/request.tsx` - Scan request form for Gmail and Google Drive (`?type=gmail|drive`). An account without the chosen service gets a "Grant … access" button, which links it again for that service with Google's `login_hint`; the service being linked is kept in `sessionStorage` across the round trip. Drive fields build the Drive query (`driveQuery.ts`), which "Edit query" lets you replace, plus an optional folder (link or ID) with or without subfolders
 - `/routes/requests.tsx` - List view of scan requests by account, with readable scan types; each scan ID links to its results. The selected account is in the URL (`?account=<client_key>`), so links and Back return to it
 - `/components/Breadcrumbs.tsx` - The trail under the nav tabs on Request History and scan pages: `Request History › <account> › Scan N`. A scan's trail always goes through its account (the summary's `client_key`), however the scan was opened, and the Request History tab stays highlighted on it

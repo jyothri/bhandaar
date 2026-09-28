@@ -1,6 +1,6 @@
 # UI Refresh: One Look for Every Page
 
-**Status:** proposed. Written 2026-09-28, after [browse.md](browse.md) was built.
+**Status:** implemented 2026-09-28 (all five steps, each reviewed on dev.sm). Written the same day, after [browse.md](browse.md) was built.
 
 ## Problem
 

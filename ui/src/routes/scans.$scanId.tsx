@@ -91,7 +91,7 @@ function ScanTrail({
   });
   const clientKey = summary?.client_key;
   const items = [
-    <Link to="/requests" search={{}} className="underline">
+    <Link to="/requests" search={{}}>
       Request History
     </Link>,
   ];
