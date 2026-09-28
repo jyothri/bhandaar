@@ -143,8 +143,6 @@ Every route but health and login/logout needs a logged-in user (see [Web authent
 | `/api/scans/{scan_id}` | GET | A page (10) of a scan's files and folders, in tree order (paths compared a segment at a time), with `file_id` for Drive |
 | `/api/scans/{scan_id}` | DELETE | Delete scan |
 | `/api/gmaildata/{scan_id}` | GET | A page (10) of a Gmail scan's new messages, newest first |
-| `/api/photos/{scan_id}` | GET | Get Photos scan results |
-| `/api/photos/albums` | GET | List photo albums |
 | `/api/accounts` | GET | List linked Google accounts: `clientKey`, `displayName`, `services` (`gmail`, `drive`) and `loginHint` (the Google account ID, when known) |
 | `/api/scans/accounts` | GET | The accounts with scans, as `{clientKey, displayName}`, each named by its newest scan |
 | `/api/browse/sources` | GET | What the user can browse: each linked account, with each service's grant and recorded totals, and each of their agents' drives (`<drive_id> (<hostname>)`), with totals, last sync and linked physical drive |
@@ -196,11 +194,7 @@ Browse routes answer 404 for a source that isn't the user's. See [archive/browse
 - Real-time progress updates via SSE
 - Deduplication by message ID
 
-**Photos Scanner (`photos.go`):**
-- Uses Google Photos API
-- Scans photos and videos
-- Extracts metadata: camera info, EXIF data, file size
-- Separate tables for photo vs video metadata
+**Photos:** the Library API scanner was removed, since that API stopped listing libraries in 2025. Scans of picked items through the Picker API are planned in [`specs/photos-picker.md`](specs/photos-picker.md).
 
 #### Notification Hub (`notification/hub.go`)
 - Pub/sub pattern for progress updates
@@ -222,10 +216,7 @@ Browse routes answer 404 for a source that isn't the user's. See [archive/browse
 scans (main scan records)
 ├── scandata (file/directory data from local/drive scans)
 ├── scanmetadata (scan configuration)
-├── messagemetadata (Gmail message data)
-└── photosmediaitem (Photos/videos)
-    ├── photometadata (photo-specific EXIF)
-    └── videometadata (video-specific metadata)
+└── messagemetadata (Gmail message data)
 
 privatetokens (linked Google accounts: refresh tokens, granted scope, google_sub)
 web_sessions (web login sessions)
@@ -249,7 +240,7 @@ Implemented (rollout steps 1 and 4): `GET /agent/health`, `POST /agent/v1/handsh
 **OAuth 2.0:**
 - Authorization code flow, one service at a time with incremental authorization (see [Account Linking Flow](#account-linking-flow))
 - Refresh tokens stored per linked account, with the scopes Google granted
-- Scopes: `openid email` (identifies the account) plus `gmail.readonly` and/or `drive.metadata.readonly`. The Photos scopes the Photos scanner asks for are no longer granted (review item 7.15)
+- Scopes: `openid email` (identifies the account) plus `gmail.readonly` and/or `drive.metadata.readonly`. Photos will ask for `photospicker.mediaitems.readonly` ([`specs/photos-picker.md`](specs/photos-picker.md))
 - The OAuth client is in "Testing": refresh tokens expire 7 days after they're issued (review item 2.11)
 
 **Required Credentials:**

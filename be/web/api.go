@@ -39,9 +39,6 @@ func api(r *mux.Router) {
 	api.HandleFunc("/scans/{scan_id}", ListScanDataHandler).Methods("GET")
 	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET")
-	api.HandleFunc("/photos/albums", ListAlbumsHandler).Methods("GET").Queries("refresh_token", "{refresh_token}")
-	api.HandleFunc("/photos/{scan_id}", ListPhotosHandler).Methods("GET").Queries("page", "{page}")
-	api.HandleFunc("/photos/{scan_id}", ListPhotosHandler).Methods("GET")
 	browseRoutes(api)
 }
 
@@ -76,7 +73,10 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 	case "GMail":
 		scanId, err = collect.Gmail(doScanRequest.GMailScan, userID)
 	case "GPhotos":
-		scanId, err = collect.Photos(doScanRequest.GPhotosScan, userID)
+		// The Photos Library API no longer lists a library; Photos scans
+		// will start from the Picker API (docs/specs/photos-picker.md).
+		http.Error(w, "Google Photos scans aren't available yet.", http.StatusBadRequest)
+		return
 	default:
 		slog.Error("Unknown scan type", "scan_type", doScanRequest.ScanType)
 		http.Error(w, fmt.Sprintf("Unknown scan type: %s", doScanRequest.ScanType), http.StatusBadRequest)
@@ -248,55 +248,6 @@ func ListMessageMetaDataHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, body, http.StatusOK)
 }
 
-func ListAlbumsHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	refresh_token, present := vars["refresh_token"]
-	if !present {
-		slog.Warn("No refresh token to execute ListAlbumsHandler.")
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	albums := collect.ListAlbums(refresh_token)
-	pageInfo := PaginationInfo{Page: 1, Size: len(albums)}
-	body := ListAlbumsResponse{
-		PageInfo: pageInfo,
-		Albums:   albums,
-	}
-	serializedBody, _ := json.Marshal(body)
-	setJsonHeader(w)
-	_, _ = w.Write(serializedBody)
-}
-
-func ListPhotosHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	pageNo := getPageNumber(mux.Vars(r))
-	scanId, ok := getIntFromMap(vars, "scan_id")
-	if !ok {
-		http.Error(w, "Invalid scan ID", http.StatusBadRequest)
-		return
-	}
-	if !checkScanOwner(w, r, scanId) {
-		return
-	}
-
-	photosMediaItem, totResults, err := db.GetPhotosMediaItemFromDb(scanId, pageNo)
-	if err != nil {
-		slog.Error("Failed to get photos from database",
-			"scan_id", scanId,
-			"page", pageNo,
-			"error", err)
-		http.Error(w, "Failed to retrieve photos", http.StatusInternalServerError)
-		return
-	}
-
-	pageInfo := PaginationInfo{Page: pageNo, Size: totResults}
-	body := PhotosMediaItemResponse{
-		PageInfo:        pageInfo,
-		PhotosMediaItem: photosMediaItem,
-	}
-	writeJSONResponse(w, body, http.StatusOK)
-}
-
 // ScanSummaryHandler answers a scan's details and totals.
 func ScanSummaryHandler(w http.ResponseWriter, r *http.Request) {
 	scanId, ok := getIntFromMap(mux.Vars(r), "scan_id")
@@ -429,11 +380,10 @@ type ScanDataResponse struct {
 }
 
 type DoScanRequest struct {
-	ScanType    string
-	LocalScan   collect.LocalScan
-	GDriveScan  collect.GDriveScan
-	GMailScan   collect.GMailScan
-	GPhotosScan collect.GPhotosScan
+	ScanType   string
+	LocalScan  collect.LocalScan
+	GDriveScan collect.GDriveScan
+	GMailScan  collect.GMailScan
 }
 
 type DoScanResponse struct {
@@ -443,14 +393,4 @@ type DoScanResponse struct {
 type MessageMetadataResponse struct {
 	PageInfo        PaginationInfo  `json:"pagination_info"`
 	MessageMetadata []db.MessageRow `json:"message_metadata"`
-}
-
-type PhotosMediaItemResponse struct {
-	PageInfo        PaginationInfo           `json:"pagination_info"`
-	PhotosMediaItem []db.PhotosMediaItemRead `json:"photos_media_item"`
-}
-
-type ListAlbumsResponse struct {
-	PageInfo PaginationInfo  `json:"pagination_info"`
-	Albums   []collect.Album `json:"albums"`
 }

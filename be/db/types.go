@@ -32,22 +32,3 @@ type MessageMetadata struct {
 	Date         time.Time
 	SizeEstimate int64
 }
-
-type PhotosMediaItem struct {
-	MediaItemId            string
-	ProductUrl             string
-	MimeType               string
-	Filename               string
-	Size                   int64
-	FileModTime            time.Time
-	Md5hash                string
-	ContributorDisplayName string
-	AlbumIds               []string
-	CameraMake             string
-	CameraModel            string
-	FocalLength            float32
-	FNumber                float32
-	Iso                    int
-	ExposureTime           string
-	Fps                    float32
-}

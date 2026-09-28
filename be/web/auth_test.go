@@ -173,7 +173,7 @@ func TestScanRoutesHideOtherUsersScans(t *testing.T) {
 	r := mux.NewRouter()
 	r.Use(authenticate)
 	api(r)
-	for _, path := range []string{"/api/scans/2", "/api/scans/2/summary", "/api/gmaildata/2", "/api/photos/2"} {
+	for _, path := range []string{"/api/scans/2", "/api/scans/2/summary", "/api/gmaildata/2"} {
 		rec := serve(r, withSession(httptest.NewRequest(http.MethodGet, path, nil), "good"))
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("GET %s: status = %d, want %d", path, rec.Code, http.StatusNotFound)

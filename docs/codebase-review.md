@@ -19,7 +19,7 @@ Status legend: `[ ]` open · **Deferred** = open, parked for now · **Blocked** 
 ## Suggested order
 
 1. **4.9** A way to remove a linked account, then clear the stale production entry.
-2. **7.15** Decide what to do about Google Photos.
+2. **7.15** Google Photos through the Picker API: [spec](specs/photos-picker.md), steps 2–6.
 3. The small ones, as convenient: 4.8, 5.1, 6.4, 2.8, 2.9, 2.10.
 4. When unblocked or revisited: 2.11, 6.3, 7.6.
 
@@ -87,4 +87,4 @@ Browsing files and folders by Google account and by agent drive was built in #35
 
 - [ ] **7.15 Google Photos scans can't work** — `be/collect/photos.go`, `be/web/api.go`
   Found while writing [archive/request-drive-scans.md](archive/request-drive-scans.md#google-photos-deferred) (2026-09-27). Since 2025-03-31 the Photos Library API no longer grants `photoslibrary.readonly` or `photoslibrary.sharing` to new authorizations. So the collector, which lists the whole library or an album, can't work for any account linked now. The Request page offers no Photos option. `GET /api/photos/albums` also still takes a raw refresh token in its URL.
-  *To decide:* the Photos Picker API (only what the user picks, and apparently without sizes), importing a Google Takeout export as a local scan, or removing the Photos collector, its routes and tables. If Photos stays, the albums route should take a `ClientKey`.
+  *Decided (2026-09-28):* move to the Photos Picker API. See [specs/photos-picker.md](specs/photos-picker.md): its step 0 found `HEAD` gives sizes. Step 1 removed the Library API collector, the albums route (and its raw refresh token), `GET /api/photos/{scan_id}` and the three tables, which were empty in production. Steps 2–6 are open.
