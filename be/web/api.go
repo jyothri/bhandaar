@@ -40,6 +40,7 @@ func api(r *mux.Router) {
 	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET")
 	photosRoutes(api)
+	gcsRoutes(api)
 	browseRoutes(api)
 }
 
