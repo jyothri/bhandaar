@@ -34,7 +34,10 @@ export function rememberLinkService(service: Service): void {
 /** The service the last link was started for, if any; it stays stored. */
 export function linkService(): Service | null {
   const service = sessionStorage.getItem(LINK_SERVICE_KEY);
-  return service === "gmail" || service === "drive" || service === "photos"
+  return service === "gmail" ||
+    service === "drive" ||
+    service === "photos" ||
+    service === "gcs"
     ? service
     : null;
 }

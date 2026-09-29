@@ -52,6 +52,7 @@ const serviceNames: Record<Service, { full: string; short: string }> = {
   gmail: { full: "Gmail", short: "Gmail" },
   drive: { full: "Google Drive", short: "Drive" },
   photos: { full: "Google Photos", short: "Photos" },
+  gcs: { full: "Google Cloud Storage", short: "Cloud Storage" },
 };
 
 // The most a query can be; the backend records it in a VARCHAR(2000).

@@ -43,9 +43,11 @@ describe("link service", () => {
     expect(linkService()).toBeNull();
   });
 
-  it("knows Photos", () => {
+  it("knows Photos and Cloud Storage", () => {
     rememberLinkService("photos");
     expect(linkService()).toBe("photos");
+    rememberLinkService("gcs");
+    expect(linkService()).toBe("gcs");
   });
 
   it("ignores anything that isn't a service", () => {

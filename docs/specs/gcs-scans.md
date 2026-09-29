@@ -199,7 +199,7 @@ One PR for the whole feature, with a commit per step. Each step leaves the branc
    - how long 1000-object pages take.
 
    Also check `Query.SoftDeleted` in the pinned client library. Record the findings here.
-1. **Cloud Storage as a linkable service:** `ServiceGcs`, the scope map, the UI `Service` type and scopes, `canListProjects`, and the tests.
+1. **Cloud Storage as a linkable service** (done): `ServiceGcs`, the scope map, the UI `Service` type and scopes, `canListProjects`, and the tests.
 2. **Project and bucket lists:** `collect.GcsProjects`, `collect.GcsBuckets`, and their routes, tested against the fake.
 3. **The scan:** the tables, the collector with both passes, the record's upserts and deletions, prefix totals, per-scan totals, `DeleteScan`, `GetScanSummary`, the results route, and the tests.
 4. **Request page:** the Google Cloud Storage tab and its tests.

@@ -8,14 +8,17 @@ import (
 func TestServices(t *testing.T) {
 	tests := map[string][]string{
 		"": {ServiceGmail}, // linked before scopes were per service
-		"https://www.googleapis.com/auth/gmail.readonly":                                                                  {ServiceGmail},
-		"openid https://www.googleapis.com/auth/drive.metadata.readonly":                                                  {ServiceDrive},
-		"https://www.googleapis.com/auth/drive.readonly":                                                                  {ServiceDrive},
-		"https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/gmail.readonly":          {ServiceGmail, ServiceDrive},
-		"openid https://www.googleapis.com/auth/userinfo.email":                                                           {},
-		"https://www.googleapis.com/auth/photoslibrary.readonly":                                                          {},
-		"https://www.googleapis.com/auth/photospicker.mediaitems.readonly":                                                {ServicePhotos},
-		"https://www.googleapis.com/auth/photospicker.mediaitems.readonly https://www.googleapis.com/auth/gmail.readonly": {ServiceGmail, ServicePhotos},
+		"https://www.googleapis.com/auth/gmail.readonly":                                                                             {ServiceGmail},
+		"openid https://www.googleapis.com/auth/drive.metadata.readonly":                                                             {ServiceDrive},
+		"https://www.googleapis.com/auth/drive.readonly":                                                                             {ServiceDrive},
+		"https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/gmail.readonly":                     {ServiceGmail, ServiceDrive},
+		"openid https://www.googleapis.com/auth/userinfo.email":                                                                      {},
+		"https://www.googleapis.com/auth/photoslibrary.readonly":                                                                     {},
+		"https://www.googleapis.com/auth/photospicker.mediaitems.readonly":                                                           {ServicePhotos},
+		"https://www.googleapis.com/auth/photospicker.mediaitems.readonly https://www.googleapis.com/auth/gmail.readonly":            {ServiceGmail, ServicePhotos},
+		"openid https://www.googleapis.com/auth/devstorage.read_only https://www.googleapis.com/auth/cloudplatformprojects.readonly": {ServiceGcs},
+		"https://www.googleapis.com/auth/cloud-platform.read-only https://www.googleapis.com/auth/gmail.readonly":                    {ServiceGmail, ServiceGcs},
+		"https://www.googleapis.com/auth/cloudplatformprojects.readonly":                                                             {},
 	}
 	for scope, want := range tests {
 		if got := Services(scope); !reflect.DeepEqual(got, want) {
@@ -236,6 +239,19 @@ func TestBackfillScanAccounts(t *testing.T) {
 			if gotKey != wantKey {
 				t.Errorf("run %d: scan %d client_key = %q, want %q", run, id, gotKey, wantKey)
 			}
+		}
+	}
+}
+
+func TestCanListProjects(t *testing.T) {
+	for scope, want := range map[string]bool{
+		"https://www.googleapis.com/auth/devstorage.read_only https://www.googleapis.com/auth/cloudplatformprojects.readonly": true,
+		"https://www.googleapis.com/auth/cloud-platform.read-only":                                                            true,
+		"https://www.googleapis.com/auth/devstorage.read_only":                                                                false,
+		"": false,
+	} {
+		if got := CanListProjects(scope); got != want {
+			t.Errorf("CanListProjects(%q) = %v, want %v", scope, got, want)
 		}
 	}
 }

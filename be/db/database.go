@@ -680,6 +680,9 @@ type Account struct {
 	// The Google account ID, for Google's login_hint; empty for an account
 	// linked before it was recorded.
 	LoginHint string `json:"loginHint,omitempty"`
+	// With Cloud Storage granted: whether the account can list its Cloud
+	// projects too, or the Request page has to ask for a project ID.
+	CanListProjects bool `json:"canListProjects,omitempty"`
 }
 
 func substr(s string, end int) string {
