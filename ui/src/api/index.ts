@@ -11,6 +11,7 @@ import {
   PhotosPick,
   PickedItemPage,
 } from "../types/photos";
+import { GcsBucket, GcsProject, GcsScanBucket } from "../types/gcs";
 import { MessagePage, ScanDataPage, ScanSummary } from "../types/results";
 import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 
@@ -181,10 +182,11 @@ export const getBrowseSources = (): Promise<BrowseSource[]> =>
 
 /**
  * A page (from 1) of a folder of a Google account's Drive ("" for its
- * roots) or of an agent drive ("" for the drive's root).
+ * roots), of an agent drive ("" for the drive's root), or of a Google
+ * account's Cloud Storage ("" for its buckets, else "<bucket>/<prefix>").
  */
 export const getBrowseChildren = (
-  kind: "google" | "agent",
+  kind: "google" | "agent" | "gcs",
   key: string,
   folder: string,
   page: number
@@ -192,7 +194,9 @@ export const getBrowseChildren = (
   const base =
     kind === "google"
       ? `/api/browse/google/${encodeURIComponent(key)}/drive/children`
-      : `/api/browse/agent/${encodeURIComponent(key)}/children`;
+      : kind === "gcs"
+        ? `/api/browse/google/${encodeURIComponent(key)}/gcs/children`
+        : `/api/browse/agent/${encodeURIComponent(key)}/children`;
   const query = new URLSearchParams({ folder, page: String(page) });
   return fetchJson(`${base}?${query}`);
 };
@@ -220,3 +224,20 @@ export const getAccountPhotos = (
   fetchJson(
     `/api/browse/google/${encodeURIComponent(clientKey)}/photos/items?sort=${sort}&page=${page}`
   );
+
+/** A linked account's active Cloud projects. */
+export const getGcsProjects = (clientKey: string): Promise<GcsProject[]> =>
+  fetchJson(`/api/gcs/${encodeURIComponent(clientKey)}/projects`);
+
+/** A project's buckets, with their settings. */
+export const getGcsBuckets = (
+  clientKey: string,
+  project: string
+): Promise<GcsBucket[]> =>
+  fetchJson(
+    `/api/gcs/${encodeURIComponent(clientKey)}/projects/${encodeURIComponent(project)}/buckets`
+  );
+
+/** What a Cloud Storage scan did with each bucket. */
+export const getGcsScanBuckets = (scanId: number): Promise<GcsScanBucket[]> =>
+  fetchJson(`/api/gcs/${scanId}`);

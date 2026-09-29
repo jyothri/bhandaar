@@ -16,6 +16,7 @@ const (
 	ServiceGmail  = "gmail"
 	ServiceDrive  = "drive"
 	ServicePhotos = "photos"
+	ServiceGcs    = "gcs" // Google Cloud Storage
 )
 
 // scopeServices maps each Google scope to the service it allows.
@@ -26,6 +27,33 @@ var scopeServices = map[string]string{
 	"https://www.googleapis.com/auth/drive":                   ServiceDrive,
 	// Picked items only; the Library API's scopes no longer read a library.
 	"https://www.googleapis.com/auth/photospicker.mediaitems.readonly": ServicePhotos,
+	// Every scope that can read buckets and objects.
+	"https://www.googleapis.com/auth/devstorage.read_only":     ServiceGcs,
+	"https://www.googleapis.com/auth/devstorage.read_write":    ServiceGcs,
+	"https://www.googleapis.com/auth/devstorage.full_control":  ServiceGcs,
+	"https://www.googleapis.com/auth/cloud-platform.read-only": ServiceGcs,
+	"https://www.googleapis.com/auth/cloud-platform":           ServiceGcs,
+}
+
+// projectScopes are the scopes that can list an account's Cloud projects
+// (Resource Manager's projects.search). See docs/archive/gcs-scans.md,
+// "Linking: Cloud Storage as a service".
+var projectScopes = map[string]bool{
+	"https://www.googleapis.com/auth/cloudplatformprojects.readonly": true,
+	"https://www.googleapis.com/auth/cloudplatformprojects":          true,
+	"https://www.googleapis.com/auth/cloud-platform.read-only":       true,
+	"https://www.googleapis.com/auth/cloud-platform":                 true,
+}
+
+// CanListProjects reports whether a granted scope can list the account's
+// Cloud projects.
+func CanListProjects(scope string) bool {
+	for _, s := range strings.Fields(scope) {
+		if projectScopes[s] {
+			return true
+		}
+	}
+	return false
 }
 
 // Services lists the services a granted scope (Google's space-separated
@@ -42,7 +70,7 @@ func Services(scope string) []string {
 		}
 	}
 	services := []string{}
-	for _, service := range []string{ServiceGmail, ServiceDrive, ServicePhotos} {
+	for _, service := range []string{ServiceGmail, ServiceDrive, ServicePhotos, ServiceGcs} {
 		if granted[service] {
 			services = append(services, service)
 		}
@@ -188,10 +216,11 @@ func GetRequestAccountsFromDb(userID int64) ([]Account, error) {
 	accounts := make([]Account, len(rows))
 	for i, row := range rows {
 		accounts[i] = Account{
-			ClientKey:   row.ClientKey,
-			DisplayName: row.DisplayName,
-			Services:    Services(row.Scope),
-			LoginHint:   row.GoogleSub,
+			ClientKey:       row.ClientKey,
+			DisplayName:     row.DisplayName,
+			Services:        Services(row.Scope),
+			LoginHint:       row.GoogleSub,
+			CanListProjects: HasService(row.Scope, ServiceGcs) && CanListProjects(row.Scope),
 		}
 	}
 	return accounts, nil

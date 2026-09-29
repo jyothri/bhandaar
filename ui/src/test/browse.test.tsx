@@ -26,6 +26,7 @@ const google = {
     },
     gmail: { granted: false },
     photos: { granted: false },
+    gcs: { granted: false },
   },
 };
 const agent = {
@@ -174,6 +175,60 @@ beforeEach(() => {
           physical_drive: 1,
           updating: true,
         });
+      case "/api/browse/google/JVVYZFCI0PaW/gcs/children":
+        if (folder === "") {
+          return json(
+            200,
+            page({
+              folders: [
+                {
+                  id: "jyo-archive/",
+                  name: "jyo-archive",
+                  files: 3000,
+                  bytes: 5000000000,
+                  detail: "US-WEST1 · ARCHIVE",
+                },
+              ],
+              entries: 1,
+              totals: { files: 3000, bytes: 5000000000 },
+              gcs: {
+                live_objects: 3000,
+                live_bytes: 5000000000,
+                noncurrent_objects: 2,
+                noncurrent_bytes: 2048,
+                soft_deleted_objects: 1,
+                soft_deleted_bytes: 1024,
+                bytes_by_class: { ARCHIVE: 5000000000 },
+              },
+            })
+          );
+        }
+        return json(
+          200,
+          page({
+            path: [{ id: "jyo-archive/", name: "jyo-archive" }],
+            files: [
+              {
+                id: "a.txt#2/live",
+                name: "a.txt",
+                size: 10,
+                modified: "2026-09-01T10:00:00Z",
+                storage_class: "ARCHIVE",
+                state: "live",
+              },
+              {
+                id: "a.txt#1/noncurrent",
+                name: "a.txt",
+                size: 3,
+                modified: null,
+                storage_class: "ARCHIVE",
+                state: "noncurrent",
+              },
+            ],
+            entries: 2,
+            totals: { files: 1, bytes: 10 },
+          })
+        );
       case "/api/browse/google/JVVYZFCI0PaW/photos/items":
         return json(200, {
           items: [
@@ -394,6 +449,60 @@ describe("Browse", () => {
     expect(
       await screen.findByRole("link", { name: /Scan it on the Request page/ })
     ).toHaveAttribute("href", "/request?type=photos&account=JVVYZFCI0PaW");
+  });
+
+  it("shows an account's Cloud Storage buckets, and what the tree hides", async () => {
+    const user = userEvent.setup();
+    sources = [
+      {
+        ...google,
+        services: {
+          ...google.services,
+          gcs: {
+            granted: true,
+            files: 3000,
+            bytes: 5000000000,
+            updated_at: "2026-09-28T10:00:00Z",
+          },
+        },
+      },
+    ];
+    renderRoute("/?source=google:JVVYZFCI0PaW&service=gcs");
+
+    expect(
+      await screen.findByRole("tab", {
+        name: /Google Cloud Storage\s*3,000 objects · 4.7 GB/,
+      })
+    ).toHaveAttribute("aria-selected", "true");
+    expect(
+      await screen.findByRole("link", { name: "jyo-archive" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("US-WEST1 · ARCHIVE")).toBeInTheDocument();
+    expect(screen.getByText("ARCHIVE 4.7 GB")).toBeInTheDocument();
+    expect(screen.getByText("2 versions · 2.0 KB")).toBeInTheDocument();
+    expect(screen.getByText("1 object · 1.0 KB")).toBeInTheDocument();
+
+    // Into the bucket: both versions of a.txt, the old one marked.
+    const bucket = screen.getByRole("link", { name: "jyo-archive" });
+    await user.click(
+      bucket.closest("summary")!.firstElementChild!.firstElementChild!
+    );
+    expect(await screen.findByText("noncurrent version")).toBeInTheDocument();
+    expect(screen.getAllByText("a.txt")).toHaveLength(2);
+    expect(
+      requested("/api/browse/google/JVVYZFCI0PaW/gcs/children").map((u) =>
+        u.searchParams.get("folder")
+      )
+    ).toEqual(["", "jyo-archive/"]);
+  });
+
+  it("points to the Request page for Cloud Storage not granted", async () => {
+    renderRoute("/?source=google:JVVYZFCI0PaW&service=gcs");
+    expect(
+      await screen.findByRole("link", {
+        name: /Grant access on the Request page/,
+      })
+    ).toHaveAttribute("href", "/request?type=gcs&account=JVVYZFCI0PaW");
   });
 
   it("shows an agent drive's totals, status and tree, a page at a time", async () => {

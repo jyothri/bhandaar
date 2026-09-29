@@ -1,5 +1,5 @@
 /** A service a linked account can be scanned for. */
-export type Service = "gmail" | "drive" | "photos";
+export type Service = "gmail" | "drive" | "photos" | "gcs";
 
 export type Account = {
   clientKey: string;
@@ -9,6 +9,9 @@ export type Account = {
   // The Google account ID, for Google's login_hint; missing for accounts
   // linked before it was recorded.
   loginHint?: string;
+  // With Cloud Storage granted: whether the account can list its Cloud
+  // projects, or a project ID has to be typed in.
+  canListProjects?: boolean;
 };
 
 /** An account that has scans, as Request History lists it. */

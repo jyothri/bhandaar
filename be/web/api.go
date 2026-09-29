@@ -40,6 +40,7 @@ func api(r *mux.Router) {
 	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET").Queries("page", "{page}")
 	api.HandleFunc("/gmaildata/{scan_id}", ListMessageMetaDataHandler).Methods("GET")
 	photosRoutes(api)
+	gcsRoutes(api)
 	browseRoutes(api)
 }
 
@@ -75,9 +76,11 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 		scanId, err = collect.Gmail(doScanRequest.GMailScan, userID)
 	case "GPhotos":
 		// The Photos Library API no longer lists a library; Photos scans
-		// will start from the Picker API (docs/archive/photos-picker.md).
-		http.Error(w, "Google Photos scans aren't available yet.", http.StatusBadRequest)
+		// start from a pick (docs/archive/photos-picker.md).
+		http.Error(w, "Start a Google Photos scan by picking photos on the Request page.", http.StatusBadRequest)
 		return
+	case "GStorage":
+		scanId, err = collect.CloudStorage(doScanRequest.GStorageScan, userID)
 	default:
 		slog.Error("Unknown scan type", "scan_type", doScanRequest.ScanType)
 		http.Error(w, fmt.Sprintf("Unknown scan type: %s", doScanRequest.ScanType), http.StatusBadRequest)
@@ -87,6 +90,11 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 	var requestErr *collect.RequestError
 	if errors.As(err, &requestErr) {
 		http.Error(w, requestErr.Message, http.StatusBadRequest)
+		return
+	}
+	var gcsErr *collect.GcsError
+	if errors.As(err, &gcsErr) {
+		http.Error(w, gcsErr.Message, gcsErr.Status)
 		return
 	}
 	if err != nil {
@@ -108,9 +116,9 @@ const maxQueryLength = 2000
 // accountFor looks up a user's linked account; tests replace it.
 var accountFor = db.GetOAuthToken
 
-// checkScanRequest checks a Gmail or Drive request before any scan is
-// created: its query fits, and the account it names has granted access to
-// that service. It returns http.StatusOK, or a status and a message the
+// checkScanRequest checks a Gmail, Drive or Cloud Storage request before
+// any scan is created: its query fits, and the account it names has
+// granted access to that service. It returns http.StatusOK, or a status and a message the
 // Request page can show as is.
 func checkScanRequest(req DoScanRequest, userID int64) (int, string) {
 	var query, clientKey, service, serviceName string
@@ -119,6 +127,11 @@ func checkScanRequest(req DoScanRequest, userID int64) (int, string) {
 		query, clientKey, service, serviceName = req.GMailScan.Filter, req.GMailScan.ClientKey, db.ServiceGmail, "Gmail"
 	case "GDrive":
 		query, clientKey, service, serviceName = req.GDriveScan.QueryString, req.GDriveScan.ClientKey, db.ServiceDrive, "Google Drive"
+	case "GStorage":
+		if status, msg := checkGcsScan(req.GStorageScan); status != http.StatusOK {
+			return status, msg
+		}
+		clientKey, service, serviceName = req.GStorageScan.ClientKey, db.ServiceGcs, "Google Cloud Storage"
 	default:
 		return http.StatusOK, ""
 	}
@@ -392,6 +405,8 @@ type DoScanRequest struct {
 	LocalScan  collect.LocalScan
 	GDriveScan collect.GDriveScan
 	GMailScan  collect.GMailScan
+	// Google Cloud Storage.
+	GStorageScan collect.GStorageScan
 }
 
 type DoScanResponse struct {

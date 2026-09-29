@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import {
+  getGcsScanBuckets,
   getGmailData,
   getPickedItems,
   getScanData,
@@ -21,12 +22,14 @@ import {
   scanTypeLabel,
 } from "../format";
 import ScanStatus from "../components/ScanStatus";
+import Badge from "../components/ui/Badge";
 import Card from "../components/ui/Card";
 import Icon from "../components/ui/Icon";
 import Pager from "../components/ui/Pager";
 import Table from "../components/ui/Table";
 import { buttonClasses } from "../components/ui/styles";
 import { fileKind } from "../fileTypes";
+import { GcsScanBucket } from "../types/gcs";
 import { MessageRow, ScanDataRow, ScanSummary } from "../types/results";
 
 // A scan's results: its summary, then a page of what it found. See
@@ -129,6 +132,8 @@ function ScanDetails({
         <Files scanId={scanId} page={page} />
       ) : summary.scan_type === "google_photos" ? (
         <Picked scanId={scanId} page={page} />
+      ) : summary.scan_type === "gcs" ? (
+        <GcsBuckets scanId={scanId} clientKey={summary.client_key} />
       ) : (
         <Card>
           <p className="text-sm text-muted">
@@ -149,12 +154,18 @@ function Summary({ summary }: { summary: ScanSummary }) {
   const seconds = Number(summary.scan_duration_in_sec);
   const isGmail = summary.scan_type === "gmail";
   const isPhotos = summary.scan_type === "google_photos";
+  const isGcs = summary.scan_type === "gcs";
   // Per review item 7.9, a Gmail scan saves only the messages new in it.
   const items = isGmail
     ? count(summary.item_count, "new message")
     : isPhotos
       ? count(summary.item_count, "picked item")
-      : count(summary.item_count, "file");
+      : isGcs
+        ? count(summary.item_count, "live object")
+        : count(summary.item_count, "file");
+  // Cloud Storage's versions that aren't live, which cost storage too.
+  const beyondLive = (n: number, bytes: number, noun: string) =>
+    n > 0 ? `${count(n, noun)}, ${formatBytes(bytes)}` : "";
   const unsized =
     summary.unsized_count > 0
       ? `, ${formatCount(summary.unsized_count)} without a size`
@@ -166,13 +177,25 @@ function Summary({ summary }: { summary: ScanSummary }) {
   const rows: [string, string][] = [
     ["Account", summary.name],
     // A Photos scan's is always "Picked in Google Photos".
-    ["Folder", isPhotos ? "" : summary.search_path],
-    [isGmail ? "Filter" : "Query", summary.search_filter],
+    [isGcs ? "Covers" : "Folder", isPhotos ? "" : summary.search_path],
+    [isGmail ? "Filter" : isGcs ? "Includes" : "Query", summary.search_filter],
     ["Started", formatDateTime(summary.scan_start_time)],
     ["Duration", seconds < 0 ? "Not finished" : formatDuration(seconds)],
     [
       "Found",
       `${items}, ${formatBytes(summary.total_bytes)}${folders}${unsized}`,
+    ],
+    [
+      "Noncurrent",
+      beyondLive(summary.noncurrent_count, summary.noncurrent_bytes, "version"),
+    ],
+    [
+      "Soft-deleted",
+      beyondLive(
+        summary.soft_deleted_count,
+        summary.soft_deleted_bytes,
+        "object"
+      ),
     ],
   ];
   // Browse shows what all the account's scans of the service found.
@@ -183,7 +206,9 @@ function Summary({ summary }: { summary: ScanSummary }) {
         ? "drive"
         : isPhotos
           ? "photos"
-          : null;
+          : isGcs
+            ? "gcs"
+            : null;
   return (
     <Card
       title={
@@ -205,7 +230,9 @@ function Summary({ summary }: { summary: ScanSummary }) {
                 ? "Gmail"
                 : service === "photos"
                   ? "Google Photos"
-                  : "Google Drive"}
+                  : service === "gcs"
+                    ? "Google Cloud Storage"
+                    : "Google Drive"}
             </Link>
           )}
         </>
@@ -447,4 +474,117 @@ function Picked({ scanId, page }: { scanId: number; page: number }) {
       {body}
     </Card>
   );
+}
+
+const bucketTones: Record<
+  GcsScanBucket["status"],
+  "success" | "danger" | "neutral"
+> = {
+  completed: "success",
+  failed: "danger",
+  skipped: "neutral",
+};
+
+// "12 objects, 3.4 GB", or "" for none.
+function objectsAndBytes(n: number, bytes: number, noun = "object"): string {
+  return n > 0 ? `${count(n, noun)}, ${formatBytes(bytes)}` : "";
+}
+
+// What a Cloud Storage scan did with each bucket; its objects are in
+// Browse, since the account's record keeps them, not the scan.
+function GcsBuckets({
+  scanId,
+  clientKey,
+}: {
+  scanId: number;
+  clientKey: string;
+}) {
+  const { data, error } = useQuery({
+    queryKey: queryKeys.gcsScanBuckets(scanId),
+    queryFn: () => getGcsScanBuckets(scanId),
+  });
+  let body;
+  if (error) {
+    body = (
+      <p className="text-sm text-danger">
+        Couldn't load results: {error.message}
+      </p>
+    );
+  } else if (!data) {
+    body = <p className="text-sm text-muted">Loading results…</p>;
+  } else if (data.length === 0) {
+    body = <p className="text-sm text-muted">This scan has no buckets.</p>;
+  } else {
+    body = (
+      <Table
+        rowKey={(b) => b.bucket}
+        rows={data}
+        columns={[
+          {
+            header: "Bucket",
+            primary: true,
+            cell: (b) =>
+              b.status === "completed" && clientKey ? (
+                <Link
+                  to="/"
+                  search={{
+                    source: `google:${clientKey}`,
+                    service: "gcs",
+                    folder: `${b.bucket}/${b.prefix}`,
+                  }}
+                  className="wrap-anywhere hover:underline"
+                >
+                  {b.bucket}
+                  {b.prefix && `/${b.prefix}`}
+                </Link>
+              ) : (
+                <span className="wrap-anywhere">{b.bucket}</span>
+              ),
+          },
+          {
+            header: "Status",
+            cell: (b) => (
+              <span className="flex flex-col items-start gap-1">
+                <Badge tone={bucketTones[b.status]}>{b.status}</Badge>
+                {b.error && (
+                  <span className="text-xs text-muted">{b.error}</span>
+                )}
+              </span>
+            ),
+          },
+          {
+            header: "Live",
+            numeric: true,
+            cell: (b) => objectsAndBytes(b.live_objects, b.live_bytes),
+          },
+          {
+            header: "Noncurrent",
+            numeric: true,
+            cell: (b) =>
+              objectsAndBytes(
+                b.noncurrent_objects,
+                b.noncurrent_bytes,
+                "version"
+              ),
+          },
+          {
+            header: "Soft-deleted",
+            numeric: true,
+            cell: (b) =>
+              objectsAndBytes(b.soft_deleted_objects, b.soft_deleted_bytes),
+          },
+          {
+            header: "Live by class",
+            cell: (b) =>
+              Object.entries(b.bytes_by_class ?? {})
+                .sort(([, x], [, y]) => y - x)
+                .map(([name, bytes]) => `${name} ${formatBytes(bytes)}`)
+                .join(" · "),
+            className: "text-muted",
+          },
+        ]}
+      />
+    );
+  }
+  return <Card title="Buckets">{body}</Card>;
 }

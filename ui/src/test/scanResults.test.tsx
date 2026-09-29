@@ -27,6 +27,10 @@ const summary = (scan_id: number, scan_type: string, extra = {}) => ({
   total_bytes: 0,
   folder_count: 0,
   unsized_count: 0,
+  noncurrent_count: 0,
+  noncurrent_bytes: 0,
+  soft_deleted_count: 0,
+  soft_deleted_bytes: 0,
   ...extra,
 });
 
@@ -102,6 +106,49 @@ beforeEach(() => {
             },
           ],
         });
+      case "/api/scans/14/summary":
+        return json(
+          200,
+          summary(14, "gcs", {
+            search_path: "backup-276614 (all buckets)",
+            search_filter: "live, noncurrent versions, soft-deleted",
+            item_count: 3000,
+            total_bytes: 5000000000,
+            noncurrent_count: 2,
+            noncurrent_bytes: 2048,
+          })
+        );
+      case "/api/gcs/14":
+        return json(200, [
+          {
+            bucket: "jyo-archive",
+            project_id: "backup-276614",
+            prefix: "",
+            status: "completed",
+            error: "",
+            live_objects: 3000,
+            live_bytes: 5000000000,
+            noncurrent_objects: 2,
+            noncurrent_bytes: 2048,
+            soft_deleted_objects: 0,
+            soft_deleted_bytes: 0,
+            bytes_by_class: { ARCHIVE: 5000000000 },
+          },
+          {
+            bucket: "shared-data",
+            project_id: "backup-276614",
+            prefix: "",
+            status: "skipped",
+            error: "Requester Pays: listing it would bill this app's project",
+            live_objects: 0,
+            live_bytes: 0,
+            noncurrent_objects: 0,
+            noncurrent_bytes: 0,
+            soft_deleted_objects: 0,
+            soft_deleted_bytes: 0,
+            bytes_by_class: {},
+          },
+        ]);
       case "/api/scans/13/summary":
         return json(
           200,
@@ -224,6 +271,37 @@ describe("scan results", () => {
     expect(
       screen.getByRole("link", { name: "Browse this account's Google Photos" })
     ).toHaveAttribute("href", "/?source=google%3AJVVYZFCI0PaW&service=photos");
+  });
+
+  it("shows a Cloud Storage scan's buckets, linked to Browse", async () => {
+    renderRoute("/scans/14");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Scan 14 · Google Cloud Storage",
+      })
+    ).toBeVisible();
+    expect(screen.getByText("3,000 live objects, 4.7 GB")).toBeVisible();
+    expect(screen.getByText("2 versions, 2.0 KB")).toBeVisible();
+    expect(screen.getByText("backup-276614 (all buckets)")).toBeVisible();
+    expect(
+      await screen.findByRole("link", { name: "jyo-archive" })
+    ).toHaveAttribute(
+      "href",
+      "/?source=google%3AJVVYZFCI0PaW&service=gcs&folder=jyo-archive%2F"
+    );
+    expect(screen.getByText("ARCHIVE 4.7 GB")).toBeVisible();
+    expect(screen.getByText("skipped")).toBeVisible();
+    expect(
+      screen.getByText(
+        "Requester Pays: listing it would bill this app's project"
+      )
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", {
+        name: "Browse this account's Google Cloud Storage",
+      })
+    ).toHaveAttribute("href", "/?source=google%3AJVVYZFCI0PaW&service=gcs");
   });
 
   it("says when a scan type has no results view", async () => {

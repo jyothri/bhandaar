@@ -6,13 +6,18 @@ import { Service } from "./types/accounts";
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 
-/** The Google scope each service needs. */
+/** The Google scopes each service needs, space-separated. */
 export const serviceScopes: Record<Service, string> = {
   gmail: "https://www.googleapis.com/auth/gmail.readonly",
   // Metadata only: the scan never reads file contents.
   drive: "https://www.googleapis.com/auth/drive.metadata.readonly",
   // Only what the user picks; see docs/archive/photos-picker.md.
   photos: "https://www.googleapis.com/auth/photospicker.mediaitems.readonly",
+  // Read-only buckets and objects, and the account's project list; see
+  // docs/archive/gcs-scans.md.
+  gcs:
+    "https://www.googleapis.com/auth/devstorage.read_only " +
+    "https://www.googleapis.com/auth/cloudplatformprojects.readonly",
 };
 
 /**

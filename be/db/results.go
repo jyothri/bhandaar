@@ -33,6 +33,12 @@ type ScanSummary struct {
 	// Google Photos items with no size (see docs/archive/photos-picker.md);
 	// 0 for other scans.
 	UnsizedCount int `db:"unsized_count" json:"unsized_count"`
+	// Google Cloud Storage: noncurrent and soft-deleted object versions,
+	// which the item count and total leave out; 0 for other scans.
+	NoncurrentCount  int64 `db:"noncurrent_count" json:"noncurrent_count"`
+	NoncurrentBytes  int64 `db:"noncurrent_bytes" json:"noncurrent_bytes"`
+	SoftDeletedCount int64 `db:"soft_deleted_count" json:"soft_deleted_count"`
+	SoftDeletedBytes int64 `db:"soft_deleted_bytes" json:"soft_deleted_bytes"`
 }
 
 // GetScanSummary returns a scan's summary. The caller checks its owner.
@@ -48,17 +54,27 @@ func GetScanSummary(scanId int) (ScanSummary, error) {
 				THEN (SELECT count(*) FROM messagemetadata m WHERE m.scan_id = s.id)
 				WHEN s.scan_type = 'google_photos'
 				THEN (SELECT count(*) FROM photos_picked_items p WHERE p.scan_id = s.id)
+				WHEN s.scan_type = 'gcs'
+				THEN (SELECT COALESCE(sum(live_objects), 0) FROM gcs_scan_buckets g WHERE g.scan_id = s.id)
 				ELSE (SELECT count(*) FROM scandata d WHERE d.scan_id = s.id AND NOT COALESCE(d.is_dir, false))
 			END AS item_count,
 			CASE WHEN s.scan_type = 'gmail'
 				THEN (SELECT COALESCE(sum(size_estimate), 0) FROM messagemetadata m WHERE m.scan_id = s.id)
 				WHEN s.scan_type = 'google_photos'
 				THEN (SELECT COALESCE(sum(size), 0) FROM photos_picked_items p WHERE p.scan_id = s.id)
+				WHEN s.scan_type = 'gcs'
+				THEN (SELECT COALESCE(sum(live_bytes), 0) FROM gcs_scan_buckets g WHERE g.scan_id = s.id)
 				ELSE (SELECT COALESCE(sum(size), 0) FROM scandata d WHERE d.scan_id = s.id AND NOT COALESCE(d.is_dir, false))
 			END AS total_bytes,
 			(SELECT count(*) FROM scandata d WHERE d.scan_id = s.id AND COALESCE(d.is_dir, false)) AS folder_count,
-			(SELECT count(*) FROM photos_picked_items p WHERE p.scan_id = s.id AND p.size IS NULL) AS unsized_count
+			(SELECT count(*) FROM photos_picked_items p WHERE p.scan_id = s.id AND p.size IS NULL) AS unsized_count,
+			g.noncurrent_count, g.noncurrent_bytes, g.soft_deleted_count, g.soft_deleted_bytes
 		FROM scans s LEFT JOIN scanmetadata sm ON sm.scan_id = s.id
+		CROSS JOIN LATERAL (SELECT COALESCE(sum(noncurrent_objects), 0) AS noncurrent_count,
+				COALESCE(sum(noncurrent_bytes), 0) AS noncurrent_bytes,
+				COALESCE(sum(soft_deleted_objects), 0) AS soft_deleted_count,
+				COALESCE(sum(soft_deleted_bytes), 0) AS soft_deleted_bytes
+			FROM gcs_scan_buckets WHERE scan_id = s.id) g
 		WHERE s.id = $1
 		LIMIT 1`, scanId)
 	if err != nil {

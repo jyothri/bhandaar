@@ -2,7 +2,7 @@
 
 ## System Overview
 
-Bhandaar is a storage analyzer application that scans and analyzes data across multiple sources: local filesystems, Google Drive, Gmail, and Google Photos.
+Bhandaar is a storage analyzer application that scans and analyzes data across multiple sources: local filesystems, Google Drive, Gmail, Google Photos, and Google Cloud Storage.
 
 ## Architecture Diagram
 
@@ -22,12 +22,12 @@ graph TB
         subgraph BE["be: Go web app :8090"]
             MW["Middleware<br/>CORS, body limits,<br/>session check + origin check"]
             AuthH["auth.go<br/>/api/auth/login, logout, me"]
-            ApiH["api.go, browse.go, photos.go<br/>/api/scans, /api/accounts,<br/>/api/scans/{id}/summary, results,<br/>/api/browse, /api/photos"]
+            ApiH["api.go, browse.go, photos.go, gcs.go<br/>/api/scans, /api/accounts,<br/>/api/scans/{id}/summary, results,<br/>/api/browse, /api/photos, /api/gcs"]
             OAuthH["oauth.go<br/>/api/glink: link accounts"]
             SseH["sse.go<br/>/sse/scanprogress"]
-            Collect["Collectors<br/>drive.go, gmail.go, local.go,<br/>photos.go (polls picks)<br/>one scan at a time"]
+            Collect["Collectors<br/>drive.go, gmail.go, local.go,<br/>photos.go (polls picks), gcs.go<br/>one scan at a time"]
             Hub["notification hub<br/>progress events"]
-            DBL["db layer<br/>database.go, users.go, accounts.go,<br/>results.go, driveitems.go, browse.go,<br/>photos.go, totals.go (folder totals checker)"]
+            DBL["db layer<br/>database.go, users.go, accounts.go,<br/>results.go, driveitems.go, browse.go,<br/>photos.go, gcs.go, totals.go (folder totals checker)"]
         end
 
         subgraph AS["agentserver: Go :8091"]
@@ -36,7 +36,7 @@ graph TB
         end
 
         subgraph PG["PostgreSQL :5432 (one database)"]
-            BeTables[("be tables<br/>scans, scanmetadata, scandata,<br/>messagemetadata, privatetokens,<br/>web_sessions, drive_items, drive_accounts,<br/>browse_folder_totals, browse_totals_state,<br/>photos_picker_sessions, photos_picked_items")]
+            BeTables[("be tables<br/>scans, scanmetadata, scandata,<br/>messagemetadata, privatetokens,<br/>web_sessions, drive_items, drive_accounts,<br/>browse_folder_totals, browse_totals_state,<br/>photos_picker_sessions, photos_picked_items,<br/>gcs_buckets, gcs_objects, gcs_prefix_totals,<br/>gcs_scan_buckets")]
             AgentTables[("agentserver tables<br/>agent_users, agent_login_failures,<br/>agent_agents, agent_drives, agent_files,<br/>agent_dir_listings, agent_scan_runs, …")]
         end
     end
@@ -46,6 +46,8 @@ graph TB
         GDrive["Google Drive API<br/>drive.metadata.readonly"]
         GMail["Gmail API<br/>gmail.readonly"]
         GPhotos["Google Photos Picker API<br/>photospicker.mediaitems.readonly"]
+        GCS["Cloud Storage JSON API<br/>devstorage.read_only"]
+        GRM["Cloud Resource Manager API<br/>cloudplatformprojects.readonly"]
     end
 
     Browser -->|HTTPS| Nginx
@@ -77,6 +79,8 @@ graph TB
     Collect -->|"files.list / files.get"| GDrive
     Collect -->|"messages.list / get"| GMail
     Collect -->|"sessions, mediaItems.list,<br/>HEAD each item's bytes"| GPhotos
+    Collect -->|"buckets.list, objects.list<br/>(versions, softDeleted)"| GCS
+    Collect -->|"projects.search"| GRM
 
     classDef client fill:#61dafb,stroke:#333,color:#000
     classDef edge fill:#999,stroke:#333,color:#fff
@@ -90,7 +94,7 @@ graph TB
     class MW,AuthH,ApiH,OAuthH,SseH,Collect,Hub,DBL backend
     class AgentAPI,House agentsrv
     class BeTables,AgentTables database
-    class GAuth,GDrive,GMail,GPhotos external
+    class GAuth,GDrive,GMail,GPhotos,GCS,GRM external
 ```
 
 - **Web users** log in to `be` with `agentserver`'s users (`agent_users`), sharing its login lockout. Sessions are `web_sessions` rows behind an HttpOnly cookie (see [Web authentication](#web-authentication)).
@@ -112,11 +116,11 @@ graph TB
 **Key Components:**
 - `/routes/__root.tsx` and `/components/Header.tsx` - The app shell: a top bar with the Bhandaar name, the nav tabs (Browse · Request · Request History; a menu on phones) and the user menu (Log out); page titles `<page> · Bhandaar`. Login and the OAuth callback show just the name
 - `/components/ui/` - The shared components (Button, Card, Field, Input, Select, Checkbox, Tabs, Switch, Badge, Table, Pager, Icon, Spinner), styled only with the tokens; `Table` stacks rows into cards on phones
-- `/routes/index.tsx` - Browse: source picker, service tabs (Google Drive · Gmail · Google Photos), a summary card per source, and the folder tree (`/components/FolderTree.tsx`: file-type icons from `fileTypes.ts`, size bars for each entry's share of its folder), the account's messages, or its picked photos and videos (`/components/PickedItemsTable.tsx`)
-- `/routes/request.tsx` - Scan request form for Gmail, Google Drive and Google Photos (`?type=gmail|drive|photos`). An account without the chosen service gets a "Grant … access" button, which links it again for that service with Google's `login_hint`; the service being linked is kept in `sessionStorage` across the round trip. Drive fields build the Drive query (`driveQuery.ts`), which "Edit query" lets you replace, plus an optional folder (link or ID) with or without subfolders. Photos has no form: **Pick in Google Photos** (`/components/PhotosPick.tsx`) opens Google Photos to pick, then follows the pick until its scan is done (see [Photos Pick Flow](#photos-pick-flow))
+- `/routes/index.tsx` - Browse: source picker, service tabs (Google Drive · Gmail · Google Photos · Google Cloud Storage), a summary card per source, and the folder tree (`/components/FolderTree.tsx`: file-type icons from `fileTypes.ts`, size bars for each entry's share of its folder), the account's messages, or its picked photos and videos (`/components/PickedItemsTable.tsx`). Google Cloud Storage uses the folder tree too: buckets, then prefixes as folders (folder IDs `<bucket>/<prefix>`), every object version a row, with a card for the noncurrent and soft-deleted totals and the live bytes by class that the tree hides
+- `/routes/request.tsx` - Scan request form for Gmail, Google Drive, Google Photos and Google Cloud Storage (`?type=gmail|drive|photos|gcs`). An account without the chosen service gets a "Grant … access" button, which links it again for that service with Google's `login_hint`; the service being linked is kept in `sessionStorage` across the round trip. Drive fields build the Drive query (`driveQuery.ts`), which "Edit query" lets you replace, plus an optional folder (link or ID) with or without subfolders. Photos has no form: **Pick in Google Photos** (`/components/PhotosPick.tsx`) opens Google Photos to pick, then follows the pick until its scan is done (see [Photos Pick Flow](#photos-pick-flow)). Google Cloud Storage (`/components/GcsFields.tsx`): a project (listed, or typed when the account can't list its projects), all its buckets or one, an optional prefix, and whether to include noncurrent versions and soft-deleted objects
 - `/routes/requests.tsx` - List view of scan requests by account, with readable scan types; each scan ID links to its results. The selected account is in the URL (`?account=<client_key>`), so links and Back return to it
 - `/components/Breadcrumbs.tsx` - The trail under the nav tabs on Request History and scan pages: `Request History › <account> › Scan N`. A scan's trail always goes through its account (the summary's `client_key`), however the scan was opened, and the Request History tab stays highlighted on it
-- `/routes/scans.$scanId.tsx` - One scan's results: its summary, then 10 rows a page: files and folders with their folder, size, file count, modified time and MD5, linked to Drive (Drive, local), new messages (Gmail), or picked items with when taken, dimensions, camera and size (Google Photos)
+- `/routes/scans.$scanId.tsx` - One scan's results: its summary, then 10 rows a page: files and folders with their folder, size, file count, modified time and MD5, linked to Drive (Drive, local), new messages (Gmail), picked items with when taken, dimensions, camera and size (Google Photos), or each bucket's status and totals by state and class, linked into Browse (Google Cloud Storage)
 - `/routes/oauth/glink.tsx` - OAuth callback handler
 - `/api/index.ts` - Backend API client
 - `/components/ScanProgress.tsx` - Real-time progress display
@@ -139,7 +143,7 @@ Every route but health and login/logout needs a logged-in user (see [Web authent
 | `/api/auth/login` | POST | Log in; sets the session cookie |
 | `/api/auth/logout` | POST | End the session |
 | `/api/auth/me` | GET | The logged-in user |
-| `/api/scans` | POST | Submit scan request; a Gmail or Drive request's account must have granted that service, and its query must fit 2000 characters (else 400, before any scan is created). `GPhotos` answers 400: Photos scans start from a pick |
+| `/api/scans` | POST | Submit scan request; a Gmail or Drive request's account must have granted that service, and its query must fit 2000 characters (else 400, before any scan is created). `GPhotos` answers 400: Photos scans start from a pick. `GStorage` (`{ClientKey, ProjectId, Bucket, Prefix, Versions, SoftDeleted}`) checks the project or bucket with Google first: one the account can't see is a 403 or 404, with no scan |
 | `/api/scans` | GET | List all scans (paginated) |
 | `/api/scans/requests/{client_key}` | GET | The scans of one linked account, newest first |
 | `/api/scans/{scan_id}/summary` | GET | A scan's details and totals: file (or new-message, or picked-item) count and bytes, folder count, and Photos items without a size |
@@ -151,7 +155,10 @@ Every route but health and login/logout needs a logged-in user (see [Web authent
 | `/api/photos/sessions/{session_key}` | GET | A pick: `{sessionKey, pickerUri, state, scanId?, pickBy}`, `state` one of `waiting`, `scanning`, `done`, `expired`, `cancelled` |
 | `/api/photos/sessions/{session_key}` | DELETE | Cancel a waiting pick (409 once it's past `waiting`) |
 | `/api/photos/{scan_id}` | GET | A page (10) of a Photos scan's picked items |
-| `/api/accounts` | GET | List linked Google accounts: `clientKey`, `displayName`, `services` (`gmail`, `drive`, `photos`) and `loginHint` (the Google account ID, when known) |
+| `/api/gcs/{client_key}/projects` | GET | The account's active Cloud projects, `[{projectId, displayName}]`; 409 when it didn't grant the project list |
+| `/api/gcs/{client_key}/projects/{project}/buckets` | GET | The project's buckets: location, default class, versioning, soft-delete retention, Requester Pays |
+| `/api/gcs/{scan_id}` | GET | What a Cloud Storage scan did with each bucket: status, error, totals by state and class |
+| `/api/accounts` | GET | List linked Google accounts: `clientKey`, `displayName`, `services` (`gmail`, `drive`, `photos`, `gcs`), `loginHint` (the Google account ID, when known) and `canListProjects` (Cloud Storage) |
 | `/api/scans/accounts` | GET | The accounts with scans, as `{clientKey, displayName}`, each named by its newest scan |
 | `/api/browse/sources` | GET | What the user can browse: each linked account, with each service's grant and recorded totals, and each of their agents' drives (`<drive_id> (<hostname>)`), with totals, last sync and linked physical drive |
 | `/api/browse/google/{client_key}/drive/children` | GET | A page (200) of a folder of the account's Drive record (`?folder=<id>`; empty for the roots, My Drive and Shared with me): its path, subfolders with totals, then files, each largest first |
@@ -159,6 +166,7 @@ Every route but health and login/logout needs a logged-in user (see [Web authent
 | `/api/browse/agent/{id}/status` | GET | An agent drive's last scan run, last sync, physical drive, and whether its folder totals are being rebuilt |
 | `/api/browse/google/{client_key}/gmail/messages` | GET | A page (50) of the account's messages across its Gmail scans (`?sort=size|date`), each with the scan that found it |
 | `/api/browse/google/{client_key}/photos/items` | GET | A page (50) of the account's picked Photos across its scans, each item once as its latest scan found it (`?sort=size|date`, date being when taken), with that scan |
+| `/api/browse/google/{client_key}/gcs/children` | GET | A page (200) of the account's Cloud Storage record: its buckets (`?folder=` empty), or a prefix's subfolders then object versions (`?folder=<bucket>/<prefix>`), each largest first, with the folder's totals by state and class |
 
 Browse routes answer 404 for a source that isn't the user's. See [archive/browse.md](archive/browse.md).
 
@@ -170,7 +178,7 @@ Browse routes answer 404 for a source that isn't the user's. See [archive/browse
 
 #### Server-Sent Events (`web/sse.go`)
 - `/events` - Real-time scan progress updates
-- Broadcasts progress for Gmail, Drive and Photos scans, to the scan's owner only
+- Broadcasts progress for Gmail, Drive, Photos and Cloud Storage scans, to the scan's owner only
 
 #### Web authentication
 
@@ -213,6 +221,16 @@ Browse routes answer 404 for a source that isn't the user's. See [archive/browse
 - At startup, picks still `waiting` expire, and `scanning` ones end (their scans are failed as interrupted)
 - See [archive/photos-picker.md](archive/photos-picker.md)
 
+**Cloud Storage Scanner (`gcs.go`):**
+- Uses the Cloud Storage JSON API and Resource Manager with a linked account's refresh token, and the read-only scopes `devstorage.read_only` and `cloudplatformprojects.readonly`: it sees what that Google account's IAM roles allow
+- A scan covers a project's buckets, or one bucket under an optional prefix. The project or bucket is checked (`buckets.list` or `buckets.get`) before the scan is recorded
+- Each bucket in turn: `objects.list` (1000 a page; with `versions=true` for noncurrent versions), then, when asked, a second pass with `softDeleted=true`, since the two can't be combined. Rows go to the account's living record (`gcs_objects`, one per object version: live, noncurrent or soft-deleted) in batches of 1000, stamped with the scan
+- Once a bucket is done, what the scan didn't see in its scope (prefix, and the states it listed) leaves the record, and the bucket's folder totals (`gcs_prefix_totals`: objects and bytes by state, live bytes by class, per prefix) are rebuilt in SQL. The scan keeps its own totals per bucket (`gcs_scan_buckets`), which stay as later scans change the record
+- Requester Pays buckets are skipped (listing them would bill this app's project); a bucket that fails (403) is recorded and the scan goes on; it fails only if every bucket did. The client library retries 429s and 5xx
+- About 3,300 objects a second per pass, so a 10-million-object bucket takes about 50 minutes per pass
+- Real-time progress updates via SSE, under the account's `client_key`
+- See [archive/gcs-scans.md](archive/gcs-scans.md)
+
 #### Notification Hub (`notification/hub.go`)
 - Pub/sub pattern for progress updates
 - Channel-based communication
@@ -237,6 +255,10 @@ scans (main scan records)
 └── photos_picked_items (Google Photos items a scan picked)
 
 photos_picker_sessions (Google Photos picks: state, pick_by, scan_id)
+gcs_scan_buckets (what each Cloud Storage scan found of each bucket)
+
+gcs_buckets, gcs_objects, gcs_prefix_totals (each account's Cloud Storage record,
+  by client_key: buckets, object versions, folder totals; kept when scans are deleted)
 
 privatetokens (linked Google accounts: refresh tokens, granted scope, google_sub)
 web_sessions (web login sessions)
@@ -260,13 +282,12 @@ Implemented (rollout steps 1 and 4): `GET /agent/health`, `POST /agent/v1/handsh
 **OAuth 2.0:**
 - Authorization code flow, one service at a time with incremental authorization (see [Account Linking Flow](#account-linking-flow))
 - Refresh tokens stored per linked account, with the scopes Google granted
-- Scopes: `openid email` (identifies the account) plus `gmail.readonly` and/or `drive.metadata.readonly`. `photospicker.mediaitems.readonly` (Photos: only what the user picks)
+- Scopes: `openid email` (identifies the account) plus `gmail.readonly` and/or `drive.metadata.readonly`. `photospicker.mediaitems.readonly` (Photos: only what the user picks), and `devstorage.read_only` with `cloudplatformprojects.readonly` (Google Cloud Storage; the OAuth client's project needs the Cloud Resource Manager API enabled for the latter)
 - The OAuth client is in "Testing": refresh tokens expire 7 days after they're issued (review item 2.11)
 
 **Required Credentials:**
 - `OAUTH_CLIENT_ID` - Google OAuth client ID
 - `OAUTH_CLIENT_SECRET` - Google OAuth client secret
-- `GOOGLE_APPLICATION_CREDENTIALS` - Service account key file path
 
 ## Data Flow
 
@@ -386,6 +407,43 @@ sequenceDiagram
     UI-->>User: Scan N is done · View results
 ```
 
+### Cloud Storage Scan Flow
+
+A Google Cloud Storage scan of one bucket, from the Request page to Browse. A whole-project scan repeats the bucket part for each bucket. See [archive/gcs-scans.md](archive/gcs-scans.md#a-living-record-per-bucket).
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as UI (Request, Browse)
+    participant BE as be: gcs.go
+    participant GCS as Cloud Storage API
+    participant RM as Resource Manager
+    participant DB as PostgreSQL
+
+    User->>UI: Google Cloud Storage tab, pick an account
+    UI->>BE: GET /api/gcs/{key}/projects
+    BE->>RM: projects.search (state:ACTIVE)
+    UI->>BE: GET /api/gcs/{key}/projects/{project}/buckets
+    BE->>GCS: buckets.list
+    User->>UI: a bucket, prefix, versions + soft-deleted, Submit
+    UI->>BE: POST /api/scans {GStorage}
+    BE->>GCS: buckets.get (checked before the scan exists)
+    BE->>DB: scans + scanmetadata (gcs)
+    BE-->>UI: {scan_id}
+    loop 1000 objects a page
+        BE->>GCS: objects.list (versions=true)
+        BE->>DB: upsert gcs_objects (seen by this scan)
+    end
+    loop 1000 objects a page
+        BE->>GCS: objects.list (softDeleted=true)
+        BE->>DB: upsert gcs_objects
+    end
+    BE->>DB: delete unseen in scope; rebuild gcs_prefix_totals;<br/>gcs_buckets; gcs_scan_buckets; scan Completed
+    User->>UI: Browse › Google Cloud Storage
+    UI->>BE: GET /api/browse/google/{key}/gcs/children?folder=<bucket>/<prefix>
+    BE->>DB: gcs_prefix_totals, gcs_objects by parent
+```
+
 ### Real-time Progress Updates (SSE)
 
 ```mermaid
@@ -486,8 +544,7 @@ Services:
 ├── hdd_db (PostgreSQL)
 │   └── Port: 5432
 ├── hdd_be (Go Backend)
-│   ├── Port: 8090
-│   └── Volume: ~/keys/gae_creds.json
+│   └── Port: 8090
 ├── hdd_ui (React Frontend)
 │   └── Port: 80/443
 └── agentserver (driveagent uploads)
@@ -499,7 +556,6 @@ Services:
 **Backend:**
 - `OAUTH_CLIENT_ID` - Google OAuth client ID
 - `OAUTH_CLIENT_SECRET` - Google OAuth client secret
-- `GOOGLE_APPLICATION_CREDENTIALS` - Path to service account JSON
 - `FRONTEND_URL` - UI origin, or a comma-separated list of origins (e.g. `https://sm.jkurapati.com,http://192.168.1.118:5173`). Used for CORS, and as the only origins account linking may return to
 
 **agentserver:** the same `DB_*` variables as the backend, plus `AGENTSERVER_JWT_SECRET` (required) and the optional settings in the [server spec](specs/remote-sync-server.md#configuration).
@@ -514,14 +570,14 @@ Services:
 | Frontend | React, TypeScript, Vite, TanStack Router/Query, Tailwind CSS |
 | Backend | Go 1.x, Gorilla Mux, sqlx |
 | Database | PostgreSQL 15+ |
-| APIs | Google Drive API, Gmail API, Google Photos Picker API |
+| APIs | Google Drive API, Gmail API, Google Photos Picker API, Cloud Storage JSON API, Cloud Resource Manager API |
 | Auth | Google OAuth 2.0 |
 | Real-time | Server-Sent Events (SSE) |
 | Containerization | Docker, Docker Compose |
 
 ## Key Features
 
-1. **Multi-source Scanning:** Local, Google Drive, Gmail, Google Photos (picked items)
+1. **Multi-source Scanning:** Local, Google Drive, Gmail, Google Photos (picked items), Google Cloud Storage
 2. **Real-time Progress:** SSE-based progress updates for long-running scans
 3. **OAuth Integration:** Secure Google account authentication
 4. **Persistent Storage:** PostgreSQL with auto-migration

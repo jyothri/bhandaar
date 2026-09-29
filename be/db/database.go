@@ -327,6 +327,8 @@ func DeleteScan(scanId int) error {
 		{"scandata", `DELETE FROM scandata WHERE scan_id = $1`},
 		{"messagemetadata", `DELETE FROM messagemetadata WHERE scan_id = $1`},
 		{"photos_picked_items", `DELETE FROM photos_picked_items WHERE scan_id = $1`},
+		// The Cloud Storage record stays; only the scan's own view goes.
+		{"gcs_scan_buckets", `DELETE FROM gcs_scan_buckets WHERE scan_id = $1`},
 		{"scanmetadata", `DELETE FROM scanmetadata WHERE scan_id = $1`},
 		{"scans", `DELETE FROM scans WHERE id = $1`},
 	}
@@ -459,6 +461,9 @@ func migrateDB() error {
 		return err
 	}
 	if err := migratePhotosPicker(); err != nil {
+		return err
+	}
+	if err := migrateGcs(); err != nil {
 		return err
 	}
 	return migrateBrowseTotals()
@@ -680,6 +685,9 @@ type Account struct {
 	// The Google account ID, for Google's login_hint; empty for an account
 	// linked before it was recorded.
 	LoginHint string `json:"loginHint,omitempty"`
+	// With Cloud Storage granted: whether the account can list its Cloud
+	// projects too, or the Request page has to ask for a project ID.
+	CanListProjects bool `json:"canListProjects,omitempty"`
 }
 
 func substr(s string, end int) string {

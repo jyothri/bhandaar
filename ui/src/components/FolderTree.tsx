@@ -15,7 +15,9 @@ import Icon from "./ui/Icon";
 // bar for its share of the folder it's in. See docs/archive/browse.md,
 // "Browse page", and docs/archive/ui-refresh.md, "Storage at a glance".
 
-export type TreeSource = { kind: "google" | "agent"; key: string };
+// A Google account's Drive, an agent drive, or a Google account's Cloud
+// Storage (folders "<bucket>/<prefix>").
+export type TreeSource = { kind: "google" | "agent" | "gcs"; key: string };
 
 type TreeProps = {
   source: TreeSource;
@@ -40,10 +42,17 @@ export default function FolderTree({ source, folder, onOpen }: TreeProps) {
   );
 }
 
-// "1 file", "2 files".
-function files(n: number): string {
-  return `${formatCount(n)} file${n === 1 ? "" : "s"}`;
+// "1 file", "2 files"; objects in Cloud Storage.
+function files(n: number, source: TreeSource): string {
+  const noun = source.kind === "gcs" ? "object" : "file";
+  return `${formatCount(n)} ${noun}${n === 1 ? "" : "s"}`;
 }
+
+// How a Cloud Storage object version that isn't live reads.
+const gcsStates: Record<string, string> = {
+  noncurrent: "noncurrent",
+  soft_deleted: "soft-deleted",
+};
 
 // Where a Drive file or folder opens.
 function driveUrl(id: string, isDir: boolean): string {
@@ -255,7 +264,7 @@ function Folder({
       <a
         href="#"
         className="truncate hover:underline"
-        title={source.kind === "agent" ? folder.id : folder.name}
+        title={source.kind === "google" ? folder.name : folder.id}
         onClick={(e) => {
           // Moves the trail here, without toggling the folder.
           e.preventDefault();
@@ -264,6 +273,11 @@ function Folder({
       >
         {folder.name}
       </a>
+      {folder.detail && (
+        <span className="hidden shrink-0 text-xs text-muted sm:inline">
+          {folder.detail}
+        </span>
+      )}
       {source.kind === "google" && folder.id !== sharedWithMe && (
         <a
           href={driveUrl(folder.id, true)}
@@ -290,7 +304,7 @@ function Folder({
             name={name}
             bar={shareOf(folder.bytes, total)}
             size={formatBytes(folder.bytes)}
-            detail={files(folder.files)}
+            detail={files(folder.files, source)}
             detailOnPhones
           />
         </summary>
@@ -354,6 +368,11 @@ function File({
         {file.error && (
           <span className="block text-xs text-danger">{file.error}</span>
         )}
+        {file.state && gcsStates[file.state] && (
+          <span className="block text-xs text-warning">
+            {gcsStates[file.state]} version
+          </span>
+        )}
       </span>
     </span>
   );
@@ -364,7 +383,12 @@ function File({
         name={name}
         bar={file.size === null ? null : shareOf(file.size, total)}
         size={size}
-        detail={file.modified ? formatDateTime(file.modified) : ""}
+        detail={[
+          file.modified ? formatDateTime(file.modified) : "",
+          file.storage_class ?? "",
+        ]
+          .filter(Boolean)
+          .join(" · ")}
       />
     </li>
   );

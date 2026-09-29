@@ -13,7 +13,7 @@ import { queryKeys } from "../api/queryKeys";
 import { accountLabels } from "../accountLabels";
 import Breadcrumbs from "../components/Breadcrumbs";
 import Masked, { MaskToggle } from "../components/Masked";
-import FolderTree from "../components/FolderTree";
+import FolderTree, { TreeSource } from "../components/FolderTree";
 import PickedItemsTable from "../components/PickedItemsTable";
 import Badge from "../components/ui/Badge";
 import Card from "../components/ui/Card";
@@ -30,7 +30,7 @@ import { BrowseSource, ServiceTotals } from "../types/browse";
 // Browse: what you have, by Google account and by agent drive. See
 // docs/archive/browse.md, "Browse page".
 
-type BrowseService = "drive" | "gmail" | "photos";
+type BrowseService = "drive" | "gmail" | "photos" | "gcs";
 
 type BrowseSearch = {
   // "google:<client key>" or "agent:<drive ID>".
@@ -53,7 +53,8 @@ export const Route = createFileRoute("/")({
         : {}),
       ...(search.service === "drive" ||
       search.service === "gmail" ||
-      search.service === "photos"
+      search.service === "photos" ||
+      search.service === "gcs"
         ? { service: search.service }
         : {}),
       ...(typeof search.folder === "string" && search.folder !== ""
@@ -95,6 +96,7 @@ const serviceNames: Record<BrowseService, string> = {
   drive: "Google Drive",
   gmail: "Gmail",
   photos: "Google Photos",
+  gcs: "Google Cloud Storage",
 };
 
 // What a service's totals count.
@@ -102,6 +104,7 @@ const serviceNouns: Record<BrowseService, string> = {
   drive: "file",
   gmail: "message",
   photos: "item",
+  gcs: "object",
 };
 
 function Browse() {
@@ -176,7 +179,9 @@ function SourceView({
   const recalled = recall(lastServiceKey(source.key));
   const service: BrowseService =
     search.service ??
-    (recalled === "gmail" || recalled === "photos" ? recalled : "drive");
+    (recalled === "gmail" || recalled === "photos" || recalled === "gcs"
+      ? recalled
+      : "drive");
 
   useEffect(() => {
     remember(lastSourceKey, id);
@@ -246,6 +251,20 @@ function SourceView({
   );
 }
 
+// The folder tree a source and service show, if any.
+function treeSource(
+  source: BrowseSource,
+  service: BrowseService
+): TreeSource | null {
+  if (source.kind === "agent") {
+    return { kind: "agent", key: source.key };
+  }
+  if (service === "drive" || service === "gcs") {
+    return { kind: service === "drive" ? "google" : "gcs", key: source.key };
+  }
+  return null;
+}
+
 // Browse › <source> › <service> › <folder path>, each part a link back up.
 function Trail({
   source,
@@ -259,12 +278,16 @@ function Trail({
   folder: string;
 }) {
   const id = sourceId(source);
-  const showsFolders = source.kind === "agent" || service === "drive";
+  const tree = treeSource(source, service);
   // The folder's path; the tree's first page, already loaded.
   const { data } = useQuery({
-    queryKey: queryKeys.browseChildren(id, folder, 1),
-    queryFn: () => getBrowseChildren(source.kind, source.key, folder, 1),
-    enabled: showsFolders && folder !== "",
+    queryKey: queryKeys.browseChildren(
+      `${tree?.kind}:${source.key}`,
+      folder,
+      1
+    ),
+    queryFn: () => getBrowseChildren(tree!.kind, source.key, folder, 1),
+    enabled: tree !== null && folder !== "",
   });
   const path = folder !== "" ? (data?.path ?? []) : [];
   const serviceSearch = source.kind === "google" ? { service } : {};
@@ -426,6 +449,11 @@ function GoogleAccount({
             label: "Google Photos",
             sub: sub("photos", services.photos),
           },
+          {
+            id: "gcs",
+            label: "Google Cloud Storage",
+            sub: sub("gcs", services.gcs),
+          },
         ]}
       />
       <SummaryCard
@@ -434,7 +462,9 @@ function GoogleAccount({
             ? "mail"
             : service === "photos"
               ? "image"
-              : "cloud"
+              : service === "gcs"
+                ? "archive"
+                : "cloud"
         }
         name={label}
         kind={`Google account · ${serviceNames[service]}`}
@@ -465,6 +495,19 @@ function GoogleAccount({
             })
           }
         />
+      ) : service === "gcs" ? (
+        <>
+          <GcsBeyondLive clientKey={source.key} folder={folder} />
+          <FolderTree
+            source={{ kind: "gcs", key: source.key }}
+            folder={folder}
+            onOpen={(f) =>
+              navigate({
+                search: { source: sourceId(source), service, folder: f },
+              })
+            }
+          />
+        </>
       ) : service === "photos" ? (
         <Photos
           clientKey={source.key}
@@ -814,6 +857,57 @@ function Photos({
           <PickedItemsTable rows={data.items} scanOf={(item) => item.scan_id} />
         </>
       )}
+    </Card>
+  );
+}
+
+// What a Cloud Storage folder tree hides: noncurrent and soft-deleted
+// versions, which cost storage too, and live bytes by storage class. The
+// tree's first page carries them, so this shares its query.
+function GcsBeyondLive({
+  clientKey,
+  folder,
+}: {
+  clientKey: string;
+  folder: string;
+}) {
+  const { data } = useQuery({
+    queryKey: queryKeys.browseChildren(`gcs:${clientKey}`, folder, 1),
+    queryFn: () => getBrowseChildren("gcs", clientKey, folder, 1),
+  });
+  const gcs = data?.gcs;
+  if (!gcs) {
+    return null;
+  }
+  const classes = Object.entries(gcs.bytes_by_class ?? {})
+    .sort(([, a], [, b]) => b - a)
+    .map(([name, bytes]) => `${name} ${formatBytes(bytes)}`);
+  const rows: [string, string][] = [
+    ["Live, by storage class", classes.join(" · ") || "None"],
+    [
+      "Noncurrent versions",
+      totals(gcs.noncurrent_objects, gcs.noncurrent_bytes, "version"),
+    ],
+    [
+      "Soft-deleted objects",
+      totals(gcs.soft_deleted_objects, gcs.soft_deleted_bytes, "object"),
+    ],
+  ];
+  return (
+    <Card>
+      <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[max-content_1fr]">
+        {rows.map(([label, value]) => (
+          <div key={label} className="contents">
+            <dt className="text-muted">{label}</dt>
+            <dd className="tabular-nums">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-3 text-xs text-muted">
+        {folder === "" ? "Across every bucket" : "Under this folder"}. The tree
+        shows live objects; noncurrent and soft-deleted versions are billed too,
+        until they&apos;re deleted for good.
+      </p>
     </Card>
   );
 }

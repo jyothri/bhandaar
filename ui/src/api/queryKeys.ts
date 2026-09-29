@@ -4,6 +4,10 @@ export const queryKeys = {
   me: ["me"] as const,
   accounts: ["accounts"] as const,
   activePhotosPick: ["activePhotosPick"] as const,
+  gcsProjects: (clientKey: string) => ["gcsProjects", clientKey] as const,
+  gcsBuckets: (clientKey: string, project: string) =>
+    ["gcsBuckets", clientKey, project] as const,
+  gcsScanBuckets: (scanId: number) => ["gcsScanBuckets", scanId] as const,
   photosPick: (sessionKey: string) => ["photosPick", sessionKey] as const,
   scannedAccounts: ["scannedAccounts"] as const,
   // Prefix of every scanRequests(accountKey) key, for invalidating them all.

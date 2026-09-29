@@ -1,5 +1,6 @@
 // What Browse shows. See docs/archive/browse.md, "Browse API".
 
+import { GcsTotals } from "./gcs";
 import { MessageRow } from "./results";
 
 /** What's recorded of one service of a Google account. */
@@ -25,6 +26,7 @@ export type BrowseSource = {
     drive: ServiceTotals;
     gmail: ServiceTotals;
     photos: ServiceTotals;
+    gcs: ServiceTotals;
   };
   // An agent drive's totals, last sync, and linked physical drive.
   files?: number;
@@ -46,6 +48,8 @@ export type BrowseFolder = {
   // Everything under it, at any depth.
   files: number;
   bytes: number;
+  // A line about it, e.g. a bucket's location and class.
+  detail?: string;
 };
 
 export type BrowseFile = {
@@ -57,6 +61,9 @@ export type BrowseFile = {
   mime_type?: string;
   // Why an agent couldn't read it.
   error?: string;
+  // A Cloud Storage object version's class and state.
+  storage_class?: string;
+  state?: "live" | "noncurrent" | "soft_deleted";
 };
 
 /** A page of a folder: subfolders, then files, each largest first. */
@@ -73,6 +80,9 @@ export type FolderPage = {
   updating: boolean;
   // Everything under the folder itself.
   totals: { files: number; bytes: number };
+  // Cloud Storage: everything under it by state and class; totals counts
+  // live objects only.
+  gcs?: GcsTotals;
 };
 
 export type AgentScanRun = {

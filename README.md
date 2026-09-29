@@ -6,8 +6,9 @@ Bhandaar is a storage analyzer. It scans your data where it lives and shows you 
 - **Gmail**: messages and their sizes
 - **Local drives**: via `driveagent`, which scans and compares drives on your machines and uploads the results
 - **Google Photos**: the photos and videos you pick in Google Photos, with their sizes (Google no longer lets apps list a whole library; [how it works](docs/archive/photos-picker.md))
+- **Google Cloud Storage**: a project's buckets, or one bucket under a prefix, including the noncurrent versions and soft-deleted objects that cost money but hide from normal listings ([how it works](docs/archive/gcs-scans.md))
 
-Scans and linked Google accounts belong to the user who made them. The web app's **Browse** page shows a folder tree for any linked Google account or uploaded agent drive, with each folder's total size and file count, and an account's Gmail messages and picked Google Photos, largest first.
+Scans and linked Google accounts belong to the user who made them. The web app's **Browse** page shows a folder tree for any linked Google account or uploaded agent drive, with each folder's total size and file count, an account's Cloud Storage buckets and prefixes, and its Gmail messages and picked Google Photos, largest first.
 
 ## Components
 
@@ -42,7 +43,7 @@ You need PostgreSQL, Go (see each module's `go.mod`) and Node (see `ui/.nvmrc`).
    cd be && DB_HOST=localhost DB_USER=postgres DB_PASSWORD=postgres DB_NAME=postgres \
      go run . -frontend_url=http://localhost:5173
    ```
-   Linking Google accounts also needs `-oauth_client_id` and `-oauth_client_secret` from a Google Cloud OAuth client, and `GOOGLE_APPLICATION_CREDENTIALS`.
+   Linking Google accounts also needs `-oauth_client_id` and `-oauth_client_secret` from a Google Cloud OAuth client.
 4. **Start the UI** and open http://localhost:5173:
    ```bash
    cd ui && npm ci && npm run dev
