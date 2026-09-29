@@ -4,9 +4,11 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/gorilla/mux"
 	"github.com/jyothri/hdd/collect"
 	"github.com/jyothri/hdd/db"
 )
@@ -76,5 +78,25 @@ func TestCheckScanRequestRejectsABadFolderId(t *testing.T) {
 		if (status == http.StatusOK) != ok {
 			t.Errorf("folder %q: got %d %q, want ok=%v", id, status, message, ok)
 		}
+	}
+}
+
+// The Photos Library API's scans and routes are gone; see
+// docs/archive/photos-picker.md.
+func TestPhotosLibraryAPIIsGone(t *testing.T) {
+	fakeSessions(t)
+	r := mux.NewRouter()
+	r.Use(authenticate)
+	api(r)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/scans", strings.NewReader(`{"ScanType": "GPhotos"}`))
+	rec := serve(r, withSession(req, "good"))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("POST /api/scans GPhotos: status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	// "albums" isn't a scan ID to /api/photos/{scan_id}.
+	rec = serve(r, withSession(httptest.NewRequest(http.MethodGet, "/api/photos/albums?refresh_token=x", nil), "good"))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("GET /api/photos/albums: status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }

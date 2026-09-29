@@ -6,6 +6,11 @@ import {
   BrowseSource,
   FolderPage,
 } from "../types/browse";
+import {
+  AccountPhotoPage,
+  PhotosPick,
+  PickedItemPage,
+} from "../types/photos";
 import { MessagePage, ScanDataPage, ScanSummary } from "../types/results";
 import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 
@@ -111,6 +116,29 @@ export const requestScan = (
     body: JSON.stringify(scanData),
   });
 
+/** Starts picking in Google Photos for a linked account. */
+export const startPhotosPick = (clientKey: string): Promise<PhotosPick> =>
+  fetchJson("/api/photos/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientKey }),
+  });
+
+/** The user's pick that is waiting or scanning, if any. */
+export const getActivePhotosPick = (): Promise<PhotosPick | null> =>
+  fetchJson("/api/photos/sessions");
+
+/** A pick's state, and its scan once picked. */
+export const getPhotosPick = (sessionKey: string): Promise<PhotosPick> =>
+  fetchJson(`/api/photos/sessions/${encodeURIComponent(sessionKey)}`);
+
+/** Cancels a pick the user hasn't picked in yet. */
+export const cancelPhotosPick = async (sessionKey: string): Promise<void> => {
+  await fetchBackend(`/api/photos/sessions/${encodeURIComponent(sessionKey)}`, {
+    method: "DELETE",
+  });
+};
+
 /**
  * Function to get list of accounts.
  */
@@ -140,6 +168,12 @@ export const getScanData = (scanId: number, page: number): Promise<ScanDataPage>
 /** A page (from 1) of the messages a Gmail scan found. */
 export const getGmailData = (scanId: number, page: number): Promise<MessagePage> =>
   fetchJson(`/api/gmaildata/${scanId}?page=${page}`);
+
+/** A page (from 1) of the items a Google Photos scan picked. */
+export const getPickedItems = (
+  scanId: number,
+  page: number
+): Promise<PickedItemPage> => fetchJson(`/api/photos/${scanId}?page=${page}`);
 
 /** What the user can browse: their Google accounts and agent drives. */
 export const getBrowseSources = (): Promise<BrowseSource[]> =>
@@ -175,4 +209,14 @@ export const getAccountMessages = (
 ): Promise<AccountMessagePage> =>
   fetchJson(
     `/api/browse/google/${encodeURIComponent(clientKey)}/gmail/messages?sort=${sort}&page=${page}`
+  );
+
+/** A page (from 1) of a Google account's picked Photos, across its scans. */
+export const getAccountPhotos = (
+  clientKey: string,
+  sort: "size" | "date",
+  page: number
+): Promise<AccountPhotoPage> =>
+  fetchJson(
+    `/api/browse/google/${encodeURIComponent(clientKey)}/photos/items?sort=${sort}&page=${page}`
   );

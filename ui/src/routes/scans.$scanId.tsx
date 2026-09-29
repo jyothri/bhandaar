@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import {
   getGmailData,
+  getPickedItems,
   getScanData,
   getScannedAccounts,
   getScanSummary,
@@ -10,6 +11,7 @@ import {
 import { accountLabels } from "../accountLabels";
 import Breadcrumbs from "../components/Breadcrumbs";
 import Masked, { MaskToggle } from "../components/Masked";
+import PickedItemsTable from "../components/PickedItemsTable";
 import { queryKeys } from "../api/queryKeys";
 import {
   formatBytes,
@@ -125,6 +127,8 @@ function ScanDetails({
       ) : summary.scan_type === "google_drive" ||
         summary.scan_type === "local" ? (
         <Files scanId={scanId} page={page} />
+      ) : summary.scan_type === "google_photos" ? (
+        <Picked scanId={scanId} page={page} />
       ) : (
         <Card>
           <p className="text-sm text-muted">
@@ -144,21 +148,32 @@ function count(n: number, noun: string): string {
 function Summary({ summary }: { summary: ScanSummary }) {
   const seconds = Number(summary.scan_duration_in_sec);
   const isGmail = summary.scan_type === "gmail";
+  const isPhotos = summary.scan_type === "google_photos";
   // Per review item 7.9, a Gmail scan saves only the messages new in it.
   const items = isGmail
     ? count(summary.item_count, "new message")
-    : count(summary.item_count, "file");
+    : isPhotos
+      ? count(summary.item_count, "picked item")
+      : count(summary.item_count, "file");
+  const unsized =
+    summary.unsized_count > 0
+      ? `, ${formatCount(summary.unsized_count)} without a size`
+      : "";
   const folders =
     summary.folder_count > 0
       ? `, ${count(summary.folder_count, "folder")}`
       : "";
   const rows: [string, string][] = [
     ["Account", summary.name],
-    ["Folder", summary.search_path],
+    // A Photos scan's is always "Picked in Google Photos".
+    ["Folder", isPhotos ? "" : summary.search_path],
     [isGmail ? "Filter" : "Query", summary.search_filter],
     ["Started", formatDateTime(summary.scan_start_time)],
     ["Duration", seconds < 0 ? "Not finished" : formatDuration(seconds)],
-    ["Found", `${items}, ${formatBytes(summary.total_bytes)}${folders}`],
+    [
+      "Found",
+      `${items}, ${formatBytes(summary.total_bytes)}${folders}${unsized}`,
+    ],
   ];
   // Browse shows what all the account's scans of the service found.
   const service =
@@ -166,7 +181,9 @@ function Summary({ summary }: { summary: ScanSummary }) {
       ? "gmail"
       : summary.scan_type === "google_drive"
         ? "drive"
-        : null;
+        : isPhotos
+          ? "photos"
+          : null;
   return (
     <Card
       title={
@@ -184,7 +201,11 @@ function Summary({ summary }: { summary: ScanSummary }) {
               className={buttonClasses("secondary", "sm")}
             >
               Browse this account's{" "}
-              {service === "gmail" ? "Gmail" : "Google Drive"}
+              {service === "gmail"
+                ? "Gmail"
+                : service === "photos"
+                  ? "Google Photos"
+                  : "Google Drive"}
             </Link>
           )}
         </>
@@ -387,6 +408,42 @@ function Messages({ scanId, page }: { scanId: number; page: number }) {
   }
   return (
     <Card title="New messages" actions={<MaskToggle />}>
+      {body}
+    </Card>
+  );
+}
+
+function Picked({ scanId, page }: { scanId: number; page: number }) {
+  const { data, error } = useQuery({
+    queryKey: queryKeys.pickedItems(scanId, page),
+    queryFn: () => getPickedItems(scanId, page),
+    placeholderData: keepPreviousData,
+  });
+  let body;
+  if (error) {
+    body = (
+      <p className="text-sm text-danger">
+        Couldn't load results: {error.message}
+      </p>
+    );
+  } else if (!data) {
+    body = <p className="text-sm text-muted">Loading results…</p>;
+  } else if (data.total === 0) {
+    body = <p className="text-sm text-muted">This scan has no items.</p>;
+  } else {
+    body = (
+      <>
+        <ResultsPager page={page} total={data.total} />
+        <PickedItemsTable rows={data.items} />
+      </>
+    );
+  }
+  return (
+    <Card title="Picked items">
+      <p className="mb-3 text-xs text-muted">
+        Sizes are of the copy Google Photos keeps, which can be far smaller than
+        the original file (Storage saver).
+      </p>
       {body}
     </Card>
   );

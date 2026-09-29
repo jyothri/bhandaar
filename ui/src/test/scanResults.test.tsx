@@ -26,6 +26,7 @@ const summary = (scan_id: number, scan_type: string, extra = {}) => ({
   item_count: 0,
   total_bytes: 0,
   folder_count: 0,
+  unsized_count: 0,
   ...extra,
 });
 
@@ -101,6 +102,44 @@ beforeEach(() => {
             },
           ],
         });
+      case "/api/scans/13/summary":
+        return json(
+          200,
+          summary(13, "google_photos", {
+            search_path: "Picked in Google Photos",
+            search_filter: "",
+            item_count: 2,
+            total_bytes: 7908979,
+            unsized_count: 1,
+          })
+        );
+      case "/api/photos/13":
+        return json(200, {
+          items: [
+            {
+              media_item_id: "m1",
+              media_type: "PHOTO",
+              mime_type: "image/jpeg",
+              filename: "PXL_20241212.jpg",
+              create_time: "2024-12-12T14:20:11Z",
+              width: 3072,
+              height: 4080,
+              camera_make: "Google",
+              camera_model: "Pixel 8 Pro",
+              focal_length: 18,
+              f_number: 2.8,
+              iso: 517,
+              exposure_time: "0.04s",
+              fps: null,
+              size: 1231877,
+              size_source: "head",
+              md5: "",
+            },
+          ],
+          page: page || 1,
+          page_size: 10,
+          total: 2,
+        });
       case "/api/scans/3/summary":
         return json(200, summary(3, "photos", { client_key: "", name: "" }));
       case "/api/scans/9/summary":
@@ -164,6 +203,27 @@ describe("scan results", () => {
     expect(await screen.findByText("1 new message, 2.0 KB")).toBeVisible();
     expect(await screen.findByText("Weekly digest")).toBeVisible();
     expect(screen.getByText("news@example.com")).toBeVisible();
+  });
+
+  it("shows a Photos scan's picked items", async () => {
+    renderRoute("/scans/13");
+
+    expect(
+      await screen.findByRole("heading", { name: "Scan 13 · Google Photos" })
+    ).toBeVisible();
+    expect(
+      screen.getByText("2 picked items, 7.5 MB, 1 without a size")
+    ).toBeVisible();
+    expect(screen.queryByText("Picked in Google Photos")).toBeNull();
+    expect(await screen.findByText("PXL_20241212.jpg")).toBeVisible();
+    expect(screen.getByText("3072 × 4080")).toBeVisible();
+    expect(screen.getByText("~1.2 MB")).toHaveAttribute(
+      "title",
+      "The size of the copy Google Photos keeps"
+    );
+    expect(
+      screen.getByRole("link", { name: "Browse this account's Google Photos" })
+    ).toHaveAttribute("href", "/?source=google%3AJVVYZFCI0PaW&service=photos");
   });
 
   it("says when a scan type has no results view", async () => {

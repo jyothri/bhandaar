@@ -25,6 +25,7 @@ const google = {
       updated_at: "2026-09-27T10:00:00Z",
     },
     gmail: { granted: false },
+    photos: { granted: false },
   },
 };
 const agent = {
@@ -173,6 +174,54 @@ beforeEach(() => {
           physical_drive: 1,
           updating: true,
         });
+      case "/api/browse/google/JVVYZFCI0PaW/photos/items":
+        return json(200, {
+          items: [
+            {
+              media_item_id: "m1",
+              media_type: "VIDEO",
+              mime_type: "video/mp4",
+              filename: "VID_4648.MOV",
+              create_time: "2020-10-11T02:08:59Z",
+              width: 1920,
+              height: 1080,
+              camera_make: "",
+              camera_model: "",
+              focal_length: null,
+              f_number: null,
+              iso: null,
+              exposure_time: "",
+              fps: 23.976,
+              size: 7908979,
+              size_source: "head",
+              md5: "",
+              scan_id: 12,
+            },
+            {
+              media_item_id: "m2",
+              media_type: "PHOTO",
+              mime_type: "image/jpeg",
+              filename: "PXL_1.jpg",
+              create_time: null,
+              width: null,
+              height: null,
+              camera_make: "Google",
+              camera_model: "Pixel 8 Pro",
+              focal_length: 6.9,
+              f_number: 1.68,
+              iso: 25,
+              exposure_time: "0.0005s",
+              fps: null,
+              size: null,
+              size_source: "unavailable",
+              md5: "",
+              scan_id: 12,
+            },
+          ],
+          total: 2,
+          page: n || 1,
+          page_size: 50,
+        });
       case "/api/browse/google/JVVYZFCI0PaW/gmail/messages":
         return json(200, {
           messages: [
@@ -272,7 +321,9 @@ describe("Browse", () => {
       "href",
       "/request?type=gmail&account=JVVYZFCI0PaW"
     );
-    expect(screen.getByRole("tab", { name: /Google Photos/ })).toBeDisabled();
+    expect(
+      screen.getByRole("tab", { name: /Google Photos.*Not granted/ })
+    ).toBeEnabled();
   });
 
   it("lists an account's messages, largest first, linked to their scans", async () => {
@@ -297,6 +348,52 @@ describe("Browse", () => {
         "/api/browse/google/JVVYZFCI0PaW/gmail/messages"
       )[0].searchParams.get("sort")
     ).toBe("size");
+  });
+
+  it("lists an account's picked photos, largest first, linked to their scans", async () => {
+    sources = [
+      {
+        ...google,
+        services: {
+          ...google.services,
+          photos: { granted: true, files: 2, bytes: 7908979 },
+        },
+      },
+    ];
+    renderRoute("/?source=google:JVVYZFCI0PaW&service=photos");
+    expect(await screen.findByText("VID_4648.MOV")).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: /Google Photos.*2 items · 7\.5 MB/ })
+    ).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("1920 × 1080")).toBeInTheDocument();
+    expect(screen.getByText("Google Pixel 8 Pro")).toBeInTheDocument();
+    expect(screen.getByText("~7.5 MB")).toBeInTheDocument();
+    expect(screen.getByText("Unknown")).toHaveAttribute(
+      "title",
+      "Google Photos didn't give a size for this item"
+    );
+    expect(screen.getAllByRole("link", { name: "12" })[0]).toHaveAttribute(
+      "href",
+      "/scans/12?page=1"
+    );
+    expect(
+      requested(
+        "/api/browse/google/JVVYZFCI0PaW/photos/items"
+      )[0].searchParams.get("sort")
+    ).toBe("size");
+  });
+
+  it("points to the Request page for Photos never scanned", async () => {
+    sources = [
+      {
+        ...google,
+        services: { ...google.services, photos: { granted: true } },
+      },
+    ];
+    renderRoute("/?source=google:JVVYZFCI0PaW&service=photos");
+    expect(
+      await screen.findByRole("link", { name: /Scan it on the Request page/ })
+    ).toHaveAttribute("href", "/request?type=photos&account=JVVYZFCI0PaW");
   });
 
   it("shows an agent drive's totals, status and tree, a page at a time", async () => {

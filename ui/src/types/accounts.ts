@@ -1,5 +1,5 @@
 /** A service a linked account can be scanned for. */
-export type Service = "gmail" | "drive";
+export type Service = "gmail" | "drive" | "photos";
 
 export type Account = {
   clientKey: string;

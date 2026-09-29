@@ -16,6 +16,7 @@ import { linkGoogleAccount } from "../googleLink";
 import { clearLinkService, linkService } from "../oauthState";
 import { Service } from "../types/accounts";
 import { ScanMetadata, ScanType } from "../types/scans";
+import PhotosPick from "../components/PhotosPick";
 import ScanProgress from "../components/ScanProgress";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
@@ -36,7 +37,9 @@ type RequestSearch = {
 export const Route = createFileRoute("/request")({
   component: Request,
   validateSearch: (search: Record<string, unknown>): RequestSearch => ({
-    ...(search.type === "gmail" || search.type === "drive"
+    ...(search.type === "gmail" ||
+    search.type === "drive" ||
+    search.type === "photos"
       ? { type: search.type }
       : {}),
     ...(typeof search.account === "string" && search.account !== ""
@@ -48,6 +51,7 @@ export const Route = createFileRoute("/request")({
 const serviceNames: Record<Service, { full: string; short: string }> = {
   gmail: { full: "Gmail", short: "Gmail" },
   drive: { full: "Google Drive", short: "Drive" },
+  photos: { full: "Google Photos", short: "Photos" },
 };
 
 // The most a query can be; the backend records it in a VARCHAR(2000).
@@ -289,6 +293,7 @@ function Request() {
           items={[
             { id: "gmail", label: serviceNames.gmail.full },
             { id: "drive", label: serviceNames.drive.full },
+            { id: "photos", label: serviceNames.photos.full },
           ]}
         />
         <div className="mt-5 grid gap-5">
@@ -378,6 +383,10 @@ function Request() {
                 )}
               </Field>
             </>
+          )}
+
+          {!missingService && service === "photos" && (
+            <PhotosPick account={account} />
           )}
 
           {!missingService && service === "drive" && (
@@ -485,42 +494,45 @@ function Request() {
           )}
         </div>
 
-        <div className="mt-6 flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-center">
-          <Button
-            loading={isPending}
-            disabled={missingService}
-            onClick={submitRequest}
-            className="w-full sm:w-auto"
-          >
-            {isPending ? "Submitting…" : "Submit"}
-          </Button>
-          {message && (
-            <p
-              className={`flex items-start gap-2 text-sm ${message.kind === "error" ? "text-danger" : "text-success"}`}
+        {/* A Photos scan starts from its pick instead. */}
+        {service !== "photos" && (
+          <div className="mt-6 flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-center">
+            <Button
+              loading={isPending}
+              disabled={missingService}
+              onClick={submitRequest}
+              className="w-full sm:w-auto"
             >
-              <Icon
-                name={message.kind === "error" ? "warning" : "check"}
-                className="mt-0.5 shrink-0"
-              />
-              <span>
-                {message.text}
-                {message.scanId !== undefined && (
-                  <>
-                    {" "}
-                    <Link
-                      to="/scans/$scanId"
-                      params={{ scanId: String(message.scanId) }}
-                      search={{ page: 1 }}
-                      className="font-medium text-accent hover:underline"
-                    >
-                      View results
-                    </Link>
-                  </>
-                )}
-              </span>
-            </p>
-          )}
-        </div>
+              {isPending ? "Submitting…" : "Submit"}
+            </Button>
+            {message && (
+              <p
+                className={`flex items-start gap-2 text-sm ${message.kind === "error" ? "text-danger" : "text-success"}`}
+              >
+                <Icon
+                  name={message.kind === "error" ? "warning" : "check"}
+                  className="mt-0.5 shrink-0"
+                />
+                <span>
+                  {message.text}
+                  {message.scanId !== undefined && (
+                    <>
+                      {" "}
+                      <Link
+                        to="/scans/$scanId"
+                        params={{ scanId: String(message.scanId) }}
+                        search={{ page: 1 }}
+                        className="font-medium text-accent hover:underline"
+                      >
+                        View results
+                      </Link>
+                    </>
+                  )}
+                </span>
+              </p>
+            )}
+          </div>
+        )}
       </Card>
 
       <ScanProgress />

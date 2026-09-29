@@ -3,6 +3,8 @@
 export const queryKeys = {
   me: ["me"] as const,
   accounts: ["accounts"] as const,
+  activePhotosPick: ["activePhotosPick"] as const,
+  photosPick: (sessionKey: string) => ["photosPick", sessionKey] as const,
   scannedAccounts: ["scannedAccounts"] as const,
   // Prefix of every scanRequests(accountKey) key, for invalidating them all.
   allScanRequests: ["scanRequests"] as const,
@@ -17,4 +19,8 @@ export const queryKeys = {
   agentStatus: (driveKey: string) => ["agentStatus", driveKey] as const,
   accountMessages: (clientKey: string, sort: string, page: number) =>
     ["accountMessages", clientKey, sort, page] as const,
+  accountPhotos: (clientKey: string, sort: string, page: number) =>
+    ["accountPhotos", clientKey, sort, page] as const,
+  pickedItems: (scanId: number, page: number) =>
+    ["pickedItems", scanId, page] as const,
 };

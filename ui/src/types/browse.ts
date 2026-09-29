@@ -21,7 +21,11 @@ export type BrowseSource = {
   key: string;
   name: string;
   // A Google account's services.
-  services?: { drive: ServiceTotals; gmail: ServiceTotals };
+  services?: {
+    drive: ServiceTotals;
+    gmail: ServiceTotals;
+    photos: ServiceTotals;
+  };
   // An agent drive's totals, last sync, and linked physical drive.
   files?: number;
   bytes?: number;

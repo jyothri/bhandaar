@@ -70,10 +70,15 @@ func BrowseSources(userID int64) ([]BrowseSource, error) {
 		if err != nil {
 			return nil, err
 		}
+		photos, err := photosServiceTotals(userID, a.ClientKey)
+		if err != nil {
+			return nil, err
+		}
 		drive.Granted = contains(a.Services, ServiceDrive)
 		gmail.Granted = contains(a.Services, ServiceGmail)
+		photos.Granted = contains(a.Services, ServicePhotos)
 		sources = append(sources, BrowseSource{Kind: "google", Key: a.ClientKey, Name: a.DisplayName,
-			Services: map[string]ServiceTotals{ServiceDrive: drive, ServiceGmail: gmail}})
+			Services: map[string]ServiceTotals{ServiceDrive: drive, ServiceGmail: gmail, ServicePhotos: photos}})
 	}
 
 	drives := []struct {

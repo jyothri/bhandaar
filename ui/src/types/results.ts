@@ -18,6 +18,8 @@ export type ScanSummary = {
   item_count: number;
   total_bytes: number;
   folder_count: number;
+  // Google Photos items with no size; 0 for other scans.
+  unsized_count: number;
 };
 
 export type PaginationInfo = {

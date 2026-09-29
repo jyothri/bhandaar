@@ -43,8 +43,13 @@ describe("link service", () => {
     expect(linkService()).toBeNull();
   });
 
+  it("knows Photos", () => {
+    rememberLinkService("photos");
+    expect(linkService()).toBe("photos");
+  });
+
   it("ignores anything that isn't a service", () => {
-    sessionStorage.setItem("oauthLinkService", "photos");
+    sessionStorage.setItem("oauthLinkService", "calendar");
     expect(linkService()).toBeNull();
   });
 });

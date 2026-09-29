@@ -94,7 +94,7 @@ func SetupDatabase() error {
 		return fmt.Errorf("failed to mark interrupted scans: %w", err)
 	}
 
-	return nil
+	return endPickerSessions()
 }
 
 // markInterruptedScans marks scans that are still open at startup as failed.
@@ -219,106 +219,6 @@ func SaveMessageMetadataToDb(scanId int, username string, messageMetaData <-chan
 	}
 }
 
-func SavePhotosMediaItemToDb(scanId int, photosMediaItem <-chan PhotosMediaItem) {
-	for {
-		pmi, more := <-photosMediaItem
-		if !more {
-			// Channel closed - mark scan as complete if not already failed
-			scan, err := GetScanById(scanId)
-			if err != nil {
-				slog.Error("Failed to get scan status",
-					"scan_id", scanId,
-					"error", err)
-				return
-			}
-
-			if scan.Status != "Failed" {
-				if err := MarkScanCompleted(scanId); err != nil {
-					slog.Error("Failed to mark scan complete",
-						"scan_id", scanId,
-						"error", err)
-				}
-			}
-			break
-		}
-
-		// Use transaction for parent + children (atomicity required)
-		tx, err := db.Beginx()
-		if err != nil {
-			slog.Error("Failed to begin transaction for photos media item, skipping",
-				"scan_id", scanId,
-				"media_item_id", pmi.MediaItemId,
-				"error", err)
-			continue
-		}
-
-		insert_row := `insert into photosmediaitem
-			(media_item_id, product_url, mime_type, filename, size, scan_id, file_mod_time,
-				contributor_display_name, md5hash)
-		values
-			($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`
-		lastInsertId := 0
-		err = tx.QueryRow(insert_row, pmi.MediaItemId, pmi.ProductUrl, pmi.MimeType, pmi.Filename,
-			pmi.Size, scanId, pmi.FileModTime, pmi.ContributorDisplayName, pmi.Md5hash).Scan(&lastInsertId)
-
-		if err != nil {
-			tx.Rollback()
-			slog.Error("Failed to insert photos media item, skipping",
-				"scan_id", scanId,
-				"media_item_id", pmi.MediaItemId,
-				"filename", pmi.Filename,
-				"error", err)
-			continue
-		}
-
-		switch pmi.MimeType[:5] {
-		case "image":
-			insert_photo_row := `insert into photometadata
-			(photos_media_item_id, camera_make, camera_model, focal_length, f_number, iso, exposure_time)
-		values
-			($1, $2, $3, $4, $5, $6, $7) RETURNING id`
-			_, err = tx.Exec(insert_photo_row, lastInsertId, pmi.CameraMake, pmi.CameraModel, pmi.FocalLength,
-				pmi.FNumber, pmi.Iso, pmi.ExposureTime)
-			if err != nil {
-				tx.Rollback()
-				slog.Error("Failed to insert photo metadata, skipping",
-					"scan_id", scanId,
-					"media_item_id", pmi.MediaItemId,
-					"camera", fmt.Sprintf("%s %s", pmi.CameraMake, pmi.CameraModel),
-					"error", err)
-				continue
-			}
-		case "video":
-			insert_video_row := `insert into videometadata
-			(photos_media_item_id, camera_make, camera_model, fps)
-		values
-			($1, $2, $3, $4) RETURNING id`
-			_, err = tx.Exec(insert_video_row, lastInsertId, pmi.CameraMake, pmi.CameraModel, pmi.Fps)
-			if err != nil {
-				tx.Rollback()
-				slog.Error("Failed to insert video metadata, skipping",
-					"scan_id", scanId,
-					"media_item_id", pmi.MediaItemId,
-					"fps", pmi.Fps,
-					"error", err)
-				continue
-			}
-		default:
-			slog.Warn("Unsupported mime type",
-				"mime_type", pmi.MimeType,
-				"media_item_id", pmi.MediaItemId)
-		}
-
-		if err := tx.Commit(); err != nil {
-			slog.Error("Failed to commit transaction for photos media item, skipping",
-				"scan_id", scanId,
-				"media_item_id", pmi.MediaItemId,
-				"error", err)
-			continue
-		}
-	}
-}
-
 func SaveStatToDb(scanId int, scanData <-chan FileData) {
 	for fd := range scanData {
 		if !fd.RecordOnly {
@@ -409,27 +309,6 @@ func GetScansFromDb(userID int64, pageNo int) ([]Scan, int, error) {
 	return scans, count, nil
 }
 
-func GetPhotosMediaItemFromDb(scanId int, pageNo int) ([]PhotosMediaItemRead, int, error) {
-	limit := 10
-	offset := limit * (pageNo - 1)
-	count_rows := `select count(*) from photosmediaitem where scan_id = $1`
-	read_row := `select id, media_item_id, product_url, mime_type, filename,
-								size, file_mod_time, md5hash, scan_id, contributor_display_name
-								from photosmediaitem
-							 where scan_id = $1 order by id limit $2 offset $3`
-	photosMediaItemRead := []PhotosMediaItemRead{}
-	var count int
-	err := db.Get(&count, count_rows, scanId)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get photo count for scan %d: %w", scanId, err)
-	}
-	err = db.Select(&photosMediaItemRead, read_row, scanId, limit, offset)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get photos for scan %d, page %d: %w", scanId, pageNo, err)
-	}
-	return photosMediaItemRead, count, nil
-}
-
 func DeleteScan(scanId int) error {
 	// Begin transaction
 	tx, err := db.Beginx()
@@ -447,16 +326,8 @@ func DeleteScan(scanId int) error {
 	}{
 		{"scandata", `DELETE FROM scandata WHERE scan_id = $1`},
 		{"messagemetadata", `DELETE FROM messagemetadata WHERE scan_id = $1`},
+		{"photos_picked_items", `DELETE FROM photos_picked_items WHERE scan_id = $1`},
 		{"scanmetadata", `DELETE FROM scanmetadata WHERE scan_id = $1`},
-		{"photometadata", `DELETE FROM photometadata 
-			WHERE photos_media_item_id IN (
-				SELECT id FROM photosmediaitem WHERE scan_id = $1
-			)`},
-		{"videometadata", `DELETE FROM videometadata 
-			WHERE photos_media_item_id IN (
-				SELECT id FROM photosmediaitem WHERE scan_id = $1
-			)`},
-		{"photosmediaitem", `DELETE FROM photosmediaitem WHERE scan_id = $1`},
 		{"scans", `DELETE FROM scans WHERE id = $1`},
 	}
 
@@ -568,6 +439,9 @@ func migrateDB() error {
 	if err := migrateDropCompletedAt(); err != nil {
 		return err
 	}
+	if err := migrateDropPhotosTables(); err != nil {
+		return err
+	}
 	if err := migrateScanTimesToTimestamptz(); err != nil {
 		return err
 	}
@@ -584,6 +458,9 @@ func migrateDB() error {
 	if err := migrateDriveItems(); err != nil {
 		return err
 	}
+	if err := migratePhotosPicker(); err != nil {
+		return err
+	}
 	return migrateBrowseTotals()
 }
 
@@ -593,6 +470,16 @@ func migrateDB() error {
 func migrateDropCompletedAt() error {
 	if _, err := db.Exec(`ALTER TABLE scans DROP COLUMN IF EXISTS completed_at`); err != nil {
 		return fmt.Errorf("failed to drop scans.completed_at: %w", err)
+	}
+	return nil
+}
+
+// migrateDropPhotosTables drops the Photos Library API's tables. That API
+// stopped listing libraries on 2025-03-31, and production never had a row in
+// them. Picker scans get tables of their own (docs/archive/photos-picker.md).
+func migrateDropPhotosTables() error {
+	if _, err := db.Exec(`DROP TABLE IF EXISTS videometadata, photometadata, photosmediaitem`); err != nil {
+		return fmt.Errorf("failed to drop the Photos Library API tables: %w", err)
 	}
 	return nil
 }
@@ -610,9 +497,6 @@ func migrateDBv0() error {
 		{"scandata", create_scandata_table},
 		{"scanmetadata", create_scanmetadata_table},
 		{"messagemetadata", create_messagemetadata_table},
-		{"photosmediaitem", create_photosmediaitem_table},
-		{"photometadata", create_photometadata_table},
-		{"videometadata", create_videometadata_table},
 		{"privatetokens", create_privatetokens_table},
 		{"version", create_version_table},
 	}
@@ -740,44 +624,6 @@ const create_messagemetadata_table string = `CREATE TABLE IF NOT EXISTS messagem
 		REFERENCES Scans (id)
 )`
 
-const create_photosmediaitem_table string = `CREATE TABLE IF NOT EXISTS photosmediaitem (
-	id serial PRIMARY KEY NOT NULL,
-	media_item_id TEXT NOT NULL,
-	product_url  TEXT NOT NULL,
-	mime_type  TEXT,
-	filename TEXT NOT NULL,
-	size BIGINT,
-	file_mod_time TIMESTAMP,
-	md5hash TEXT,
-	scan_id INT NOT NULL,
-	contributor_display_name TEXT,
-	FOREIGN KEY (scan_id)
-		REFERENCES Scans (id)
-)`
-
-const create_photometadata_table string = `CREATE TABLE IF NOT EXISTS photometadata (
-	id serial PRIMARY KEY NOT NULL,
-	photos_media_item_id INT NOT NULL,
-	camera_make VARCHAR(500),
-	camera_model VARCHAR(500),
-  focal_length numeric,
-  f_number numeric,
-  iso INT,
-  exposure_time VARCHAR(500),
-	FOREIGN KEY (photos_media_item_id)
-		REFERENCES photosmediaitem (id)
-)`
-
-const create_videometadata_table string = `CREATE TABLE IF NOT EXISTS videometadata (
-	id serial PRIMARY KEY NOT NULL,
-	photos_media_item_id INT NOT NULL,
-	camera_make VARCHAR(500),
-	camera_model VARCHAR(500),
-  fps numeric,
-	FOREIGN KEY (photos_media_item_id)
-		REFERENCES photosmediaitem (id)
-)`
-
 const create_privatetokens_table string = `CREATE TABLE IF NOT EXISTS privatetokens (
 	id serial PRIMARY KEY NOT NULL,
 	access_token VARCHAR(800),
@@ -824,19 +670,6 @@ type ScanRequests struct {
 	ScanStartTime     time.Time `db:"scan_start_time" json:"scan_start_time"`
 	ScanDurationInSec string    `db:"scan_duration_in_sec" json:"scan_duration_in_sec"`
 	Status            string    `db:"status" json:"status"`
-}
-
-type PhotosMediaItemRead struct {
-	Id                     int            `db:"id" json:"photos_media_item_id"`
-	ScanId                 int            `db:"scan_id"`
-	MediaItemId            string         `db:"media_item_id" json:"media_item_id"`
-	ProductUrl             string         `db:"product_url"`
-	MimeType               sql.NullString `db:"mime_type"`
-	Filename               string
-	Size                   sql.NullInt64
-	ModifiedTime           sql.NullTime `db:"file_mod_time"`
-	Md5hash                sql.NullString
-	ContributorDisplayName sql.NullString `db:"contributor_display_name"`
 }
 
 // Account is a linked Google account, as GET /api/accounts lists it.
