@@ -26,7 +26,7 @@ import (
 )
 
 // Google Cloud Storage: a linked account's projects, buckets and objects.
-// See docs/specs/gcs-scans.md.
+// See docs/archive/gcs-scans.md.
 
 // Built on first use, after main has parsed the OAuth flags. Only the
 // token's own grant matters; Scopes is for the record.

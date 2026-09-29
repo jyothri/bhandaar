@@ -14,7 +14,7 @@ export const serviceScopes: Record<Service, string> = {
   // Only what the user picks; see docs/archive/photos-picker.md.
   photos: "https://www.googleapis.com/auth/photospicker.mediaitems.readonly",
   // Read-only buckets and objects, and the account's project list; see
-  // docs/specs/gcs-scans.md.
+  // docs/archive/gcs-scans.md.
   gcs:
     "https://www.googleapis.com/auth/devstorage.read_only " +
     "https://www.googleapis.com/auth/cloudplatformprojects.readonly",

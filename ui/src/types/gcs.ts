@@ -1,4 +1,4 @@
-// Google Cloud Storage. See docs/specs/gcs-scans.md.
+// Google Cloud Storage. See docs/archive/gcs-scans.md.
 
 /** One of an account's Cloud projects. */
 export type GcsProject = {

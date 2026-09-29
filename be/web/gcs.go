@@ -12,7 +12,7 @@ import (
 )
 
 // Google Cloud Storage: what the Request page needs to start a scan. See
-// docs/specs/gcs-scans.md, "Routes".
+// docs/archive/gcs-scans.md, "Backend".
 
 func gcsRoutes(api *mux.Router) {
 	api.HandleFunc("/gcs/{client_key}/projects", GcsProjectsHandler).Methods("GET")

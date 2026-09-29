@@ -1,5 +1,5 @@
 // Google Cloud Storage names, checked as the backend checks them
-// (be/collect/gcs.go). See docs/specs/gcs-scans.md.
+// (be/collect/gcs.go). See docs/archive/gcs-scans.md.
 
 /** A project ID, optionally in a domain ("example.com:my-project"). */
 export function validProjectId(id: string): boolean {

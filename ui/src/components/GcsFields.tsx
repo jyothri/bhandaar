@@ -13,7 +13,7 @@ import Select from "./ui/Select";
 
 // The Request page's Google Cloud Storage fields: a project, all its
 // buckets or one, a prefix, and which object versions to include. See
-// docs/specs/gcs-scans.md, "Request page".
+// docs/archive/gcs-scans.md, "Request page".
 
 /** A bucket as the bucket list shows it. */
 function bucketLabel(b: GcsBucket): string {

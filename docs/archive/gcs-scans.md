@@ -1,6 +1,6 @@
 # Google Cloud Storage Scans
 
-**Status:** proposed, 2026-09-28. Adds Google Cloud Storage as a source: scan a Google account's buckets, and browse them like Drive and agent drives. Builds on the Google Photos work (#39): its Photos service, retry helper and service tabs.
+**Status:** implemented in #40 (steps 0–6), and checked on dev.sm against a copy of production on 2026-09-29: a test bucket with live, noncurrent, composite, Nearline and soft-deleted objects, scanned twice, the second time after an object was deleted. Written 2026-09-28. Builds on the Google Photos work (#39). Where the build differs from the design is in [As built](#as-built) and under each step of the [implementation plan](#implementation-plan).
 
 ## Problem
 
@@ -83,7 +83,7 @@ A **Google Cloud Storage** tab (`?type=gcs`):
 
 ### A living record per bucket
 
-Like Drive's record (`drive_items`, [archive/browse.md](../archive/browse.md#drive-a-living-record-per-account)), each linked account has **one row per object version per bucket**, kept current by its scans, so the database grows with the buckets, not with the number of scans. A scan:
+Like Drive's record (`drive_items`, [archive/browse.md](browse.md#drive-a-living-record-per-account)), each linked account has **one row per object version per bucket**, kept current by its scans, so the database grows with the buckets, not with the number of scans. A scan:
 
 1. **Upserts** every version it lists, keyed on (account, bucket, object name, generation, state), stamping it with the scan's ID (`seen_scan_id`).
 2. Once a bucket's passes are complete, **deletes what it didn't see** in its scope: the rows of that bucket, under the scan's prefix, in the states its passes covered (live always, noncurrent if it listed versions, soft-deleted if it listed those), whose `seen_scan_id` isn't this scan's. A pass that failed deletes nothing, and a state the scan didn't list keeps its rows as they were.
@@ -186,6 +186,22 @@ The record. A bucket appears once any scan has completed it. A bucket a later wh
 - `be/db/accounts_test.go`: the storage scopes map to `gcs`.
 - UI: the Request page's Google Cloud Storage tab (projects, the fallback text box, buckets, the options), the results view, and Browse's Google Cloud Storage tab.
 
+## As built
+
+- **Backend:** `be/collect/gcs.go` (projects, buckets, the scan and its passes), `be/db/gcs.go` (the record, per-scan totals, and Browse's buckets and prefixes), `be/web/gcs.go` (the `/api/gcs/…` routes), and a Cloud Storage case in `/api/scans`, the scan summary and `/api/browse/sources`.
+- **UI:** the Request page's Google Cloud Storage tab (`ui/src/components/GcsFields.tsx`), the results view's per-bucket table, and Browse's Google Cloud Storage tab, which reuses `FolderTree` with folder IDs `<bucket>/<prefix>`.
+- **Differences from the design above**, in more detail under each step below:
+  - the record replaced the per-scan snapshot (decided before building);
+  - the client library's own retries replaced a custom retry loop;
+  - a failed soft-deleted pass leaves its bucket completed, with the error recorded;
+  - every object version is a row in Browse, the non-live ones marked.
+- **Checked live** (2026-09-29, on `hdd_dev`, bucket `bhandaar-gcs-test-17911`):
+  - granting Cloud Storage and listing projects and buckets;
+  - a scan of 6 object versions: 4 live (a Nearline one and a composite one with no MD5), 1 noncurrent, 1 soft-deleted, with folder totals right at every level;
+  - after `cold/b.txt` was deleted, a second scan replaced its live row with a noncurrent one and updated the totals, while the first scan's totals stayed as they were;
+  - the results view and Browse, checked by the owner.
+- **Left open:** open questions 1–3 below.
+
 ## Implementation plan
 
 One PR for the whole feature, with a commit per step. Each step leaves the branch working.
@@ -204,7 +220,7 @@ One PR for the whole feature, with a commit per step. Each step leaves the branc
 3. **The scan** (done; the client library retries 429s and 5xx itself, so the collector doesn't; a soft-deleted pass that fails leaves the bucket completed, with the error recorded and soft-deleted rows untouched): the tables, the collector with both passes, the record's upserts and deletions, prefix totals, per-scan totals, `DeleteScan`, `GetScanSummary`, the results route, and the tests.
 4. **Request page** (done): the Google Cloud Storage tab (`ui/src/components/GcsFields.tsx`) and its tests. The project list falls back to a typed ID when the account can't list projects, has none, or listing fails; changing the account resets the fields.
 5. **Results view and Browse** (done; folder IDs are `<bucket>/<prefix>`, so `FolderTree` needed only a new source kind; every object version is a row, the non-live ones marked): the results view, the Browse route, the Google Cloud Storage tab, and the tests.
-6. **Docs and cleanup:** `architecture.md` (diagram, routes, collector, schema, scopes, a scan flow), `README.md`, `CLAUDE.md`. Remove `GOOGLE_APPLICATION_CREDENTIALS` and `~/keys/gae_creds.json` from the docs, since nothing needs them. Then mark this spec implemented with an "As built" section, and move it to `docs/archive/`.
+6. **Docs and cleanup** (done): `architecture.md` (diagram, routes, collector, schema, scopes, a scan flow), `README.md`, `CLAUDE.md`. Remove `GOOGLE_APPLICATION_CREDENTIALS` and `~/keys/gae_creds.json` from the docs, since nothing needs them. Then mark this spec implemented with an "As built" section, and move it to `docs/archive/`.
 
 Then an end-to-end run on dev.sm against a copy of production, as for Photos, before the PR.
 

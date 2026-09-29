@@ -36,7 +36,7 @@ var scopeServices = map[string]string{
 }
 
 // projectScopes are the scopes that can list an account's Cloud projects
-// (Resource Manager's projects.search). See docs/specs/gcs-scans.md,
+// (Resource Manager's projects.search). See docs/archive/gcs-scans.md,
 // "Linking: Cloud Storage as a service".
 var projectScopes = map[string]bool{
 	"https://www.googleapis.com/auth/cloudplatformprojects.readonly": true,

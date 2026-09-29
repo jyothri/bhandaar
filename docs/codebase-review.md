@@ -22,7 +22,7 @@ Status legend: `[ ]` open · **Deferred** = open, parked for now · **Blocked** 
 2. The small ones, as convenient: 4.8, 5.1, 6.4, 2.8, 2.9, 2.10, 7.16.
 3. When unblocked or revisited: 2.11, 6.3, 7.6.
 
-Browsing files and folders by Google account and by agent drive was built in #35, from [archive/browse.md](archive/browse.md). Google Photos through the Picker API was built in #39, from [archive/photos-picker.md](archive/photos-picker.md).
+Browsing files and folders by Google account and by agent drive was built in #35, from [archive/browse.md](archive/browse.md). Google Photos through the Picker API was built in #39, from [archive/photos-picker.md](archive/photos-picker.md). Google Cloud Storage scans were built in #40, from [archive/gcs-scans.md](archive/gcs-scans.md).
 
 ---
 

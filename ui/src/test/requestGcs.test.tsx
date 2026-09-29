@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loggedIn, renderRoute, stubEventSource } from "./renderRoute";
 
 // The Request page's Google Cloud Storage tab, with the backend faked. See
-// docs/specs/gcs-scans.md, "Request page".
+// docs/archive/gcs-scans.md, "Request page".
 
 const fetchMock = vi.fn<typeof fetch>();
 

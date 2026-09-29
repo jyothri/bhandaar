@@ -13,7 +13,7 @@ import (
 
 // Google Cloud Storage: each linked account's living record of its buckets
 // and objects, updated by every scan, and what each scan found. See
-// docs/specs/gcs-scans.md, "A living record per bucket".
+// docs/archive/gcs-scans.md, "A living record per bucket".
 
 // An object version's states.
 const (
@@ -333,7 +333,7 @@ func GcsScanBuckets(scanId int) ([]GcsScanBucket, error) {
 // Browse: an account's buckets, then prefixes as folders, from the record.
 // A folder ID is "<bucket>/<prefix>": "jyo-pics/" is the bucket's root,
 // "jyo-pics/2024/" a folder in it, and "" lists the buckets. See
-// docs/specs/gcs-scans.md, "What Browse shows".
+// docs/archive/gcs-scans.md, "What Browse shows".
 
 // gcsTotalsRow is a gcs_prefix_totals row.
 type gcsTotalsRow struct {

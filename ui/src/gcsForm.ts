@@ -1,5 +1,5 @@
 // The Request page's Google Cloud Storage fields. See
-// docs/specs/gcs-scans.md, "Request page".
+// docs/archive/gcs-scans.md, "Request page".
 
 export type GcsForm = {
   project: string;
