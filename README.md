@@ -5,9 +5,9 @@ Bhandaar is a storage analyzer. It scans your data where it lives and shows you 
 - **Google Drive**: the whole Drive, or one folder with or without its subfolders
 - **Gmail**: messages and their sizes
 - **Local drives**: via `driveagent`, which scans and compares drives on your machines and uploads the results
-- **Google Photos**: moving to the Picker API after Google's 2025 API change ([spec](docs/specs/photos-picker.md))
+- **Google Photos**: the photos and videos you pick in Google Photos, with their sizes (Google no longer lets apps list a whole library; [how it works](docs/archive/photos-picker.md))
 
-Scans and linked Google accounts belong to the user who made them. The web app's **Browse** page shows a folder tree for any linked Google account or uploaded agent drive, with each folder's total size and file count.
+Scans and linked Google accounts belong to the user who made them. The web app's **Browse** page shows a folder tree for any linked Google account or uploaded agent drive, with each folder's total size and file count, and an account's Gmail messages and picked Google Photos, largest first.
 
 ## Components
 

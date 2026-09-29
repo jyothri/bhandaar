@@ -30,7 +30,7 @@ type ScanSummary struct {
 	ItemCount   int   `db:"item_count" json:"item_count"`
 	TotalBytes  int64 `db:"total_bytes" json:"total_bytes"`
 	FolderCount int   `db:"folder_count" json:"folder_count"`
-	// Google Photos items with no size (see docs/specs/photos-picker.md);
+	// Google Photos items with no size (see docs/archive/photos-picker.md);
 	// 0 for other scans.
 	UnsizedCount int `db:"unsized_count" json:"unsized_count"`
 }

@@ -26,7 +26,7 @@ import (
 
 // Google Photos, through the Picker API: the user picks items in Google
 // Photos, and a scan records what they picked, with each item's size. See
-// docs/specs/photos-picker.md, "Backend".
+// docs/archive/photos-picker.md, "Backend".
 
 // photosPickerApi is the Picker API's base URL; tests point it at a fake.
 var photosPickerApi = "https://photospicker.googleapis.com/"
@@ -497,7 +497,7 @@ func pickedItem(it pickedMediaItem) db.PickedItem {
 
 // sizeItem finds an item's size from a HEAD of its bytes' URL, or else by
 // downloading them, which also gives their MD5. Sizes are of the copy
-// Google Photos keeps (see docs/specs/photos-picker.md, "Step 0
+// Google Photos keeps (see docs/archive/photos-picker.md, "Step 0
 // findings"). An item it can't size keeps SizeUnavailable.
 func sizeItem(client *http.Client, urls *baseUrls, it pickedMediaItem, item *db.PickedItem) {
 	suffix := "=d"

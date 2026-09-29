@@ -11,7 +11,7 @@ import (
 )
 
 // Google Photos, through the Picker API: picking sessions and the items
-// each scan picked. See docs/specs/photos-picker.md, "Backend".
+// each scan picked. See docs/archive/photos-picker.md, "Backend".
 
 // A picking session's states.
 const (
@@ -263,7 +263,7 @@ func PickedItems(scanId int, pageNo int) (PickedItemPage, error) {
 }
 
 // Browse's Photos: every item an account's Photos scans picked, each once,
-// as its latest scan found it. See docs/specs/photos-picker.md, "UI".
+// as its latest scan found it. See docs/archive/photos-picker.md, "UI".
 
 // AccountPhotosPageSize is how many items a page of an account's Photos
 // holds.

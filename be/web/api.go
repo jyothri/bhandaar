@@ -75,7 +75,7 @@ func DoScansHandler(w http.ResponseWriter, r *http.Request) {
 		scanId, err = collect.Gmail(doScanRequest.GMailScan, userID)
 	case "GPhotos":
 		// The Photos Library API no longer lists a library; Photos scans
-		// will start from the Picker API (docs/specs/photos-picker.md).
+		// will start from the Picker API (docs/archive/photos-picker.md).
 		http.Error(w, "Google Photos scans aren't available yet.", http.StatusBadRequest)
 		return
 	default:

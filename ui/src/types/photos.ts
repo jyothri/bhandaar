@@ -1,4 +1,4 @@
-// Google Photos picks. See docs/specs/photos-picker.md.
+// Google Photos picks. See docs/archive/photos-picker.md.
 
 export type PhotosPickState =
   | "waiting" // created; the user hasn't picked yet

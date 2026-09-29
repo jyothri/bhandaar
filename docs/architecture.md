@@ -6,7 +6,7 @@ Bhandaar is a storage analyzer application that scans and analyzes data across m
 
 ## Architecture Diagram
 
-The whole system as built. Google Photos is left out: its scanner can't work since Google's 2025 API change (review item 7.15).
+The whole system as built.
 
 ```mermaid
 graph TB
@@ -22,12 +22,12 @@ graph TB
         subgraph BE["be: Go web app :8090"]
             MW["Middleware<br/>CORS, body limits,<br/>session check + origin check"]
             AuthH["auth.go<br/>/api/auth/login, logout, me"]
-            ApiH["api.go, browse.go<br/>/api/scans, /api/accounts,<br/>/api/scans/{id}/summary, results,<br/>/api/browse"]
+            ApiH["api.go, browse.go, photos.go<br/>/api/scans, /api/accounts,<br/>/api/scans/{id}/summary, results,<br/>/api/browse, /api/photos"]
             OAuthH["oauth.go<br/>/api/glink: link accounts"]
             SseH["sse.go<br/>/sse/scanprogress"]
-            Collect["Collectors<br/>drive.go, gmail.go, local.go<br/>one scan at a time"]
+            Collect["Collectors<br/>drive.go, gmail.go, local.go,<br/>photos.go (polls picks)<br/>one scan at a time"]
             Hub["notification hub<br/>progress events"]
-            DBL["db layer<br/>database.go, users.go, accounts.go,<br/>results.go, driveitems.go, browse.go,<br/>totals.go (folder totals checker)"]
+            DBL["db layer<br/>database.go, users.go, accounts.go,<br/>results.go, driveitems.go, browse.go,<br/>photos.go, totals.go (folder totals checker)"]
         end
 
         subgraph AS["agentserver: Go :8091"]
@@ -36,7 +36,7 @@ graph TB
         end
 
         subgraph PG["PostgreSQL :5432 (one database)"]
-            BeTables[("be tables<br/>scans, scanmetadata, scandata,<br/>messagemetadata, privatetokens,<br/>web_sessions, drive_items, drive_accounts,<br/>browse_folder_totals, browse_totals_state")]
+            BeTables[("be tables<br/>scans, scanmetadata, scandata,<br/>messagemetadata, privatetokens,<br/>web_sessions, drive_items, drive_accounts,<br/>browse_folder_totals, browse_totals_state,<br/>photos_picker_sessions, photos_picked_items")]
             AgentTables[("agentserver tables<br/>agent_users, agent_login_failures,<br/>agent_agents, agent_drives, agent_files,<br/>agent_dir_listings, agent_scan_runs, …")]
         end
     end
@@ -45,6 +45,7 @@ graph TB
         GAuth["Google OAuth 2.0 / OpenID<br/>consent + token endpoint"]
         GDrive["Google Drive API<br/>drive.metadata.readonly"]
         GMail["Gmail API<br/>gmail.readonly"]
+        GPhotos["Google Photos Picker API<br/>photospicker.mediaitems.readonly"]
     end
 
     Browser -->|HTTPS| Nginx
@@ -53,6 +54,7 @@ graph TB
     Nginx -->|"/api, /sse"| MW
     Nginx -->|"/agent/"| AgentAPI
     Browser -.->|"consent redirect<br/>(openid email + service scope)"| GAuth
+    Browser -.->|"picks items<br/>(pickerUri window)"| GPhotos
 
     MW --> AuthH
     MW --> ApiH
@@ -74,6 +76,7 @@ graph TB
     OAuthH -->|"code exchange, id_token"| GAuth
     Collect -->|"files.list / files.get"| GDrive
     Collect -->|"messages.list / get"| GMail
+    Collect -->|"sessions, mediaItems.list,<br/>HEAD each item's bytes"| GPhotos
 
     classDef client fill:#61dafb,stroke:#333,color:#000
     classDef edge fill:#999,stroke:#333,color:#fff
@@ -87,7 +90,7 @@ graph TB
     class MW,AuthH,ApiH,OAuthH,SseH,Collect,Hub,DBL backend
     class AgentAPI,House agentsrv
     class BeTables,AgentTables database
-    class GAuth,GDrive,GMail external
+    class GAuth,GDrive,GMail,GPhotos external
 ```
 
 - **Web users** log in to `be` with `agentserver`'s users (`agent_users`), sharing its login lockout. Sessions are `web_sessions` rows behind an HttpOnly cookie (see [Web authentication](#web-authentication)).
@@ -109,11 +112,11 @@ graph TB
 **Key Components:**
 - `/routes/__root.tsx` and `/components/Header.tsx` - The app shell: a top bar with the Bhandaar name, the nav tabs (Browse · Request · Request History; a menu on phones) and the user menu (Log out); page titles `<page> · Bhandaar`. Login and the OAuth callback show just the name
 - `/components/ui/` - The shared components (Button, Card, Field, Input, Select, Checkbox, Tabs, Switch, Badge, Table, Pager, Icon, Spinner), styled only with the tokens; `Table` stacks rows into cards on phones
-- `/routes/index.tsx` - Browse: source picker, service tabs, a summary card per source, and the folder tree (`/components/FolderTree.tsx`: file-type icons from `fileTypes.ts`, size bars for each entry's share of its folder) or the account's messages
-- `/routes/request.tsx` - Scan request form for Gmail and Google Drive (`?type=gmail|drive`). An account without the chosen service gets a "Grant … access" button, which links it again for that service with Google's `login_hint`; the service being linked is kept in `sessionStorage` across the round trip. Drive fields build the Drive query (`driveQuery.ts`), which "Edit query" lets you replace, plus an optional folder (link or ID) with or without subfolders
+- `/routes/index.tsx` - Browse: source picker, service tabs (Google Drive · Gmail · Google Photos), a summary card per source, and the folder tree (`/components/FolderTree.tsx`: file-type icons from `fileTypes.ts`, size bars for each entry's share of its folder), the account's messages, or its picked photos and videos (`/components/PickedItemsTable.tsx`)
+- `/routes/request.tsx` - Scan request form for Gmail, Google Drive and Google Photos (`?type=gmail|drive|photos`). An account without the chosen service gets a "Grant … access" button, which links it again for that service with Google's `login_hint`; the service being linked is kept in `sessionStorage` across the round trip. Drive fields build the Drive query (`driveQuery.ts`), which "Edit query" lets you replace, plus an optional folder (link or ID) with or without subfolders. Photos has no form: **Pick in Google Photos** (`/components/PhotosPick.tsx`) opens Google Photos to pick, then follows the pick until its scan is done (see [Photos Pick Flow](#photos-pick-flow))
 - `/routes/requests.tsx` - List view of scan requests by account, with readable scan types; each scan ID links to its results. The selected account is in the URL (`?account=<client_key>`), so links and Back return to it
 - `/components/Breadcrumbs.tsx` - The trail under the nav tabs on Request History and scan pages: `Request History › <account> › Scan N`. A scan's trail always goes through its account (the summary's `client_key`), however the scan was opened, and the Request History tab stays highlighted on it
-- `/routes/scans.$scanId.tsx` - One scan's results: its summary, then 10 rows a page: files and folders with their folder, size, file count, modified time and MD5, linked to Drive (Drive, local), or new messages (Gmail)
+- `/routes/scans.$scanId.tsx` - One scan's results: its summary, then 10 rows a page: files and folders with their folder, size, file count, modified time and MD5, linked to Drive (Drive, local), new messages (Gmail), or picked items with when taken, dimensions, camera and size (Google Photos)
 - `/routes/oauth/glink.tsx` - OAuth callback handler
 - `/api/index.ts` - Backend API client
 - `/components/ScanProgress.tsx` - Real-time progress display
@@ -136,20 +139,26 @@ Every route but health and login/logout needs a logged-in user (see [Web authent
 | `/api/auth/login` | POST | Log in; sets the session cookie |
 | `/api/auth/logout` | POST | End the session |
 | `/api/auth/me` | GET | The logged-in user |
-| `/api/scans` | POST | Submit scan request; a Gmail or Drive request's account must have granted that service, and its query must fit 2000 characters (else 400, before any scan is created) |
+| `/api/scans` | POST | Submit scan request; a Gmail or Drive request's account must have granted that service, and its query must fit 2000 characters (else 400, before any scan is created). `GPhotos` answers 400: Photos scans start from a pick |
 | `/api/scans` | GET | List all scans (paginated) |
 | `/api/scans/requests/{client_key}` | GET | The scans of one linked account, newest first |
-| `/api/scans/{scan_id}/summary` | GET | A scan's details and totals: file (or new-message) count and bytes, and folder count |
+| `/api/scans/{scan_id}/summary` | GET | A scan's details and totals: file (or new-message, or picked-item) count and bytes, folder count, and Photos items without a size |
 | `/api/scans/{scan_id}` | GET | A page (10) of a scan's files and folders, in tree order (paths compared a segment at a time), with `file_id` for Drive |
 | `/api/scans/{scan_id}` | DELETE | Delete scan |
 | `/api/gmaildata/{scan_id}` | GET | A page (10) of a Gmail scan's new messages, newest first |
-| `/api/accounts` | GET | List linked Google accounts: `clientKey`, `displayName`, `services` (`gmail`, `drive`) and `loginHint` (the Google account ID, when known) |
+| `/api/photos/sessions` | POST | `{clientKey}`: start a Google Photos pick for an account that has granted Photos (one pick at a time per user, else 409); answers the pick |
+| `/api/photos/sessions` | GET | The user's pick that is waiting or scanning, or `null` |
+| `/api/photos/sessions/{session_key}` | GET | A pick: `{sessionKey, pickerUri, state, scanId?, pickBy}`, `state` one of `waiting`, `scanning`, `done`, `expired`, `cancelled` |
+| `/api/photos/sessions/{session_key}` | DELETE | Cancel a waiting pick (409 once it's past `waiting`) |
+| `/api/photos/{scan_id}` | GET | A page (10) of a Photos scan's picked items |
+| `/api/accounts` | GET | List linked Google accounts: `clientKey`, `displayName`, `services` (`gmail`, `drive`, `photos`) and `loginHint` (the Google account ID, when known) |
 | `/api/scans/accounts` | GET | The accounts with scans, as `{clientKey, displayName}`, each named by its newest scan |
 | `/api/browse/sources` | GET | What the user can browse: each linked account, with each service's grant and recorded totals, and each of their agents' drives (`<drive_id> (<hostname>)`), with totals, last sync and linked physical drive |
 | `/api/browse/google/{client_key}/drive/children` | GET | A page (200) of a folder of the account's Drive record (`?folder=<id>`; empty for the roots, My Drive and Shared with me): its path, subfolders with totals, then files, each largest first |
 | `/api/browse/agent/{id}/children` | GET | The same for an agent drive (`?folder=<path>`, relative to the drive's root) |
 | `/api/browse/agent/{id}/status` | GET | An agent drive's last scan run, last sync, physical drive, and whether its folder totals are being rebuilt |
 | `/api/browse/google/{client_key}/gmail/messages` | GET | A page (50) of the account's messages across its Gmail scans (`?sort=size|date`), each with the scan that found it |
+| `/api/browse/google/{client_key}/photos/items` | GET | A page (50) of the account's picked Photos across its scans, each item once as its latest scan found it (`?sort=size|date`, date being when taken), with that scan |
 
 Browse routes answer 404 for a source that isn't the user's. See [archive/browse.md](archive/browse.md).
 
@@ -161,7 +170,7 @@ Browse routes answer 404 for a source that isn't the user's. See [archive/browse
 
 #### Server-Sent Events (`web/sse.go`)
 - `/events` - Real-time scan progress updates
-- Broadcasts progress for Gmail and Drive scans, to the scan's owner only
+- Broadcasts progress for Gmail, Drive and Photos scans, to the scan's owner only
 
 #### Web authentication
 
@@ -194,7 +203,15 @@ Browse routes answer 404 for a source that isn't the user's. See [archive/browse
 - Real-time progress updates via SSE
 - Deduplication by message ID
 
-**Photos:** the Library API scanner was removed, since that API stopped listing libraries in 2025. Scans of picked items through the Picker API are planned in [`specs/photos-picker.md`](specs/photos-picker.md).
+**Photos Scanner (`photos.go`):**
+- Uses the Google Photos Picker API, the only way left to read a user's own photos since Google turned off the Library API's read scopes in 2025. It can't list a library: a scan covers what the user picks, up to 2000 items
+- `POST /api/photos/sessions` creates a picking session (`photos_picker_sessions`, one `waiting` or `scanning` per user) and a goroutine polls it every `pollInterval` (5 s) until the user has picked, or `timeoutIn` (30 minutes) passes (`expired`). Google's session ID never reaches the browser
+- Once picked, a `google_photos` scan lists the items and sizes each one with a `HEAD` of its bytes' URL (`=d`, `=dv` for videos), with the account's bearer token, four at a time; only when `HEAD` gives no length does it download the item, recording its MD5. It retries 429s, 5xx and network errors, re-lists after 50 minutes for fresh `baseUrl`s, and deletes the session when done
+- Sizes are of the copy Google Photos keeps, which for Storage saver uploads can be far smaller than the original; the Picker API gives no upload quality or quota use
+- Stores (`photos_picked_items`): media item ID, photo or video, MIME type, file name, when taken, dimensions, camera and exposure, fps, size and how it was found
+- Real-time progress updates via SSE, under the account's `client_key`
+- At startup, picks still `waiting` expire, and `scanning` ones end (their scans are failed as interrupted)
+- See [archive/photos-picker.md](archive/photos-picker.md)
 
 #### Notification Hub (`notification/hub.go`)
 - Pub/sub pattern for progress updates
@@ -216,7 +233,10 @@ Browse routes answer 404 for a source that isn't the user's. See [archive/browse
 scans (main scan records)
 ├── scandata (file/directory data from local/drive scans)
 ├── scanmetadata (scan configuration)
-└── messagemetadata (Gmail message data)
+├── messagemetadata (Gmail message data)
+└── photos_picked_items (Google Photos items a scan picked)
+
+photos_picker_sessions (Google Photos picks: state, pick_by, scan_id)
 
 privatetokens (linked Google accounts: refresh tokens, granted scope, google_sub)
 web_sessions (web login sessions)
@@ -240,7 +260,7 @@ Implemented (rollout steps 1 and 4): `GET /agent/health`, `POST /agent/v1/handsh
 **OAuth 2.0:**
 - Authorization code flow, one service at a time with incremental authorization (see [Account Linking Flow](#account-linking-flow))
 - Refresh tokens stored per linked account, with the scopes Google granted
-- Scopes: `openid email` (identifies the account) plus `gmail.readonly` and/or `drive.metadata.readonly`. Photos will ask for `photospicker.mediaitems.readonly` ([`specs/photos-picker.md`](specs/photos-picker.md))
+- Scopes: `openid email` (identifies the account) plus `gmail.readonly` and/or `drive.metadata.readonly`. `photospicker.mediaitems.readonly` (Photos: only what the user picks)
 - The OAuth client is in "Testing": refresh tokens expire 7 days after they're issued (review item 2.11)
 
 **Required Credentials:**
@@ -326,6 +346,44 @@ sequenceDiagram
     BE->>DB: LinkAccount: update the user's row with this sub,<br/>else adopt the newest same-named legacy row,<br/>else insert (new client_key)
     BE-->>UI: 302 /request?account=<client_key>
     UI-->>User: account selected, back on the service being linked
+```
+
+### Photos Pick Flow
+
+A Google Photos scan, from the Request page's **Pick in Google Photos** to its results. See [archive/photos-picker.md](archive/photos-picker.md#flow).
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as UI (PhotosPick)
+    participant BE as be: photos.go
+    participant Picker as Photos Picker API
+    participant DB as PostgreSQL
+
+    User->>UI: Pick in Google Photos
+    UI->>UI: open a blank window (while the click counts)
+    UI->>BE: POST /api/photos/sessions {clientKey}
+    BE->>DB: account granted Photos? no pick under way?
+    BE->>Picker: sessions.create
+    Picker-->>BE: id, pickerUri, pollingConfig, expireTime
+    BE->>DB: photos_picker_sessions: waiting, pick_by
+    BE-->>UI: {sessionKey, pickerUri, pickBy}
+    UI->>UI: window → pickerUri/autoclose
+    loop every pollInterval, until picked or pick_by
+        BE->>Picker: sessions.get
+    end
+    User->>Picker: picks items, Done
+    loop every 3 s while waiting or scanning
+        UI->>BE: GET /api/photos/sessions/{key}
+    end
+    BE->>DB: scanning; LogStartScan(google_photos)
+    BE->>Picker: mediaItems.list
+    par four at a time
+        BE->>Picker: HEAD baseUrl=d / =dv (bearer token)
+    end
+    BE->>DB: photos_picked_items; scan Completed; done
+    BE->>Picker: sessions.delete
+    UI-->>User: Scan N is done · View results
 ```
 
 ### Real-time Progress Updates (SSE)
@@ -456,20 +514,20 @@ Services:
 | Frontend | React, TypeScript, Vite, TanStack Router/Query, Tailwind CSS |
 | Backend | Go 1.x, Gorilla Mux, sqlx |
 | Database | PostgreSQL 15+ |
-| APIs | Google Drive API, Gmail API, Google Photos API |
+| APIs | Google Drive API, Gmail API, Google Photos Picker API |
 | Auth | Google OAuth 2.0 |
 | Real-time | Server-Sent Events (SSE) |
 | Containerization | Docker, Docker Compose |
 
 ## Key Features
 
-1. **Multi-source Scanning:** Local, Google Drive, Gmail, Photos
+1. **Multi-source Scanning:** Local, Google Drive, Gmail, Google Photos (picked items)
 2. **Real-time Progress:** SSE-based progress updates for long-running scans
 3. **OAuth Integration:** Secure Google account authentication
 4. **Persistent Storage:** PostgreSQL with auto-migration
 5. **RESTful API:** Clean REST endpoints with pagination
 6. **Deduplication:** Gmail messages deduplicated by message ID
-7. **Rich Metadata:** EXIF data for photos, email headers, file attributes
+7. **Rich Metadata:** camera and exposure data for picked photos, email headers, file attributes
 
 ## Known Limitations
 

@@ -16,7 +16,7 @@ import Icon from "./ui/Icon";
 import Spinner from "./ui/Spinner";
 
 // A Google Photos scan: the user picks items in Google Photos, and the
-// backend scans what they picked. See docs/specs/photos-picker.md, "UI".
+// backend scans what they picked. See docs/archive/photos-picker.md, "UI".
 
 /** How often a pick's state is checked while it's under way. */
 export const PICK_POLL_MS = 3000;

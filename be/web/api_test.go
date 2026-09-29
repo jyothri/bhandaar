@@ -82,7 +82,7 @@ func TestCheckScanRequestRejectsABadFolderId(t *testing.T) {
 }
 
 // The Photos Library API's scans and routes are gone; see
-// docs/specs/photos-picker.md.
+// docs/archive/photos-picker.md.
 func TestPhotosLibraryAPIIsGone(t *testing.T) {
 	fakeSessions(t)
 	r := mux.NewRouter()

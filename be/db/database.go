@@ -476,7 +476,7 @@ func migrateDropCompletedAt() error {
 
 // migrateDropPhotosTables drops the Photos Library API's tables. That API
 // stopped listing libraries on 2025-03-31, and production never had a row in
-// them. Picker scans get tables of their own (docs/specs/photos-picker.md).
+// them. Picker scans get tables of their own (docs/archive/photos-picker.md).
 func migrateDropPhotosTables() error {
 	if _, err := db.Exec(`DROP TABLE IF EXISTS videometadata, photometadata, photosmediaitem`); err != nil {
 		return fmt.Errorf("failed to drop the Photos Library API tables: %w", err)

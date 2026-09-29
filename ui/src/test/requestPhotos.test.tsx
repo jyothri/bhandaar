@@ -5,7 +5,7 @@ import { loggedIn, renderRoute, stubEventSource } from "./renderRoute";
 import { PhotosPick } from "../types/photos";
 
 // The Request page's Google Photos tab, with the backend faked. See
-// docs/specs/photos-picker.md, "UI".
+// docs/archive/photos-picker.md, "UI".
 
 const fetchMock = vi.fn<typeof fetch>();
 

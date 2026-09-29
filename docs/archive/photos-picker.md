@@ -1,6 +1,6 @@
 # Google Photos: Move to the Picker API
 
-**Status:** proposed, 2026-09-28. Resolves review item 7.15 in [`codebase-review.md`](../codebase-review.md) ("Google Photos scans can't work"). Supersedes [Google Photos (deferred)](../archive/request-drive-scans.md#google-photos-deferred) in the Request page spec.
+**Status:** implemented in #39 (steps 0–6), and checked on dev.sm against a copy of production on 2026-09-28: a real pick of 219 items (217 photos, 2 videos), every one sized by `HEAD`, scanned in 27 s. Written 2026-09-28. Resolved review item 7.15 ("Google Photos scans can't work"); superseded [Google Photos (deferred)](request-drive-scans.md#google-photos-deferred) in the Request page spec. Where the build differs from the design is in [As built](#as-built) and under each step of the [implementation plan](#implementation-plan).
 
 ## Problem
 
@@ -255,6 +255,14 @@ Each `media_item_id` appears once, from its latest scan (`DISTINCT ON (media_ite
 - `be/db/accounts_test.go`: the Picker scope maps to `photos`, and the old scopes still map to nothing.
 - UI (`src/test/`): the Request page's Photos tab (grant button, popup-blocked fallback link, waiting, cancel, expired), the results view for both scan types, and the Browse Photos tab (enabled and disabled, sorting).
 
+## As built
+
+- **Backend:** `be/collect/photos.go` (session, poller, scan, sizing), `be/db/photos.go` (`photos_picker_sessions`, `photos_picked_items`, and Browse's queries), `be/web/photos.go` (the `/api/photos/…` routes). The Library API's collector, routes and tables are gone; a startup migration drops the tables.
+- **UI:** the Request page's Google Photos tab (`ui/src/components/PhotosPick.tsx`), a results view for `google_photos` scans, and Browse's Google Photos tab, both on `ui/src/components/PickedItemsTable.tsx`.
+- **Differences from the design above**, in more detail under each step below: the deadline is `pick_by` (`timeoutIn` after creation), not `expire_time`; `GET /api/photos/sessions` answers the pick under way, so a reloaded page takes it up again; every pick route answers `{sessionKey, pickerUri, state, scanId?, pickBy}`; the old tables were dropped rather than kept (none had rows).
+- **Checked live** (2026-09-28, on `hdd_dev`): granting Photos to a linked account, picking in Google Photos, waiting, scanning, the results view and Browse. No errors or retries in the log.
+- **Left open:** open question 2 (keeping picked items' metadata and encryption at rest) is review item 7.16. Question 3 stands as designed: each scan is its own pick.
+
 ## Implementation plan
 
 One PR for the whole feature (branch `photos-picker`), with a commit per step. Each step leaves the branch working.
@@ -277,7 +285,7 @@ One PR for the whole feature (branch `photos-picker`), with a commit per step. E
    - `GET /api/browse/google/{client_key}/photos/items` answers `{items, total, page, page_size}`; each item carries the `scan_id` that last picked it, which Browse links to. Newest first sorts by when an item was taken (`create_time`).
    - `ui/src/components/PickedItemsTable.tsx` is the table both views share: name (photo or video icon), taken, dimensions, camera, and size as "~7.5 MB" (or "Unknown"), with how it was measured on hover. The scan's summary reads "N picked items, size, M without a size".
    - A finished pick refreshes Browse's totals and list.
-6. **Docs:** `architecture.md` (Photos back in the diagrams, routes, scopes and tables), `README.md`, `CLAUDE.md` (routes, `photos.go`, tests), and this spec's status to implemented, with an "As built" section. Then move it to `docs/archive/`, and move 7.15 to `codebase-review-history.md` with a change-log row.
+6. **Docs** (done): `architecture.md` (Photos back in the diagrams, routes, scopes and tables), `README.md`, `CLAUDE.md` (routes, `photos.go`, tests), and this spec's status to implemented, with an "As built" section. Then move it to `docs/archive/`, and move 7.15 to `codebase-review-history.md` with a change-log row.
 
 ## Open questions
 

@@ -13,7 +13,7 @@ import (
 )
 
 // Google Photos scans: the user picks items in Google Photos, and the
-// backend scans what they picked. See docs/specs/photos-picker.md,
+// backend scans what they picked. See docs/archive/photos-picker.md,
 // "Backend".
 
 func photosRoutes(api *mux.Router) {

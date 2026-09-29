@@ -7,7 +7,7 @@ import Table, { Column } from "./ui/Table";
 
 // Items Google Photos scans picked, for a scan's results and for Browse.
 // Sizes are of the copy Google Photos keeps; see
-// docs/specs/photos-picker.md, "Step 0 findings".
+// docs/archive/photos-picker.md, "Step 0 findings".
 
 const sizeNotes: Record<PickedItem["size_source"], string> = {
   head: "The size of the copy Google Photos keeps",
