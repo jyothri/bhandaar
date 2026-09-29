@@ -20,6 +20,12 @@ export type ScanSummary = {
   folder_count: number;
   // Google Photos items with no size; 0 for other scans.
   unsized_count: number;
+  // Google Cloud Storage versions the item count leaves out; 0 for other
+  // scans.
+  noncurrent_count: number;
+  noncurrent_bytes: number;
+  soft_deleted_count: number;
+  soft_deleted_bytes: number;
 };
 
 export type PaginationInfo = {

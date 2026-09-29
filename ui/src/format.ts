@@ -70,6 +70,7 @@ const scanTypeLabels: Record<string, string> = {
   google_drive: "Google Drive",
   local: "Local",
   google_photos: "Google Photos",
+  gcs: "Google Cloud Storage",
 };
 
 /** A scan type as people read it, e.g. "Google Drive" for google_drive. */

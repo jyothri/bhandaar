@@ -182,10 +182,11 @@ export const getBrowseSources = (): Promise<BrowseSource[]> =>
 
 /**
  * A page (from 1) of a folder of a Google account's Drive ("" for its
- * roots) or of an agent drive ("" for the drive's root).
+ * roots), of an agent drive ("" for the drive's root), or of a Google
+ * account's Cloud Storage ("" for its buckets, else "<bucket>/<prefix>").
  */
 export const getBrowseChildren = (
-  kind: "google" | "agent",
+  kind: "google" | "agent" | "gcs",
   key: string,
   folder: string,
   page: number
@@ -193,7 +194,9 @@ export const getBrowseChildren = (
   const base =
     kind === "google"
       ? `/api/browse/google/${encodeURIComponent(key)}/drive/children`
-      : `/api/browse/agent/${encodeURIComponent(key)}/children`;
+      : kind === "gcs"
+        ? `/api/browse/google/${encodeURIComponent(key)}/gcs/children`
+        : `/api/browse/agent/${encodeURIComponent(key)}/children`;
   const query = new URLSearchParams({ folder, page: String(page) });
   return fetchJson(`${base}?${query}`);
 };

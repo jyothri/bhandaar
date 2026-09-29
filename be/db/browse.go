@@ -74,11 +74,17 @@ func BrowseSources(userID int64) ([]BrowseSource, error) {
 		if err != nil {
 			return nil, err
 		}
+		gcs, err := gcsServiceTotals(a.ClientKey)
+		if err != nil {
+			return nil, err
+		}
+		gcs.Granted = contains(a.Services, ServiceGcs)
 		drive.Granted = contains(a.Services, ServiceDrive)
 		gmail.Granted = contains(a.Services, ServiceGmail)
 		photos.Granted = contains(a.Services, ServicePhotos)
 		sources = append(sources, BrowseSource{Kind: "google", Key: a.ClientKey, Name: a.DisplayName,
-			Services: map[string]ServiceTotals{ServiceDrive: drive, ServiceGmail: gmail, ServicePhotos: photos}})
+			Services: map[string]ServiceTotals{ServiceDrive: drive, ServiceGmail: gmail, ServicePhotos: photos,
+				ServiceGcs: gcs}})
 	}
 
 	drives := []struct {
@@ -207,6 +213,8 @@ type BrowseFolder struct {
 	Id   string `json:"id"`
 	Name string `json:"name"`
 	FolderTotals
+	// A line about it, e.g. a bucket's location and class.
+	Detail string `json:"detail,omitempty"`
 }
 
 // BrowseFile is a file in the folder browsed.
@@ -218,6 +226,10 @@ type BrowseFile struct {
 	MimeType string     `db:"mime_type" json:"mime_type,omitempty"`
 	// Why an agent couldn't read it, instead of a size.
 	Error string `db:"error" json:"error,omitempty"`
+	// A Cloud Storage object version's class and state (live,
+	// noncurrent, soft_deleted).
+	StorageClass string `db:"storage_class" json:"storage_class,omitempty"`
+	State        string `db:"state" json:"state,omitempty"`
 }
 
 // FolderPage is a page of a folder's contents: subfolders, largest first,
@@ -234,6 +246,9 @@ type FolderPage struct {
 	Updating bool `json:"updating"`
 	// Everything under the folder itself, for each entry's share of it.
 	Totals FolderTotals `json:"totals"`
+	// Cloud Storage: everything under the folder by state and class, since
+	// Totals counts live objects only.
+	Gcs *GcsTotals `json:"gcs,omitempty"`
 }
 
 // GoogleAccountOwnedBy reports whether userID linked clientKey.

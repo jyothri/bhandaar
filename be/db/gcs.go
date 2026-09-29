@@ -1,7 +1,9 @@
 package db
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -326,4 +328,177 @@ func GcsScanBuckets(scanId int) ([]GcsScanBucket, error) {
 		}
 	}
 	return buckets, nil
+}
+
+// Browse: an account's buckets, then prefixes as folders, from the record.
+// A folder ID is "<bucket>/<prefix>": "jyo-pics/" is the bucket's root,
+// "jyo-pics/2024/" a folder in it, and "" lists the buckets. See
+// docs/specs/gcs-scans.md, "What Browse shows".
+
+// gcsTotalsRow is a gcs_prefix_totals row.
+type gcsTotalsRow struct {
+	GcsTotals
+	Prefix  string `db:"prefix"`
+	ByClass []byte `db:"bytes_by_class"`
+}
+
+func (r *gcsTotalsRow) totals() *GcsTotals {
+	t := r.GcsTotals
+	json.Unmarshal(r.ByClass, &t.BytesByClass)
+	return &t
+}
+
+// add sums another bucket's totals into t.
+func (t *GcsTotals) add(o *GcsTotals) {
+	t.LiveObjects += o.LiveObjects
+	t.LiveBytes += o.LiveBytes
+	t.NoncurrentObjects += o.NoncurrentObjects
+	t.NoncurrentBytes += o.NoncurrentBytes
+	t.SoftDeletedObjects += o.SoftDeletedObjects
+	t.SoftDeletedBytes += o.SoftDeletedBytes
+	for class, bytes := range o.BytesByClass {
+		if t.BytesByClass == nil {
+			t.BytesByClass = map[string]int64{}
+		}
+		t.BytesByClass[class] += bytes
+	}
+}
+
+const gcsTotalsColumns = `live_objects, live_bytes, noncurrent_objects, noncurrent_bytes,
+	soft_deleted_objects, soft_deleted_bytes, bytes_by_class`
+
+func gcsServiceTotals(clientKey string) (ServiceTotals, error) {
+	var row struct {
+		Buckets   int64      `db:"buckets"`
+		Files     int64      `db:"files"`
+		Bytes     int64      `db:"bytes"`
+		UpdatedAt *time.Time `db:"updated_at"`
+	}
+	err := db.Get(&row, `SELECT count(*) AS buckets, COALESCE(sum(t.live_objects), 0) AS files,
+			COALESCE(sum(t.live_bytes), 0) AS bytes, max(b.updated_at) AS updated_at
+		FROM gcs_buckets b LEFT JOIN gcs_prefix_totals t
+			ON t.client_key = b.client_key AND t.bucket = b.bucket AND t.prefix = ''
+		WHERE b.client_key = $1`, clientKey)
+	if err != nil {
+		return ServiceTotals{}, fmt.Errorf("failed to add up the Cloud Storage of %s: %w", clientKey, err)
+	}
+	if row.Buckets == 0 {
+		return ServiceTotals{}, nil
+	}
+	return ServiceTotals{Files: &row.Files, Bytes: &row.Bytes, UpdatedAt: row.UpdatedAt}, nil
+}
+
+// GcsChildren returns a page of a Cloud Storage folder of clientKey: the
+// buckets for "", else a prefix's subfolders, then its object versions,
+// each largest first. ErrNotFound for a bucket or prefix not in the record.
+func GcsChildren(clientKey string, folder string, pageNo int) (FolderPage, error) {
+	page := FolderPage{Path: []PathPart{}, Page: max(pageNo, 1)}
+	if folder == "" {
+		return gcsBuckets(clientKey, page)
+	}
+	bucket, prefix, ok := strings.Cut(folder, "/")
+	if !ok || (prefix != "" && !strings.HasSuffix(prefix, "/")) {
+		return FolderPage{}, ErrNotFound
+	}
+	var own gcsTotalsRow
+	err := db.Get(&own, `SELECT prefix, `+gcsTotalsColumns+` FROM gcs_prefix_totals
+		WHERE client_key = $1 AND bucket = $2 AND prefix = $3`, clientKey, bucket, prefix)
+	if errors.Is(err, sql.ErrNoRows) {
+		return FolderPage{}, ErrNotFound
+	}
+	if err != nil {
+		return FolderPage{}, fmt.Errorf("failed to get the totals of %s: %w", folder, err)
+	}
+	page.Totals = FolderTotals{Files: own.LiveObjects, Bytes: own.LiveBytes}
+	page.Gcs = own.totals()
+
+	page.Path = append(page.Path, PathPart{Id: bucket + "/", Name: bucket})
+	if prefix != "" {
+		at := ""
+		for _, segment := range strings.Split(strings.TrimSuffix(prefix, "/"), "/") {
+			at += segment + "/"
+			page.Path = append(page.Path, PathPart{Id: bucket + "/" + at, Name: gcsFolderName(segment)})
+		}
+	}
+
+	var subs []gcsTotalsRow
+	if err := db.Select(&subs, `SELECT prefix, `+gcsTotalsColumns+` FROM gcs_prefix_totals
+		WHERE client_key = $1 AND bucket = $2 AND parent = $3`, clientKey, bucket, prefix); err != nil {
+		return FolderPage{}, fmt.Errorf("failed to list folders in %s: %w", folder, err)
+	}
+	folders := make([]BrowseFolder, len(subs))
+	for i, s := range subs {
+		folders[i] = BrowseFolder{Id: bucket + "/" + s.Prefix,
+			Name:         gcsFolderName(strings.TrimSuffix(strings.TrimPrefix(s.Prefix, prefix), "/")),
+			FolderTotals: FolderTotals{Files: s.LiveObjects, Bytes: s.LiveBytes}}
+	}
+	var files int
+	if err := db.Get(&files, `SELECT count(*) FROM gcs_objects WHERE client_key = $1 AND bucket = $2 AND parent = $3`,
+		clientKey, bucket, prefix); err != nil {
+		return FolderPage{}, fmt.Errorf("failed to count objects in %s: %w", folder, err)
+	}
+	offset, limit := pageFolders(&page, folders, files)
+	if limit > 0 && offset < files {
+		if err := db.Select(&page.Files, `SELECT name || '#' || generation || '/' || state AS id,
+				substr(name, length($3) + 1) AS name, size, updated AS modified, '' AS mime_type, '' AS error,
+				storage_class, state
+			FROM gcs_objects WHERE client_key = $1 AND bucket = $2 AND parent = $3
+			ORDER BY size DESC, name, generation DESC, state LIMIT $4 OFFSET $5`,
+			clientKey, bucket, prefix, limit, offset); err != nil {
+			return FolderPage{}, fmt.Errorf("failed to list objects in %s: %w", folder, err)
+		}
+	}
+	return page, nil
+}
+
+// gcsFolderName is how a prefix's last segment reads; "a//b" has an empty one.
+func gcsFolderName(segment string) string {
+	if segment == "" {
+		return "(empty name)"
+	}
+	return segment
+}
+
+// gcsBuckets is the buckets page: each bucket as a folder, with its
+// location and class, and when a scan last completed it.
+func gcsBuckets(clientKey string, page FolderPage) (FolderPage, error) {
+	var rows []struct {
+		gcsTotalsRow
+		Bucket       string    `db:"bucket"`
+		Location     string    `db:"location"`
+		StorageClass string    `db:"storage_class"`
+		UpdatedAt    time.Time `db:"updated_at"`
+	}
+	if err := db.Select(&rows, `SELECT b.bucket, b.location, b.storage_class, b.updated_at,
+			COALESCE(t.prefix, '') AS prefix, COALESCE(t.live_objects, 0) AS live_objects,
+			COALESCE(t.live_bytes, 0) AS live_bytes, COALESCE(t.noncurrent_objects, 0) AS noncurrent_objects,
+			COALESCE(t.noncurrent_bytes, 0) AS noncurrent_bytes, COALESCE(t.soft_deleted_objects, 0) AS soft_deleted_objects,
+			COALESCE(t.soft_deleted_bytes, 0) AS soft_deleted_bytes, COALESCE(t.bytes_by_class, '{}') AS bytes_by_class
+		FROM gcs_buckets b LEFT JOIN gcs_prefix_totals t
+			ON t.client_key = b.client_key AND t.bucket = b.bucket AND t.prefix = ''
+		WHERE b.client_key = $1`, clientKey); err != nil {
+		return FolderPage{}, fmt.Errorf("failed to list the buckets of %s: %w", clientKey, err)
+	}
+	all := &GcsTotals{}
+	folders := make([]BrowseFolder, len(rows))
+	for i, r := range rows {
+		all.add(r.totals())
+		detail := strings.Join(nonEmpty(r.Location, r.StorageClass), " · ")
+		folders[i] = BrowseFolder{Id: r.Bucket + "/", Name: r.Bucket, Detail: detail,
+			FolderTotals: FolderTotals{Files: r.LiveObjects, Bytes: r.LiveBytes}}
+	}
+	page.Totals = FolderTotals{Files: all.LiveObjects, Bytes: all.LiveBytes}
+	page.Gcs = all
+	pageFolders(&page, folders, 0)
+	return page, nil
+}
+
+func nonEmpty(s ...string) []string {
+	out := []string{}
+	for _, x := range s {
+		if x != "" {
+			out = append(out, x)
+		}
+	}
+	return out
 }

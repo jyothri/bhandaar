@@ -223,3 +223,74 @@ func TestGcsParent(t *testing.T) {
 		}
 	}
 }
+
+func TestGcsChildren(t *testing.T) {
+	migrated(t)
+	alice := addUser(t, "alice")
+	s := gcsScan(t, alice)
+	for bucket, objects := range map[string][]GcsObject{
+		"pics": {
+			obj("top.txt", 1, GcsLive, 1, "STANDARD"),
+			obj("docs/a", 1, GcsLive, 10, "STANDARD"),
+			obj("docs/a", 0, GcsNoncurrent, 4, "STANDARD"),
+			obj("docs/2024/b", 1, GcsLive, 100, "NEARLINE"),
+		},
+		"archive": {obj("x", 1, GcsLive, 1000, "ARCHIVE")},
+	} {
+		if err := UpsertGcsObjects("k1", bucket, s, objects); err != nil {
+			t.Fatal(err)
+		}
+		if err := RebuildGcsPrefixTotals("k1", bucket); err != nil {
+			t.Fatal(err)
+		}
+		if err := SaveGcsBucket("k1", GcsBucketRecord{Bucket: bucket, ProjectId: "p-123456", Location: "US-WEST1",
+			StorageClass: "STANDARD"}, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	roots, err := GcsChildren("k1", "", 1)
+	if err != nil || len(roots.Folders) != 2 || roots.Folders[0].Id != "archive/" || roots.Folders[0].Bytes != 1000 ||
+		roots.Folders[1].Id != "pics/" || roots.Folders[1].Files != 3 || roots.Folders[1].Detail != "US-WEST1 · STANDARD" ||
+		roots.Totals.Bytes != 1111 || roots.Gcs.NoncurrentBytes != 4 || len(roots.Files) != 0 {
+		t.Errorf("roots = %+v, %v", roots, err)
+	}
+
+	bucket, err := GcsChildren("k1", "pics/", 1)
+	if err != nil || len(bucket.Folders) != 1 || bucket.Folders[0].Id != "pics/docs/" || bucket.Folders[0].Bytes != 110 ||
+		len(bucket.Files) != 1 || bucket.Files[0].Name != "top.txt" || bucket.Totals.Bytes != 111 ||
+		len(bucket.Path) != 1 || bucket.Path[0].Name != "pics" {
+		t.Errorf("pics/ = %+v, %v", bucket, err)
+	}
+
+	docs, err := GcsChildren("k1", "pics/docs/", 1)
+	if err != nil || len(docs.Folders) != 1 || docs.Folders[0].Name != "2024" || docs.Folders[0].Id != "pics/docs/2024/" {
+		t.Fatalf("pics/docs/ = %+v, %v", docs, err)
+	}
+	// Both versions of a, largest first, with class and state.
+	if len(docs.Files) != 2 || docs.Files[0].Name != "a" || docs.Files[0].State != GcsLive ||
+		docs.Files[1].State != GcsNoncurrent || docs.Files[1].StorageClass != "STANDARD" || docs.Files[0].Id == docs.Files[1].Id {
+		t.Errorf("pics/docs/ files = %+v", docs.Files)
+	}
+	if docs.Gcs.NoncurrentBytes != 4 || docs.Gcs.BytesByClass["NEARLINE"] != 100 ||
+		len(docs.Path) != 2 || docs.Path[1] != (PathPart{Id: "pics/docs/", Name: "docs"}) {
+		t.Errorf("pics/docs/ totals and path = %+v %+v", docs.Gcs, docs.Path)
+	}
+
+	for _, missing := range []string{"nope/", "pics/nope/", "pics", "pics/docs"} {
+		if _, err := GcsChildren("k1", missing, 1); err != ErrNotFound {
+			t.Errorf("GcsChildren(%q) err = %v, want ErrNotFound", missing, err)
+		}
+	}
+	if theirs, err := GcsChildren("k2", "", 1); err != nil || len(theirs.Folders) != 0 {
+		t.Errorf("another account's buckets = %+v, %v", theirs, err)
+	}
+
+	totals, err := gcsServiceTotals("k1")
+	if err != nil || *totals.Files != 4 || *totals.Bytes != 1111 || totals.UpdatedAt == nil {
+		t.Errorf("service totals = %+v, %v", totals, err)
+	}
+	if none, err := gcsServiceTotals("k2"); err != nil || none.Files != nil {
+		t.Errorf("no buckets: %+v, %v", none, err)
+	}
+}

@@ -18,6 +18,7 @@ func browseRoutes(api *mux.Router) {
 	api.HandleFunc("/browse/google/{client_key}/drive/children", DriveChildrenHandler).Methods("GET")
 	api.HandleFunc("/browse/google/{client_key}/gmail/messages", AccountMessagesHandler).Methods("GET")
 	api.HandleFunc("/browse/google/{client_key}/photos/items", AccountPhotosHandler).Methods("GET")
+	api.HandleFunc("/browse/google/{client_key}/gcs/children", GcsChildrenHandler).Methods("GET")
 	api.HandleFunc("/browse/agent/{drive}/children", AgentChildrenHandler).Methods("GET")
 	api.HandleFunc("/browse/agent/{drive}/status", AgentStatusHandler).Methods("GET")
 }
@@ -160,4 +161,14 @@ func AccountPhotosHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONResponse(w, page, http.StatusOK)
+}
+
+func GcsChildrenHandler(w http.ResponseWriter, r *http.Request) {
+	clientKey, ok := checkGoogleAccount(w, r)
+	if !ok {
+		return
+	}
+	folder := r.URL.Query().Get("folder")
+	page, err := db.GcsChildren(clientKey, folder, queryPage(r))
+	writeFolderPage(w, page, err, "gcs:"+clientKey, folder)
 }

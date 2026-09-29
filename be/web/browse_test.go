@@ -31,6 +31,7 @@ func TestBrowseChecksTheSourceIsTheUsers(t *testing.T) {
 		"/api/browse/google/theirs/drive/children",
 		"/api/browse/google/theirs/gmail/messages?sort=size",
 		"/api/browse/google/theirs/photos/items?sort=size",
+		"/api/browse/google/theirs/gcs/children?folder=b1/",
 		"/api/browse/agent/2/children?folder=a",
 		"/api/browse/agent/2/status",
 		"/api/browse/agent/x/status",
