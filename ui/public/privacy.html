@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Privacy Policy · Bhandaar</title>
+    <meta
+      name="description"
+      content="How Bhandaar, a private storage analyzer, accesses, uses, stores and deletes Google user data."
+    />
+    <style>
+      :root {
+        --canvas: #f6f7f9;
+        --surface: #ffffff;
+        --fg: #1b1f24;
+        --muted: #5b6573;
+        --line: #e3e6ea;
+        --accent: #2f5bd3;
+        --code: #eef1f5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --canvas: #111418;
+          --surface: #191d22;
+          --fg: #e6e9ed;
+          --muted: #9aa4b1;
+          --line: #2b3139;
+          --accent: #8fb0ff;
+          --code: #232931;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--canvas);
+        color: var(--fg);
+        font:
+          16px/1.6 system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+      }
+      main {
+        max-width: 48rem;
+        margin: 0 auto;
+        padding: 2.5rem 1rem 4rem;
+      }
+      article {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+      }
+      @media (min-width: 640px) {
+        article {
+          padding: 2.5rem;
+        }
+      }
+      h1 {
+        font-size: 1.75rem;
+        line-height: 1.25;
+        margin: 0 0 0.25rem;
+      }
+      h2 {
+        font-size: 1.2rem;
+        margin: 2.25rem 0 0.5rem;
+      }
+      h3 {
+        font-size: 1rem;
+        margin: 1.5rem 0 0.25rem;
+      }
+      p,
+      ul {
+        margin: 0.5rem 0;
+      }
+      li {
+        margin: 0.25rem 0;
+      }
+      a {
+        color: var(--accent);
+      }
+      code {
+        background: var(--code);
+        border-radius: 0.25rem;
+        padding: 0.05rem 0.3rem;
+        font-size: 0.85em;
+        overflow-wrap: anywhere;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .note {
+        border-left: 3px solid var(--accent);
+        padding: 0.25rem 0 0.25rem 1rem;
+        margin: 1rem 0;
+      }
+      .table-wrap {
+        overflow-x: auto;
+        margin: 0.75rem 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.9rem;
+      }
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 0.5rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      header.site {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+        font-weight: 600;
+      }
+      header.site img {
+        width: 1.5rem;
+        height: 1.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="site">
+        <img src="/favicon.svg" alt="" />
+        <a href="/" style="color: inherit; text-decoration: none">Bhandaar</a>
+      </header>
+      <article>
+        <h1>Privacy Policy</h1>
+        <p class="muted">Effective 29 September 2026</p>
+
+        <p>
+          Bhandaar (<a href="https://sm.jkurapati.com">sm.jkurapati.com</a>) is
+          a private storage analyzer. It shows you what takes up space in your
+          Google Drive, Gmail, Google Photos and Google Cloud Storage, and on
+          your own drives. It is run by Jyothrilinga Kurapati (&ldquo;I&rdquo;,
+          &ldquo;me&rdquo;) for personal use and a small number of invited
+          family members. There is no public sign-up: every account is created
+          by me.
+        </p>
+        <p>
+          This policy explains what data Bhandaar accesses, why, how it is
+          stored and protected, who it is shared with (no one), and how you can
+          have it deleted. Questions or requests:
+          <a href="mailto:jyothrilinga@gmail.com">jyothrilinga@gmail.com</a>.
+        </p>
+
+        <div class="note">
+          <strong>In short:</strong> Bhandaar reads only metadata (names, sizes,
+          dates and similar), only from the Google services you choose to
+          connect, and only with read-only permissions. It never reads the
+          contents of your email, files or storage objects, never changes or
+          deletes them, never shows ads, and never sells, shares or transfers
+          your data.
+        </div>
+
+        <h2>1. Google user data Bhandaar accesses</h2>
+        <p>
+          You connect a Google account to Bhandaar one service at a time,
+          through Google&rsquo;s own consent screen. Bhandaar asks only for the
+          permissions (OAuth scopes) that service needs, and every one of them
+          is read-only.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Permission (scope)</th>
+                <th>What Bhandaar reads</th>
+                <th>Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <code>openid</code>, <code>email</code> (every connection)
+                </td>
+                <td>Your Google account&rsquo;s ID and email address.</td>
+                <td>
+                  To tell your connected accounts apart and to recognise an
+                  account connected again. Only a masked form of the address
+                  (for example <code>jyo****ri@gmail.com</code>) is stored and
+                  shown.
+                </td>
+              </tr>
+              <tr>
+                <td><code>gmail.readonly</code> (Gmail)</td>
+                <td>
+                  For each message: its ID and thread ID, labels, the From, To,
+                  Subject and Date headers, and its size.
+                </td>
+                <td>
+                  To list your largest and oldest messages, so you can see what
+                  uses your mailbox storage.
+                </td>
+              </tr>
+              <tr>
+                <td><code>drive.metadata.readonly</code> (Google Drive)</td>
+                <td>
+                  For each file and folder: its name, ID, folder, type, size,
+                  modified time and MD5 checksum.
+                </td>
+                <td>
+                  To show your Drive as a folder tree with the size of each
+                  folder.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>photospicker.mediaitems.readonly</code> (Google Photos)
+                </td>
+                <td>
+                  Only the photos and videos you pick yourself in Google
+                  Photos&rsquo; picker: each item&rsquo;s ID, file name, type,
+                  when it was taken, dimensions, camera and exposure details,
+                  and its size.
+                </td>
+                <td>To show how much space the items you picked take up.</td>
+              </tr>
+              <tr>
+                <td>
+                  <code>devstorage.read_only</code> and
+                  <code>cloudplatformprojects.readonly</code> (Google Cloud
+                  Storage)
+                </td>
+                <td>
+                  Your Cloud project names and IDs; each bucket&rsquo;s name,
+                  location and settings (storage class, versioning, soft
+                  delete); and for each object: its name, size, storage class,
+                  version, checksums and dates, including older versions and
+                  recently deleted objects.
+                </td>
+                <td>
+                  To show your buckets as folder trees, with what each folder
+                  costs to store, including storage that normal listings hide.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>What Bhandaar does not access</h3>
+        <ul>
+          <li>
+            The body or attachments of any email, the contents of any Drive
+            file, or the contents of any Cloud Storage object.
+          </li>
+          <li>
+            Any photo or video you did not pick. For the ones you pick, Bhandaar
+            asks Google for each item&rsquo;s size. In the rare case Google
+            doesn&rsquo;t give one, it downloads the item once to count its
+            bytes and compute a checksum, then discards it; the photo itself is
+            never stored. Bhandaar stores no location data.
+          </li>
+          <li>
+            Your contacts, calendar, or any Google service you haven&rsquo;t
+            connected.
+          </li>
+        </ul>
+        <p>
+          Bhandaar never changes or deletes your email, files, photos or storage
+          objects. The only thing it creates in your Google account is a
+          temporary Google Photos picking session when you choose to pick
+          photos, which it deletes once your pick is scanned.
+        </p>
+
+        <h2>2. How Bhandaar uses this data</h2>
+        <p>
+          Only to show <em>you</em> your own storage: scan results, folder
+          trees, totals and lists of your largest items, on pages that only you
+          can see after logging in. Specifically, Bhandaar does not:
+        </p>
+        <ul>
+          <li>sell, rent or share your data;</li>
+          <li>use it for advertising, or for profiling you;</li>
+          <li>
+            use it to develop, improve or train artificial intelligence or
+            machine learning models;
+          </li>
+          <li>
+            let any person read it, except you, and me when you ask for help
+            with your account, when needed for security, or to comply with the
+            law.
+          </li>
+        </ul>
+
+        <h3>Google API Services User Data Policy</h3>
+        <p>
+          Bhandaar&rsquo;s use and transfer to any other app of information
+          received from Google APIs will adhere to the
+          <a
+            href="https://developers.google.com/terms/api-services-user-data-policy"
+            >Google API Services User Data Policy</a
+          >, including the Limited Use requirements.
+        </p>
+
+        <h2>3. Sharing</h2>
+        <p>
+          Bhandaar does not share, sell or transfer Google user data to anyone.
+          It runs on a server I own and control; no hosting provider, analytics
+          service or other third party receives it. Bhandaar sends requests to
+          Google&rsquo;s own APIs to read your data, as described above. The
+          only exception would be a disclosure required by law.
+        </p>
+
+        <h2>4. Other information Bhandaar keeps</h2>
+        <ul>
+          <li>
+            <strong>Your Bhandaar login:</strong> a username, and a password
+            stored only as a salted Argon2id hash. Failed login attempts are
+            recorded briefly to block password guessing.
+          </li>
+          <li>
+            <strong>Connection details for each Google account:</strong> the
+            access and refresh tokens Google issues, and the permissions you
+            granted. The refresh token lets Bhandaar run the scans you request
+            later without asking you to sign in again.
+          </li>
+          <li>
+            <strong>Scan history:</strong> when each scan ran, what it covered
+            (for example a Drive folder or a Cloud Storage bucket), and its
+            totals.
+          </li>
+          <li>
+            <strong>Local drives:</strong> if you use Bhandaar&rsquo;s
+            <code>driveagent</code> tool, the file names, folders, sizes, dates
+            and checksums of the drives you scan with it. This is not Google
+            data.
+          </li>
+          <li>
+            <strong>Server logs:</strong> technical records of requests and
+            errors, used only to run and fix the service.
+          </li>
+        </ul>
+
+        <h2>5. Cookies and browser storage</h2>
+        <p>
+          Bhandaar sets one cookie, <code>bhandaar_session</code>, to keep you
+          logged in. It is HttpOnly (scripts can&rsquo;t read it), sent only to
+          Bhandaar, and expires 30 days after you last use the site, or when you
+          log out. Your browser also keeps a few settings for Bhandaar (such as
+          the account and service you last browsed), and, only while you connect
+          an account, a random security value for Google&rsquo;s sign-in. There
+          are no advertising or analytics cookies, and no tracking.
+        </p>
+
+        <h2>6. How data is stored and protected</h2>
+        <ul>
+          <li>
+            Data is stored in a database on my own server, reachable only over
+            encrypted connections (HTTPS/TLS). Access to the server and database
+            is limited to me.
+          </li>
+          <li>
+            Each user sees only their own scans and connected accounts; the
+            server checks this on every request.
+          </li>
+          <li>
+            Passwords are stored only as Argon2id hashes; repeated failed logins
+            are blocked.
+          </li>
+          <li>
+            Google tokens are kept on the server and are never sent to your
+            browser.
+          </li>
+        </ul>
+
+        <h2>7. How long data is kept</h2>
+        <ul>
+          <li>
+            <strong>Scan results</strong> are kept until you delete the scan.
+          </li>
+          <li>
+            <strong>Your Drive and Cloud Storage folder trees</strong> are kept,
+            and updated by each new scan, until you ask me to remove the Google
+            account from Bhandaar.
+          </li>
+          <li>
+            <strong>Connection details and tokens</strong> are kept until you
+            ask me to remove the Google account. If you revoke Bhandaar&rsquo;s
+            access at Google, the tokens stop working at once.
+          </li>
+          <li>
+            <strong>Login sessions</strong> end 30 days after last use, or when
+            you log out.
+          </li>
+          <li>
+            <strong>Google Photos picking sessions</strong> are deleted at
+            Google as soon as the scan of what you picked is done.
+          </li>
+        </ul>
+
+        <h2>8. Your choices, and deleting your data</h2>
+        <ul>
+          <li>
+            <strong>Connect only what you want.</strong> Each Google service is
+            connected separately, and you can decline any permission on
+            Google&rsquo;s consent screen.
+          </li>
+          <li>
+            <strong>Delete scans</strong> yourself, in Bhandaar&rsquo;s Request
+            History. This deletes the scan and what it found.
+          </li>
+          <li>
+            <strong>Revoke access</strong> at any time from your Google Account,
+            at
+            <a href="https://myaccount.google.com/permissions"
+              >myaccount.google.com/permissions</a
+            >. Bhandaar then can no longer read anything from that account.
+          </li>
+          <li>
+            <strong
+              >Remove a Google account, or your whole Bhandaar account,</strong
+            >
+            and all data kept for it, including its tokens, scans and folder
+            trees: email
+            <a href="mailto:jyothrilinga@gmail.com">jyothrilinga@gmail.com</a>.
+            I will delete it within 30 days and confirm by email.
+          </li>
+          <li>
+            <strong>Ask what data Bhandaar holds about you</strong>, or for a
+            copy of it, at the same address.
+          </li>
+        </ul>
+
+        <h2>9. Children</h2>
+        <p>
+          Bhandaar is not directed at children under 13, and accounts are
+          created only by me.
+        </p>
+
+        <h2>10. Changes to this policy</h2>
+        <p>
+          If this policy changes, the new version will be posted here with a new
+          effective date. If a change affects how your Google data is used, I
+          will tell you before it takes effect, and ask for your consent again
+          where needed.
+        </p>
+
+        <h2>11. Contact</h2>
+        <p>
+          Jyothrilinga Kurapati<br />
+          <a href="mailto:jyothrilinga@gmail.com">jyothrilinga@gmail.com</a>
+        </p>
+      </article>
+    </main>
+  </body>
+</html>

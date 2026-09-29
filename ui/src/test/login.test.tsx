@@ -92,6 +92,17 @@ describe("login", () => {
     expect(router.state.location.pathname).toBe("/login");
   });
 
+  it("says what the app is, and links to its privacy policy", async () => {
+    renderRoute("/login");
+
+    expect(
+      await screen.findByText(/Bhandaar shows what takes up space/)
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Privacy policy" })
+    ).toHaveAttribute("href", "/privacy.html");
+  });
+
   it("never redirects off the site after logging in", async () => {
     const { router } = renderRoute(
       "/login?redirect=%2F%2Fevil.example.com%2Fx"

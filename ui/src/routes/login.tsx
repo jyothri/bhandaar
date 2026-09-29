@@ -92,6 +92,16 @@ function Login() {
           {isPending ? "Logging in…" : "Log in"}
         </Button>
       </form>
+      {/* What the app is, and its privacy policy, for anyone who lands
+          here; Google's OAuth verification checks the homepage for both. */}
+      <p className="mt-6 border-t border-line pt-4 text-xs text-muted">
+        Bhandaar shows what takes up space in your Google Drive, Gmail, Google
+        Photos and Google Cloud Storage, and on your own drives, using read-only
+        access. It&apos;s private and invite-only.{" "}
+        <a href="/privacy.html" className="text-accent hover:underline">
+          Privacy policy
+        </a>
+      </p>
     </Card>
   );
 }
