@@ -19,4 +19,8 @@ export const queryKeys = {
   agentStatus: (driveKey: string) => ["agentStatus", driveKey] as const,
   accountMessages: (clientKey: string, sort: string, page: number) =>
     ["accountMessages", clientKey, sort, page] as const,
+  accountPhotos: (clientKey: string, sort: string, page: number) =>
+    ["accountPhotos", clientKey, sort, page] as const,
+  pickedItems: (scanId: number, page: number) =>
+    ["pickedItems", scanId, page] as const,
 };

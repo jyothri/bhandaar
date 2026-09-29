@@ -54,12 +54,14 @@ export default function PhotosPick({ account }: { account?: Account }) {
       underWay(query.state.data) ? PICK_POLL_MS : false,
   });
 
-  // Once a pick is done, its scan is new in the history.
+  // Once a pick is done, its scan is new in the history and in Browse.
   const state = pick?.state;
   useEffect(() => {
     if (state === "done") {
       queryClient.invalidateQueries({ queryKey: queryKeys.allScanRequests });
       queryClient.invalidateQueries({ queryKey: queryKeys.scannedAccounts });
+      queryClient.invalidateQueries({ queryKey: queryKeys.browseSources });
+      queryClient.invalidateQueries({ queryKey: ["accountPhotos"] });
     }
   }, [state, queryClient]);
 

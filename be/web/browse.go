@@ -17,6 +17,7 @@ func browseRoutes(api *mux.Router) {
 	api.HandleFunc("/browse/sources", BrowseSourcesHandler).Methods("GET")
 	api.HandleFunc("/browse/google/{client_key}/drive/children", DriveChildrenHandler).Methods("GET")
 	api.HandleFunc("/browse/google/{client_key}/gmail/messages", AccountMessagesHandler).Methods("GET")
+	api.HandleFunc("/browse/google/{client_key}/photos/items", AccountPhotosHandler).Methods("GET")
 	api.HandleFunc("/browse/agent/{drive}/children", AgentChildrenHandler).Methods("GET")
 	api.HandleFunc("/browse/agent/{drive}/status", AgentStatusHandler).Methods("GET")
 }
@@ -142,6 +143,20 @@ func AccountMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("Failed to list account messages", "client_key", clientKey, "error", err)
 		http.Error(w, "Failed to list the messages", http.StatusInternalServerError)
+		return
+	}
+	writeJSONResponse(w, page, http.StatusOK)
+}
+
+func AccountPhotosHandler(w http.ResponseWriter, r *http.Request) {
+	clientKey, ok := checkGoogleAccount(w, r)
+	if !ok {
+		return
+	}
+	page, err := db.AccountPhotos(currentUser(r).ID, clientKey, r.URL.Query().Get("sort"), queryPage(r))
+	if err != nil {
+		slog.Error("Failed to list account photos", "client_key", clientKey, "error", err)
+		http.Error(w, "Failed to list the photos", http.StatusInternalServerError)
 		return
 	}
 	writeJSONResponse(w, page, http.StatusOK)

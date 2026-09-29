@@ -169,3 +169,67 @@ func TestPickedItemsAndSummary(t *testing.T) {
 		t.Errorf("after DeleteScan: %d items, %v; want none", page.Total, err)
 	}
 }
+
+// photosScanOf records userID's Photos scan of account clientKey, with
+// items (media item ID → size, nil for none), taken on the days given.
+func photosScanOf(t *testing.T, userID int64, clientKey string, items map[string]*int64, taken map[string]string) int {
+	t.Helper()
+	scanId, err := LogStartScan("google_photos", userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveScanMetadata("someone", clientKey, "Picked in Google Photos", "", scanId); err != nil {
+		t.Fatal(err)
+	}
+	var picked []PickedItem
+	for id, size := range items {
+		item := PickedItem{MediaItemId: id, MediaType: "PHOTO", Filename: id + ".jpg", Size: size, SizeSource: SizeFromHead}
+		if day, ok := taken[id]; ok {
+			when, _ := time.Parse("2006-01-02", day)
+			item.CreateTime = &when
+		}
+		picked = append(picked, item)
+	}
+	if err := SavePickedItems(scanId, picked); err != nil {
+		t.Fatal(err)
+	}
+	return scanId
+}
+
+func TestAccountPhotos(t *testing.T) {
+	migrated(t)
+	alice, bob := addUser(t, "alice"), addUser(t, "bob")
+	n := func(v int64) *int64 { return &v }
+	taken := map[string]string{"a": "2024-01-01", "b": "2025-06-01", "c": "2023-03-03"}
+	photosScanOf(t, alice, "k1", map[string]*int64{"a": n(100), "b": n(5)}, taken)
+	// Picked again later, with a new size; and c, with none.
+	later := photosScanOf(t, alice, "k1", map[string]*int64{"a": n(300), "c": nil}, taken)
+	photosScanOf(t, bob, "k2", map[string]*int64{"z": n(1)}, nil)
+
+	ids := func(p AccountPhotoPage) []string {
+		var s []string
+		for _, it := range p.Items {
+			s = append(s, it.MediaItemId)
+		}
+		return s
+	}
+	bySize, err := AccountPhotos(alice, "k1", "size", 1)
+	if err != nil || bySize.Total != 3 || !equal(ids(bySize), []string{"a", "b", "c"}) ||
+		*bySize.Items[0].Size != 300 || bySize.Items[0].ScanId != later {
+		t.Errorf("by size = %v of %d, %v", ids(bySize), bySize.Total, err)
+	}
+	byDate, _ := AccountPhotos(alice, "k1", "date", 1)
+	if !equal(ids(byDate), []string{"b", "a", "c"}) {
+		t.Errorf("by date = %v", ids(byDate))
+	}
+	if theirs, _ := AccountPhotos(alice, "k2", "", 1); theirs.Total != 0 {
+		t.Errorf("alice sees %d of bob's photos", theirs.Total)
+	}
+	totals, err := photosServiceTotals(alice, "k1")
+	if err != nil || *totals.Files != 3 || *totals.Bytes != 305 || totals.UpdatedAt == nil {
+		t.Errorf("photos totals = %+v, %v", totals, err)
+	}
+	if none, err := photosServiceTotals(alice, "k9"); err != nil || none.Files != nil {
+		t.Errorf("totals of an account without Photos scans = %+v, %v", none, err)
+	}
+}

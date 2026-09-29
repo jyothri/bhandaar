@@ -261,3 +261,77 @@ func PickedItems(scanId int, pageNo int) (PickedItemPage, error) {
 	}
 	return page, nil
 }
+
+// Browse's Photos: every item an account's Photos scans picked, each once,
+// as its latest scan found it. See docs/specs/photos-picker.md, "UI".
+
+// AccountPhotosPageSize is how many items a page of an account's Photos
+// holds.
+const AccountPhotosPageSize = 50
+
+// latestPicks is each item of userID's ($1) Photos scans of an account
+// ($2), from its latest scan, with when that scan ran.
+const latestPicks = `WITH latest AS (
+	SELECT DISTINCT ON (p.media_item_id) p.id, p.media_item_id, p.media_type, p.mime_type, p.filename,
+		p.create_time, p.width, p.height, p.camera_make, p.camera_model, p.focal_length, p.f_number,
+		p.iso, p.exposure_time, p.fps, p.size, p.size_source, p.md5hash, p.scan_id,
+		COALESCE(s.scan_end_time, s.scan_start_time) AS scanned_at
+	FROM photos_picked_items p JOIN scans s ON s.id = p.scan_id
+		JOIN scanmetadata sm ON sm.scan_id = p.scan_id
+	WHERE s.user_id = $1 AND sm.client_key = $2 AND s.scan_type = 'google_photos'
+	ORDER BY p.media_item_id, p.scan_id DESC)
+`
+
+func photosServiceTotals(userID int64, clientKey string) (ServiceTotals, error) {
+	var row struct {
+		Files     int64      `db:"files"`
+		Bytes     int64      `db:"bytes"`
+		UpdatedAt *time.Time `db:"updated_at"`
+	}
+	err := db.Get(&row, latestPicks+`SELECT count(*) AS files, COALESCE(sum(size), 0) AS bytes,
+		max(scanned_at) AS updated_at FROM latest`, userID, clientKey)
+	if err != nil {
+		return ServiceTotals{}, fmt.Errorf("failed to add up the Photos of %s: %w", clientKey, err)
+	}
+	if row.Files == 0 {
+		return ServiceTotals{}, nil
+	}
+	return ServiceTotals{Files: &row.Files, Bytes: &row.Bytes, UpdatedAt: row.UpdatedAt}, nil
+}
+
+// AccountPhoto is an item in an account's Photos, with the scan that last
+// picked it.
+type AccountPhoto struct {
+	PickedItem
+	ScanId int `db:"scan_id" json:"scan_id"`
+}
+
+// AccountPhotoPage is a page of an account's Photos.
+type AccountPhotoPage struct {
+	Items    []AccountPhoto `json:"items"`
+	Total    int            `json:"total"`
+	Page     int            `json:"page"`
+	PageSize int            `json:"page_size"`
+}
+
+// AccountPhotos returns a page of clientKey's picked items, across all
+// userID's Photos scans of it: by "size", largest first, or else newest
+// first (when taken).
+func AccountPhotos(userID int64, clientKey string, sortBy string, pageNo int) (AccountPhotoPage, error) {
+	page := AccountPhotoPage{Items: []AccountPhoto{}, Page: max(pageNo, 1), PageSize: AccountPhotosPageSize}
+	if err := db.Get(&page.Total, latestPicks+`SELECT count(*) FROM latest`, userID, clientKey); err != nil {
+		return AccountPhotoPage{}, fmt.Errorf("failed to count the Photos of %s: %w", clientKey, err)
+	}
+	order := `create_time DESC NULLS LAST, id`
+	if sortBy == "size" {
+		order = `size DESC NULLS LAST, id`
+	}
+	if err := db.Select(&page.Items, latestPicks+`SELECT media_item_id, media_type, mime_type, filename,
+			create_time, width, height, camera_make, camera_model, focal_length, f_number, iso,
+			exposure_time, fps, size, size_source, md5hash, scan_id
+		FROM latest ORDER BY `+order+` LIMIT $3 OFFSET $4`,
+		userID, clientKey, AccountPhotosPageSize, AccountPhotosPageSize*(page.Page-1)); err != nil {
+		return AccountPhotoPage{}, fmt.Errorf("failed to list the Photos of %s: %w", clientKey, err)
+	}
+	return page, nil
+}

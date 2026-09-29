@@ -51,10 +51,10 @@ The application consists of:
 ### Frontend Structure (`ui/`)
 
 - **src/routes/**: TanStack Router route components
-  - `index.tsx`: Browse, the landing page: pick a Google account (then Google Drive or Gmail) or an agent drive, and see a collapsible folder tree (`components/FolderTree.tsx`, one folder loaded at a time) or the account's messages; `?source=google:<client_key>|agent:<id>&service=&folder=`
+  - `index.tsx`: Browse, the landing page: pick a Google account (then Google Drive, Gmail or Google Photos) or an agent drive, and see a collapsible folder tree (`components/FolderTree.tsx`, one folder loaded at a time), the account's messages, or its picked photos (`components/PickedItemsTable.tsx`); `?source=google:<client_key>|agent:<id>&service=&folder=`
   - `request.tsx`: Scan request form for Gmail, Google Drive and Google Photos (`?type=gmail|drive|photos`; Photos picks in Google Photos, `components/PhotosPick.tsx`): account linking per service (`googleLink.ts`), the Drive query builder (`driveQuery.ts`), and live progress
   - `requests.tsx`: List view of scan requests by account (`?account=<client_key>`); each scan ID links to its results. It and a scan's page show a trail under the nav tabs (`components/Breadcrumbs.tsx`): Request History › account › Scan N
-  - `scans.$scanId.tsx`: One scan's results: summary (with a link to Browse the account), then a page of files and folders (Drive, local) or new messages (Gmail)
+  - `scans.$scanId.tsx`: One scan's results: summary (with a link to Browse the account), then a page of files and folders (Drive, local), new messages (Gmail) or picked items (Google Photos)
   - `oauth/glink.tsx`: OAuth callback handler
 - **src/api/**: Backend API client functions
 - **src/components/**: Reusable UI components; `components/ui/` holds the shared ones (Button, Card, Field, Input, Select, Checkbox, Tabs, Switch, Badge, Table, Pager, Icon, Spinner), and `Header.tsx` the app shell's top bar
@@ -267,6 +267,7 @@ All but health and login/logout need the session cookie.
 - `GET /api/browse/agent/{id}/children?folder=&page=` - The same for an agent drive, `folder` a path relative to its root
 - `GET /api/browse/agent/{id}/status` - An agent drive's last scan, last sync, physical drive
 - `GET /api/browse/google/{client_key}/gmail/messages?sort=size|date&page=` - A page (50) of the account's messages across its Gmail scans
+- `GET /api/browse/google/{client_key}/photos/items?sort=size|date&page=` - A page (50) of the account's picked Photos across its scans, each item once (from its latest scan)
 - `GET /oauth/authorize` - Initiate OAuth flow
 - `GET /oauth/callback` - OAuth callback handler
 - `GET /events` - SSE endpoint for scan progress

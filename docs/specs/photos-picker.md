@@ -272,7 +272,11 @@ One PR for the whole feature (branch `photos-picker`), with a commit per step. E
    - `GET /api/photos/sessions` answers the user's pick that is `waiting` or `scanning` (or `null`), and every pick route answers the same shape, `{sessionKey, pickerUri, state, scanId?, pickBy}`. The page takes up a pick already under way, so a reload, or another tab, doesn't leave the user stuck behind the one-pick-at-a-time rule until it expires.
    - The Photos panel is `ui/src/components/PhotosPick.tsx`. It checks a pick's state every 3 s while it's `waiting` or `scanning`, and replaces the Submit row. "Open Google Photos" stays as a link while waiting, for a closed or blocked window. A finished pick shows its outcome next to the **Pick in Google Photos** button, which starts the next pick.
    - The popup opens blank on the click, then goes to `pickerUri/autoclose` with `opener` cleared.
-5. **Results view and Browse:** the results view for both types, the Browse route and totals, the Photos tab enabled, and the tests.
+5. **Results view and Browse** (done): the results view, the Browse route and totals, the Photos tab enabled, and the tests. Where it differs from the design above:
+   - With the old tables dropped, there's only one scan type to show (`google_photos`); `scanTypeLabel` names it "Google Photos".
+   - `GET /api/browse/google/{client_key}/photos/items` answers `{items, total, page, page_size}`; each item carries the `scan_id` that last picked it, which Browse links to. Newest first sorts by when an item was taken (`create_time`).
+   - `ui/src/components/PickedItemsTable.tsx` is the table both views share: name (photo or video icon), taken, dimensions, camera, and size as "~7.5 MB" (or "Unknown"), with how it was measured on hover. The scan's summary reads "N picked items, size, M without a size".
+   - A finished pick refreshes Browse's totals and list.
 6. **Docs:** `architecture.md` (Photos back in the diagrams, routes, scopes and tables), `README.md`, `CLAUDE.md` (routes, `photos.go`, tests), and this spec's status to implemented, with an "As built" section. Then move it to `docs/archive/`, and move 7.15 to `codebase-review-history.md` with a change-log row.
 
 ## Open questions

@@ -30,6 +30,7 @@ func TestBrowseChecksTheSourceIsTheUsers(t *testing.T) {
 	for _, path := range []string{
 		"/api/browse/google/theirs/drive/children",
 		"/api/browse/google/theirs/gmail/messages?sort=size",
+		"/api/browse/google/theirs/photos/items?sort=size",
 		"/api/browse/agent/2/children?folder=a",
 		"/api/browse/agent/2/status",
 		"/api/browse/agent/x/status",

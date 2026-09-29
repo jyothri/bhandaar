@@ -4,6 +4,7 @@ import { ReactNode, useEffect } from "react";
 
 import {
   getAccountMessages,
+  getAccountPhotos,
   getAgentDriveStatus,
   getBrowseChildren,
   getBrowseSources,
@@ -13,6 +14,7 @@ import { accountLabels } from "../accountLabels";
 import Breadcrumbs from "../components/Breadcrumbs";
 import Masked, { MaskToggle } from "../components/Masked";
 import FolderTree from "../components/FolderTree";
+import PickedItemsTable from "../components/PickedItemsTable";
 import Badge from "../components/ui/Badge";
 import Card from "../components/ui/Card";
 import Icon, { IconName } from "../components/ui/Icon";
@@ -28,7 +30,7 @@ import { BrowseSource, ServiceTotals } from "../types/browse";
 // Browse: what you have, by Google account and by agent drive. See
 // docs/archive/browse.md, "Browse page".
 
-type BrowseService = "drive" | "gmail";
+type BrowseService = "drive" | "gmail" | "photos";
 
 type BrowseSearch = {
   // "google:<client key>" or "agent:<drive ID>".
@@ -36,7 +38,7 @@ type BrowseSearch = {
   service?: BrowseService;
   // A Drive folder ID, or an agent folder's path; the root when missing.
   folder?: string;
-  // Gmail's order and page.
+  // Gmail's and Photos' order and page.
   sort?: "size" | "date";
   page?: number;
 };
@@ -49,7 +51,9 @@ export const Route = createFileRoute("/")({
       ...(typeof search.source === "string" && search.source !== ""
         ? { source: search.source }
         : {}),
-      ...(search.service === "drive" || search.service === "gmail"
+      ...(search.service === "drive" ||
+      search.service === "gmail" ||
+      search.service === "photos"
         ? { service: search.service }
         : {}),
       ...(typeof search.folder === "string" && search.folder !== ""
@@ -90,6 +94,14 @@ const sourceId = (s: BrowseSource) => `${s.kind}:${s.key}`;
 const serviceNames: Record<BrowseService, string> = {
   drive: "Google Drive",
   gmail: "Gmail",
+  photos: "Google Photos",
+};
+
+// What a service's totals count.
+const serviceNouns: Record<BrowseService, string> = {
+  drive: "file",
+  gmail: "message",
+  photos: "item",
 };
 
 function Browse() {
@@ -161,9 +173,10 @@ function SourceView({
 }) {
   const navigate = useNavigate({ from: Route.fullPath });
   const id = sourceId(source);
+  const recalled = recall(lastServiceKey(source.key));
   const service: BrowseService =
     search.service ??
-    (recall(lastServiceKey(source.key)) === "gmail" ? "gmail" : "drive");
+    (recalled === "gmail" || recalled === "photos" ? recalled : "drive");
 
   useEffect(() => {
     remember(lastSourceKey, id);
@@ -387,7 +400,7 @@ function GoogleAccount({
   const services = source.services!;
   const sub = (name: BrowseService, st: ServiceTotals) =>
     st.files !== undefined && st.bytes !== undefined
-      ? totals(st.files, st.bytes, name === "gmail" ? "message" : "file")
+      ? totals(st.files, st.bytes, serviceNouns[name])
       : st.granted
         ? "Not scanned"
         : "Not granted";
@@ -395,11 +408,10 @@ function GoogleAccount({
   const recorded = current.files !== undefined && current.bytes !== undefined;
   return (
     <>
-      <Tabs<BrowseService | "photos">
+      <Tabs<BrowseService>
         label="Service"
         value={service}
         onChange={(name) =>
-          name !== "photos" &&
           navigate({ search: { source: sourceId(source), service: name } })
         }
         items={[
@@ -409,11 +421,21 @@ function GoogleAccount({
             sub: sub("drive", services.drive),
           },
           { id: "gmail", label: "Gmail", sub: sub("gmail", services.gmail) },
-          { id: "photos", label: "Google Photos", sub: "Soon", disabled: true },
+          {
+            id: "photos",
+            label: "Google Photos",
+            sub: sub("photos", services.photos),
+          },
         ]}
       />
       <SummaryCard
-        icon={service === "gmail" ? "mail" : "cloud"}
+        icon={
+          service === "gmail"
+            ? "mail"
+            : service === "photos"
+              ? "image"
+              : "cloud"
+        }
         name={label}
         kind={`Google account · ${serviceNames[service]}`}
         badges={service === "drive" && current.updating && <Updating />}
@@ -422,7 +444,7 @@ function GoogleAccount({
           <Figures
             bytes={current.bytes!}
             files={current.files!}
-            noun={service === "gmail" ? "message" : "file"}
+            noun={serviceNouns[service]}
             updatedAt={current.updated_at}
           />
         ) : (
@@ -442,6 +464,12 @@ function GoogleAccount({
               search: { source: sourceId(source), service, folder: f },
             })
           }
+        />
+      ) : service === "photos" ? (
+        <Photos
+          clientKey={source.key}
+          sort={search.sort ?? "size"}
+          page={search.page ?? 1}
         />
       ) : (
         <Messages
@@ -602,21 +630,9 @@ function AgentStatus({ driveKey }: { driveKey: string }) {
   );
 }
 
-function Messages({
-  clientKey,
-  sort,
-  page,
-}: {
-  clientKey: string;
-  sort: "size" | "date";
-  page: number;
-}) {
-  const { data, error } = useQuery({
-    queryKey: queryKeys.accountMessages(clientKey, sort, page),
-    queryFn: () => getAccountMessages(clientKey, sort, page),
-    placeholderData: keepPreviousData,
-  });
-  // A two-way segmented control of links, so each order has its URL.
+// Largest first or newest first: a two-way segmented control of links, so
+// each order has its URL.
+function Order({ sort }: { sort: "size" | "date" }) {
   const sortLink = (to: "size" | "date", text: string) => (
     <Link
       from={Route.fullPath}
@@ -631,20 +647,65 @@ function Messages({
       {text}
     </Link>
   );
+  return (
+    <div
+      role="group"
+      aria-label="Order"
+      className="inline-flex rounded-md bg-surface-muted p-0.5 text-sm"
+    >
+      {sortLink("size", "Largest first")}
+      {sortLink("date", "Newest first")}
+    </div>
+  );
+}
+
+// Page links for a list of messages or photos, above it.
+function ListPager({
+  page,
+  total,
+  pageSize,
+}: {
+  page: number;
+  total: number;
+  pageSize: number;
+}) {
+  return (
+    <Pager
+      page={page}
+      pages={Math.max(1, Math.ceil(total / pageSize))}
+      link={(to, children, className) => (
+        <Link
+          from={Route.fullPath}
+          search={(prev) => ({ ...prev, page: to > 1 ? to : undefined })}
+          className={className}
+        >
+          {children}
+        </Link>
+      )}
+    />
+  );
+}
+
+function Messages({
+  clientKey,
+  sort,
+  page,
+}: {
+  clientKey: string;
+  sort: "size" | "date";
+  page: number;
+}) {
+  const { data, error } = useQuery({
+    queryKey: queryKeys.accountMessages(clientKey, sort, page),
+    queryFn: () => getAccountMessages(clientKey, sort, page),
+    placeholderData: keepPreviousData,
+  });
   const actions = (
     <>
-      <div
-        role="group"
-        aria-label="Order"
-        className="inline-flex rounded-md bg-surface-muted p-0.5 text-sm"
-      >
-        {sortLink("size", "Largest first")}
-        {sortLink("date", "Newest first")}
-      </div>
+      <Order sort={sort} />
       <MaskToggle />
     </>
   );
-  const pages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
   return (
     <Card title="Messages" actions={actions}>
       <p className="mb-3 text-xs text-muted">
@@ -659,19 +720,7 @@ function Messages({
         <p className="text-sm text-muted">Loading messages…</p>
       ) : (
         <>
-          <Pager
-            page={page}
-            pages={pages}
-            link={(to, children, className) => (
-              <Link
-                from={Route.fullPath}
-                search={(prev) => ({ ...prev, page: to > 1 ? to : undefined })}
-                className={className}
-              >
-                {children}
-              </Link>
-            )}
-          />
+          <ListPager page={page} total={data.total} pageSize={data.page_size} />
           <Table
             rowKey={(m) => m.message_metadata_id}
             rows={data.messages}
@@ -726,6 +775,43 @@ function Messages({
               },
             ]}
           />
+        </>
+      )}
+    </Card>
+  );
+}
+
+function Photos({
+  clientKey,
+  sort,
+  page,
+}: {
+  clientKey: string;
+  sort: "size" | "date";
+  page: number;
+}) {
+  const { data, error } = useQuery({
+    queryKey: queryKeys.accountPhotos(clientKey, sort, page),
+    queryFn: () => getAccountPhotos(clientKey, sort, page),
+    placeholderData: keepPreviousData,
+  });
+  return (
+    <Card title="Photos and videos" actions={<Order sort={sort} />}>
+      <p className="mb-3 text-xs text-muted">
+        Everything this account's Google Photos scans picked, each item once, as
+        its latest scan found it. Sizes are of the copy Google Photos keeps,
+        which can be far smaller than the original file (Storage saver).
+      </p>
+      {error ? (
+        <p className="text-sm text-danger">
+          Couldn't load photos: {error.message}
+        </p>
+      ) : !data ? (
+        <p className="text-sm text-muted">Loading photos…</p>
+      ) : (
+        <>
+          <ListPager page={page} total={data.total} pageSize={data.page_size} />
+          <PickedItemsTable rows={data.items} scanOf={(item) => item.scan_id} />
         </>
       )}
     </Card>

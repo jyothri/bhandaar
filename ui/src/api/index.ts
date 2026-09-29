@@ -6,7 +6,11 @@ import {
   BrowseSource,
   FolderPage,
 } from "../types/browse";
-import { PhotosPick } from "../types/photos";
+import {
+  AccountPhotoPage,
+  PhotosPick,
+  PickedItemPage,
+} from "../types/photos";
 import { MessagePage, ScanDataPage, ScanSummary } from "../types/results";
 import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 
@@ -165,6 +169,12 @@ export const getScanData = (scanId: number, page: number): Promise<ScanDataPage>
 export const getGmailData = (scanId: number, page: number): Promise<MessagePage> =>
   fetchJson(`/api/gmaildata/${scanId}?page=${page}`);
 
+/** A page (from 1) of the items a Google Photos scan picked. */
+export const getPickedItems = (
+  scanId: number,
+  page: number
+): Promise<PickedItemPage> => fetchJson(`/api/photos/${scanId}?page=${page}`);
+
 /** What the user can browse: their Google accounts and agent drives. */
 export const getBrowseSources = (): Promise<BrowseSource[]> =>
   fetchJson("/api/browse/sources");
@@ -199,4 +209,14 @@ export const getAccountMessages = (
 ): Promise<AccountMessagePage> =>
   fetchJson(
     `/api/browse/google/${encodeURIComponent(clientKey)}/gmail/messages?sort=${sort}&page=${page}`
+  );
+
+/** A page (from 1) of a Google account's picked Photos, across its scans. */
+export const getAccountPhotos = (
+  clientKey: string,
+  sort: "size" | "date",
+  page: number
+): Promise<AccountPhotoPage> =>
+  fetchJson(
+    `/api/browse/google/${encodeURIComponent(clientKey)}/photos/items?sort=${sort}&page=${page}`
   );
