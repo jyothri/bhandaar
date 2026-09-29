@@ -202,7 +202,7 @@ One PR for the whole feature, with a commit per step. Each step leaves the branc
 1. **Cloud Storage as a linkable service** (done): `ServiceGcs`, the scope map, the UI `Service` type and scopes, `canListProjects`, and the tests.
 2. **Project and bucket lists** (done; projects sort by display name ignoring case, and Google's refusals become messages: an API not enabled, 403, 404): `collect.GcsProjects`, `collect.GcsBuckets`, and their routes, tested against the fake.
 3. **The scan** (done; the client library retries 429s and 5xx itself, so the collector doesn't; a soft-deleted pass that fails leaves the bucket completed, with the error recorded and soft-deleted rows untouched): the tables, the collector with both passes, the record's upserts and deletions, prefix totals, per-scan totals, `DeleteScan`, `GetScanSummary`, the results route, and the tests.
-4. **Request page:** the Google Cloud Storage tab and its tests.
+4. **Request page** (done): the Google Cloud Storage tab (`ui/src/components/GcsFields.tsx`) and its tests. The project list falls back to a typed ID when the account can't list projects, has none, or listing fails; changing the account resets the fields.
 5. **Results view and Browse:** the results view, the Browse route, the Google Cloud Storage tab, and the tests.
 6. **Docs and cleanup:** `architecture.md` (diagram, routes, collector, schema, scopes, a scan flow), `README.md`, `CLAUDE.md`. Remove `GOOGLE_APPLICATION_CREDENTIALS` and `~/keys/gae_creds.json` from the docs, since nothing needs them. Then mark this spec implemented with an "As built" section, and move it to `docs/archive/`.
 

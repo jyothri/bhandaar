@@ -16,7 +16,10 @@ import { linkGoogleAccount } from "../googleLink";
 import { clearLinkService, linkService } from "../oauthState";
 import { Service } from "../types/accounts";
 import { ScanMetadata, ScanType } from "../types/scans";
+import GcsFields from "../components/GcsFields";
+import { GcsForm, initialGcsForm } from "../gcsForm";
 import PhotosPick from "../components/PhotosPick";
+import { MAX_PREFIX_BYTES, validProjectId } from "../gcsNames";
 import ScanProgress from "../components/ScanProgress";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
@@ -39,7 +42,8 @@ export const Route = createFileRoute("/request")({
   validateSearch: (search: Record<string, unknown>): RequestSearch => ({
     ...(search.type === "gmail" ||
     search.type === "drive" ||
-    search.type === "photos"
+    search.type === "photos" ||
+    search.type === "gcs"
       ? { type: search.type }
       : {}),
     ...(typeof search.account === "string" && search.account !== ""
@@ -119,6 +123,8 @@ function Request() {
   }));
   const updateForm = (changes: Partial<RequestForm>) =>
     setForm((current) => ({ ...current, ...changes }));
+  // Google Cloud Storage's fields, kept apart: they belong to one account.
+  const [gcsForm, setGcsForm] = useState<GcsForm>(initialGcsForm);
   const queryFilter = buildGmailFilter(form);
   const builtDriveQuery = buildDriveQuery({
     ...form,
@@ -218,6 +224,27 @@ function Request() {
     };
   }
 
+  function gcsRequest(clientKey: string): ScanMetadata | string {
+    if (!validProjectId(gcsForm.project)) {
+      return "Pick a project, or type its ID.";
+    }
+    const prefixBytes = new TextEncoder().encode(gcsForm.prefix).length;
+    if (prefixBytes > MAX_PREFIX_BYTES) {
+      return `The prefix is too long: ${prefixBytes} bytes, the most is ${MAX_PREFIX_BYTES}.`;
+    }
+    return {
+      ScanType: ScanType.GStorage,
+      GStorageScan: {
+        ClientKey: clientKey,
+        ProjectId: gcsForm.project,
+        Bucket: gcsForm.bucket,
+        Prefix: gcsForm.bucket ? gcsForm.prefix : "",
+        Versions: gcsForm.versions,
+        SoftDeleted: gcsForm.softDeleted,
+      },
+    };
+  }
+
   function submitRequest() {
     if (!account) {
       setMessage({ kind: "error", text: "Please select an account." });
@@ -226,7 +253,9 @@ function Request() {
     const request =
       service === "drive"
         ? driveRequest(account.clientKey)
-        : gmailRequest(account.clientKey);
+        : service === "gcs"
+          ? gcsRequest(account.clientKey)
+          : gmailRequest(account.clientKey);
     if (typeof request === "string") {
       setMessage({ kind: "error", text: request });
       return;
@@ -237,6 +266,7 @@ function Request() {
 
   function handleSelectAccount(e: React.ChangeEvent<HTMLSelectElement>) {
     updateForm({ clientKey: e.target.value });
+    setGcsForm(initialGcsForm);
   }
 
   function toggleFileType(fileType: DriveFileType, checked: boolean) {
@@ -295,6 +325,7 @@ function Request() {
             { id: "gmail", label: serviceNames.gmail.full },
             { id: "drive", label: serviceNames.drive.full },
             { id: "photos", label: serviceNames.photos.full },
+            { id: "gcs", label: serviceNames.gcs.full },
           ]}
         />
         <div className="mt-5 grid gap-5">
@@ -389,6 +420,23 @@ function Request() {
           {!missingService && service === "photos" && (
             <PhotosPick account={account} />
           )}
+
+          {!missingService &&
+            service === "gcs" &&
+            (account ? (
+              <GcsFields
+                key={account.clientKey}
+                account={account}
+                form={gcsForm}
+                onChange={(changes) =>
+                  setGcsForm((current) => ({ ...current, ...changes }))
+                }
+              />
+            ) : (
+              <p className="text-sm text-muted">
+                Select an account to list its projects and buckets.
+              </p>
+            ))}
 
           {!missingService && service === "drive" && (
             <>

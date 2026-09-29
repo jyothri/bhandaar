@@ -1,3 +1,5 @@
+import { GStorageScan } from "./gcs";
+
 export interface GMailScan {
   Filter: string;
   ClientKey: string;
@@ -27,6 +29,7 @@ export type ScanMetadata = {
   ScanType?: ScanType;
   GMailScan?: GMailScan;
   GDriveScan?: GDriveScan;
+  GStorageScan?: GStorageScan;
 };
 
 export type RequestScanResponse = {

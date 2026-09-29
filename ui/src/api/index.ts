@@ -11,6 +11,7 @@ import {
   PhotosPick,
   PickedItemPage,
 } from "../types/photos";
+import { GcsBucket, GcsProject, GcsScanBucket } from "../types/gcs";
 import { MessagePage, ScanDataPage, ScanSummary } from "../types/results";
 import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 
@@ -220,3 +221,20 @@ export const getAccountPhotos = (
   fetchJson(
     `/api/browse/google/${encodeURIComponent(clientKey)}/photos/items?sort=${sort}&page=${page}`
   );
+
+/** A linked account's active Cloud projects. */
+export const getGcsProjects = (clientKey: string): Promise<GcsProject[]> =>
+  fetchJson(`/api/gcs/${encodeURIComponent(clientKey)}/projects`);
+
+/** A project's buckets, with their settings. */
+export const getGcsBuckets = (
+  clientKey: string,
+  project: string
+): Promise<GcsBucket[]> =>
+  fetchJson(
+    `/api/gcs/${encodeURIComponent(clientKey)}/projects/${encodeURIComponent(project)}/buckets`
+  );
+
+/** What a Cloud Storage scan did with each bucket. */
+export const getGcsScanBuckets = (scanId: number): Promise<GcsScanBucket[]> =>
+  fetchJson(`/api/gcs/${scanId}`);
