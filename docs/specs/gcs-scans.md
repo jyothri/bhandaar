@@ -38,6 +38,17 @@ Checked against Google's documentation on 2026-09-28 ([objects.list](https://doc
 - **Cost of a scan:** each `objects.list` call is a Class A operation, billed to the bucket's project, not ours: one per 1000 objects, per pass. Requester Pays buckets need a `userProject` to bill, so a scan skips them and says so. *(To check: that the Cloud Storage JSON API and Cloud Resource Manager API have to be enabled in the OAuth client's own project, as the Picker API had to be.)*
 - **Go:** `cloud.google.com/go/storage` (already in `go.mod`) takes a token source (`option.WithTokenSource`) and a fake endpoint (`option.WithEndpoint`) for tests. `Query.Versions`, `Query.SoftDeleted` and `Query.Delimiter` cover the passes. Resource Manager is `google.golang.org/api/cloudresourcemanager/v3`, already a dependency. *(To check: `Query.SoftDeleted` in v1.50.)*
 
+## Step 0 findings
+
+Probed on 2026-09-28 with a throwaway script, as the owner of project `personal-backup-276614` (three real buckets, the largest listed only 3 pages deep on purpose).
+
+- **Setup:** the **Cloud Resource Manager API** had to be enabled in the OAuth client's project; until it was, `projects.search` answered `403 SERVICE_DISABLED`. The Cloud Storage API needed nothing. Both scopes were granted as they are, with the client in "Testing".
+- **Projects:** `projects.search` with `cloudplatformprojects.readonly` alone listed the account's 8 active projects in 0.4 s, on one page.
+- **Buckets:** `buckets.list` (0.4 s) answered `location`, `locationType`, `storageClass`, `softDeletePolicy.retentionDurationSeconds` (604800, the 7-day default, on all three), and no `versioning` or `billing` when they're off.
+- **Objects:** 1000-object pages took about 0.3 s each, so a pass lists about 3,300 objects a second: a 10-million-object bucket takes about 50 minutes per pass. `size` is a string. `versions=true` and `softDeleted=true` both worked with `devstorage.read_only` for the project's owner (whether a viewer-only role needs more is still unknown). Each item has `bucket`, `name`, `generation`, `size`, `storageClass`, `md5Hash`, `crc32c`, `updated`, `timeCreated`, `timeFinalized`, `timeStorageClassUpdated`, `contentType` and more.
+- **Not yet seen:** noncurrent versions, composite objects and soft-deleted objects: the probed bucket has none. They're covered by the fake API in tests, and checked for real at the end-to-end run, on a small test bucket.
+- **Go:** `cloud.google.com/go/storage` v1.50.0 has `Query.Versions`, `Query.SoftDeleted`, `Query.IncludeFoldersAsPrefixes`, and `BucketAttrs.RequesterPays` and `.SoftDeletePolicy`, but not `returnPartialSuccess` for buckets, which isn't needed.
+
 ## Design
 
 ### Linking: Cloud Storage as a service
@@ -179,7 +190,7 @@ The record. A bucket appears once any scan has completed it. A bucket a later wh
 
 One PR for the whole feature, with a commit per step. Each step leaves the branch working.
 
-0. **Check before building** (a throwaway script, not merged): link a test account with both scopes, and confirm:
+0. **Check before building** (done 2026-09-28, see [Step 0 findings](#step-0-findings); a throwaway script, not merged): link a test account with both scopes, and confirm:
    - which APIs the OAuth client's project needs enabled;
    - that `projects.search` lists the account's projects with `cloudplatformprojects.readonly` alone;
    - the fields `buckets.list` answers;
