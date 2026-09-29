@@ -2,6 +2,7 @@ package web
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -16,12 +17,14 @@ import (
 func gcsRoutes(api *mux.Router) {
 	api.HandleFunc("/gcs/{client_key}/projects", GcsProjectsHandler).Methods("GET")
 	api.HandleFunc("/gcs/{client_key}/projects/{project}/buckets", GcsBucketsHandler).Methods("GET")
+	api.HandleFunc("/gcs/{scan_id}", GcsScanBucketsHandler).Methods("GET")
 }
 
 // The listings; tests replace them.
 var (
-	gcsProjects = collect.GcsProjects
-	gcsBuckets  = collect.GcsBuckets
+	gcsProjects    = collect.GcsProjects
+	gcsBuckets     = collect.GcsBuckets
+	gcsScanBuckets = db.GcsScanBuckets
 )
 
 // checkGcsAccount answers an error unless the request's account is the
@@ -85,6 +88,48 @@ func GcsBucketsHandler(w http.ResponseWriter, r *http.Request) {
 	buckets, err := gcsBuckets(currentUser(r).ID, clientKey, project)
 	if err != nil {
 		writeGcsError(w, err, "buckets")
+		return
+	}
+	writeJSONResponse(w, buckets, http.StatusOK)
+}
+
+// maxPrefixLength is the longest prefix a scan takes: an object name's
+// longest, in bytes.
+const maxPrefixLength = 1024
+
+// checkGcsScan checks a Cloud Storage scan request's own fields; the
+// account is checked like any other scan's.
+func checkGcsScan(scan collect.GStorageScan) (int, string) {
+	switch {
+	case scan.ClientKey == "":
+		return http.StatusBadRequest, "Pick an account."
+	case !collect.ValidProjectId(scan.ProjectId):
+		return http.StatusBadRequest, "That isn't a Google Cloud project ID."
+	case scan.Bucket != "" && !collect.ValidBucketName(scan.Bucket):
+		return http.StatusBadRequest, "That isn't a bucket name."
+	case scan.Prefix != "" && scan.Bucket == "":
+		return http.StatusBadRequest, "A prefix needs a bucket."
+	case len(scan.Prefix) > maxPrefixLength:
+		return http.StatusBadRequest, fmt.Sprintf("The prefix is too long: %d bytes, the most is %d.", len(scan.Prefix), maxPrefixLength)
+	}
+	return http.StatusOK, ""
+}
+
+// GcsScanBucketsHandler answers what a Cloud Storage scan did with each
+// bucket, with its totals.
+func GcsScanBucketsHandler(w http.ResponseWriter, r *http.Request) {
+	scanId, ok := getIntFromMap(mux.Vars(r), "scan_id")
+	if !ok {
+		http.Error(w, "Invalid scan ID", http.StatusBadRequest)
+		return
+	}
+	if !checkScanOwner(w, r, scanId) {
+		return
+	}
+	buckets, err := gcsScanBuckets(scanId)
+	if err != nil {
+		slog.Error("Failed to get a scan's buckets", "scan_id", scanId, "error", err)
+		http.Error(w, "Failed to retrieve the scan's buckets", http.StatusInternalServerError)
 		return
 	}
 	writeJSONResponse(w, buckets, http.StatusOK)

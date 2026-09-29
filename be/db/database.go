@@ -327,6 +327,8 @@ func DeleteScan(scanId int) error {
 		{"scandata", `DELETE FROM scandata WHERE scan_id = $1`},
 		{"messagemetadata", `DELETE FROM messagemetadata WHERE scan_id = $1`},
 		{"photos_picked_items", `DELETE FROM photos_picked_items WHERE scan_id = $1`},
+		// The Cloud Storage record stays; only the scan's own view goes.
+		{"gcs_scan_buckets", `DELETE FROM gcs_scan_buckets WHERE scan_id = $1`},
 		{"scanmetadata", `DELETE FROM scanmetadata WHERE scan_id = $1`},
 		{"scans", `DELETE FROM scans WHERE id = $1`},
 	}
@@ -459,6 +461,9 @@ func migrateDB() error {
 		return err
 	}
 	if err := migratePhotosPicker(); err != nil {
+		return err
+	}
+	if err := migrateGcs(); err != nil {
 		return err
 	}
 	return migrateBrowseTotals()
