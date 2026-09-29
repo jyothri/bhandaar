@@ -20,8 +20,10 @@ Taken with the owner on 2026-09-28:
 |---|---|
 | Access | **The linked Google account.** Cloud Storage is a service the account grants, like Gmail, Drive and Photos, with read-only scopes. A scan sees what that Google account can read. No service account key |
 | What a scan covers | **Pick a project, then its buckets.** The Request page lists the account's projects, then the project's buckets. One scan covers every bucket of the project, or one bucket, optionally under a prefix |
-| Browse | **A folder tree from the latest scan.** A Cloud Storage tab on the account: buckets, then prefixes as folders, each with totals, from each bucket's latest complete scan |
+| Browse | **A folder tree.** A Google Cloud Storage tab on the account: buckets, then prefixes as folders, each with totals, from the account's record |
 | What's recorded | Name, size, MD5, time updated, and also **storage class**, **noncurrent versions** and **soft-deleted objects**, since all three decide what a bucket costs |
+| Storage | **A living record per bucket**, like Drive's: one row per object version, updated by each scan, which deletes what it no longer sees. Scans keep only their totals |
+| Name | **Google Cloud Storage** in the UI's tabs and labels |
 
 ## API facts
 
@@ -46,7 +48,7 @@ Checked against Google's documentation on 2026-09-28 ([objects.list](https://doc
 
 ### Request page
 
-A **Cloud Storage** tab (`?type=gcs`):
+A **Google Cloud Storage** tab (`?type=gcs`):
 
 1. **Project:** a select filled from `GET /api/gcs/{client_key}/projects` (active projects, by display name, with the ID). Or a text box for the ID when the account can't list projects, or has none listed.
 2. **Buckets:** "All buckets" or one bucket, from `GET /api/gcs/{client_key}/projects/{project}/buckets` (name, location, default class, versioning, soft-delete retention).
@@ -65,62 +67,84 @@ A **Cloud Storage** tab (`?type=gcs`):
   1. **Live and noncurrent:** `objects.list` with `versions` (or not) and the prefix, 1000 a page. Each version is one row: live, or `noncurrent` when it has `timeDeleted`.
   2. **Soft-deleted:** when asked for, and the bucket's soft-delete retention is above 0, a second pass with `softDeleted=true`; each row is `soft_deleted`.
   3. Progress: objects listed so far, published under the account's `client_key`.
-  4. Retry 429 and 5xx with backoff, as the Photos collector's `fetch` does (#39). A 403 on one bucket marks that bucket failed in the scan's record and moves on. The scan fails only if every bucket did.
-- Buckets are listed one page at a time, never whole, so memory stays flat for large buckets. Rows go to the database in batches of 1000, as they're listed.
-- **Folder totals** are computed after the listing, per bucket, from the rows: one row per prefix (split on `/`), with the object count and bytes under it, split by state (live, noncurrent, soft-deleted) and by storage class. That's the same idea as Drive's and local scans' folder rows, done in SQL (`INSERT … SELECT … GROUP BY` over each ancestor prefix) rather than in memory.
+  4. Retry 429 and 5xx with backoff, as the Photos collector's `fetch` does. A 403 on one bucket marks that bucket failed in the scan's record and moves on. The scan fails only if every bucket did.
+- Buckets are listed one page at a time, never whole, so memory stays flat for large buckets. Rows are written to the record in batches of 1000, as they're listed.
+
+### A living record per bucket
+
+Like Drive's record (`drive_items`, [archive/browse.md](../archive/browse.md#drive-a-living-record-per-account)), each linked account has **one row per object version per bucket**, kept current by its scans, so the database grows with the buckets, not with the number of scans. A scan:
+
+1. **Upserts** every version it lists, keyed on (account, bucket, object name, generation, state), stamping it with the scan's ID (`seen_scan_id`).
+2. Once a bucket's passes are complete, **deletes what it didn't see** in its scope: the rows of that bucket, under the scan's prefix, in the states its passes covered (live always, noncurrent if it listed versions, soft-deleted if it listed those), whose `seen_scan_id` isn't this scan's. A pass that failed deletes nothing, and a state the scan didn't list keeps its rows as they were.
+3. **Rebuilds the bucket's folder totals** (`gcs_prefix_totals`) from the record: one row per prefix, with the object count and bytes under it, by state and by storage class. Done in SQL (`INSERT … SELECT … GROUP BY` over each ancestor prefix), not in memory.
+4. Records the scan's own view of each bucket (`gcs_scan_buckets`): its status and its totals by state and class, which stay after later scans change the record.
+
+A scan's objects aren't kept per scan: its results page shows its totals per bucket, and links to Browse for the objects. Deleting a scan deletes its `gcs_scan_buckets` rows only; the record, like Drive's, stays.
 
 **Tables** (`be/db/gcs.go`):
 
 ```sql
-CREATE TABLE IF NOT EXISTS gcs_buckets (          -- what a scan found of each bucket
-  id              serial PRIMARY KEY,
-  scan_id         INT NOT NULL REFERENCES scans (id),
-  project_id      TEXT NOT NULL,
-  bucket          TEXT NOT NULL,
-  location        TEXT NOT NULL DEFAULT '',
-  storage_class   TEXT NOT NULL DEFAULT '',        -- the bucket's default
-  versioning      BOOLEAN NOT NULL DEFAULT false,
-  soft_delete_days INT,                             -- NULL when off
-  prefix          TEXT NOT NULL DEFAULT '',        -- '' for the whole bucket
-  status          TEXT NOT NULL,                    -- completed | failed | skipped (Requester Pays)
-  error           TEXT NOT NULL DEFAULT '',
-  UNIQUE (scan_id, bucket)
+CREATE TABLE IF NOT EXISTS gcs_buckets (          -- the record's buckets, per account
+  client_key       VARCHAR(100) NOT NULL,
+  bucket           TEXT NOT NULL,
+  project_id       TEXT NOT NULL,
+  location         TEXT NOT NULL DEFAULT '',
+  storage_class    TEXT NOT NULL DEFAULT '',       -- the bucket's default
+  versioning       BOOLEAN NOT NULL DEFAULT false,
+  soft_delete_days INT,                            -- NULL when off
+  last_scan_id     INT REFERENCES scans (id) ON DELETE SET NULL,
+  updated_at       TIMESTAMPTZ NOT NULL,           -- when a scan last completed it
+  PRIMARY KEY (client_key, bucket)
 );
 
-CREATE TABLE IF NOT EXISTS gcs_objects (
-  id              bigserial PRIMARY KEY,
-  scan_id         INT NOT NULL REFERENCES scans (id),
-  bucket          TEXT NOT NULL,
-  name            TEXT NOT NULL,                    -- the object's full name
-  parent          TEXT NOT NULL,                    -- its prefix up to the last '/', '' at the root
-  generation      BIGINT NOT NULL,
-  state           VARCHAR(12) NOT NULL,             -- live | noncurrent | soft_deleted
-  size            BIGINT NOT NULL,
-  storage_class   TEXT NOT NULL,
-  md5hash         TEXT NOT NULL DEFAULT '',         -- hex; '' for composite and CMEK objects
-  crc32c          TEXT NOT NULL DEFAULT '',
-  updated         TIMESTAMPTZ,
-  time_deleted    TIMESTAMPTZ,                      -- noncurrent: when it stopped being live
-  hard_delete_time TIMESTAMPTZ,                     -- soft-deleted: when it goes for good
-  UNIQUE (scan_id, bucket, name, generation, state)
+CREATE TABLE IF NOT EXISTS gcs_objects (          -- the record: one row per object version
+  client_key       VARCHAR(100) NOT NULL,
+  bucket           TEXT NOT NULL,
+  name             TEXT NOT NULL,                  -- the object's full name
+  generation       BIGINT NOT NULL,
+  state            VARCHAR(12) NOT NULL,           -- live | noncurrent | soft_deleted
+  parent           TEXT NOT NULL,                  -- its prefix up to the last '/', '' at the root
+  size             BIGINT NOT NULL,
+  storage_class    TEXT NOT NULL,
+  md5hash          TEXT NOT NULL DEFAULT '',       -- hex; '' for composite and CMEK objects
+  crc32c           TEXT NOT NULL DEFAULT '',
+  updated          TIMESTAMPTZ,
+  time_deleted     TIMESTAMPTZ,                    -- noncurrent: when it stopped being live
+  hard_delete_time TIMESTAMPTZ,                    -- soft-deleted: when it goes for good
+  seen_scan_id     INT NOT NULL,                   -- the last scan that listed it
+  PRIMARY KEY (client_key, bucket, name, generation, state)
 );
-CREATE INDEX IF NOT EXISTS gcs_objects_children ON gcs_objects (scan_id, bucket, parent);
+CREATE INDEX IF NOT EXISTS gcs_objects_children ON gcs_objects (client_key, bucket, parent);
 
-CREATE TABLE IF NOT EXISTS gcs_prefix_totals (    -- one row per prefix ("folder") per scan
-  scan_id         INT NOT NULL REFERENCES scans (id),
-  bucket          TEXT NOT NULL,
-  prefix          TEXT NOT NULL,                    -- '' is the bucket itself
-  parent          TEXT,                             -- NULL for the bucket
-  live_objects    BIGINT NOT NULL, live_bytes BIGINT NOT NULL,
-  noncurrent_objects BIGINT NOT NULL, noncurrent_bytes BIGINT NOT NULL,
+CREATE TABLE IF NOT EXISTS gcs_prefix_totals (    -- one row per prefix ("folder"), from the record
+  client_key       VARCHAR(100) NOT NULL,
+  bucket           TEXT NOT NULL,
+  prefix           TEXT NOT NULL,                  -- '' is the bucket itself
+  parent           TEXT,                           -- NULL for the bucket
+  live_objects BIGINT NOT NULL,         live_bytes BIGINT NOT NULL,
+  noncurrent_objects BIGINT NOT NULL,   noncurrent_bytes BIGINT NOT NULL,
   soft_deleted_objects BIGINT NOT NULL, soft_deleted_bytes BIGINT NOT NULL,
-  bytes_by_class  JSONB NOT NULL,                   -- live bytes per storage class
-  PRIMARY KEY (scan_id, bucket, prefix)
+  bytes_by_class   JSONB NOT NULL,                 -- live bytes per storage class
+  PRIMARY KEY (client_key, bucket, prefix)
 );
-CREATE INDEX IF NOT EXISTS gcs_prefix_totals_children ON gcs_prefix_totals (scan_id, bucket, parent);
+CREATE INDEX IF NOT EXISTS gcs_prefix_totals_children ON gcs_prefix_totals (client_key, bucket, parent);
+
+CREATE TABLE IF NOT EXISTS gcs_scan_buckets (     -- what each scan found of each bucket
+  scan_id          INT NOT NULL REFERENCES scans (id),
+  bucket           TEXT NOT NULL,
+  project_id       TEXT NOT NULL,
+  prefix           TEXT NOT NULL DEFAULT '',       -- '' for the whole bucket
+  status           TEXT NOT NULL,                  -- completed | failed | skipped (Requester Pays)
+  error            TEXT NOT NULL DEFAULT '',
+  live_objects BIGINT NOT NULL DEFAULT 0,         live_bytes BIGINT NOT NULL DEFAULT 0,
+  noncurrent_objects BIGINT NOT NULL DEFAULT 0,   noncurrent_bytes BIGINT NOT NULL DEFAULT 0,
+  soft_deleted_objects BIGINT NOT NULL DEFAULT 0, soft_deleted_bytes BIGINT NOT NULL DEFAULT 0,
+  bytes_by_class   JSONB NOT NULL DEFAULT '{}',
+  PRIMARY KEY (scan_id, bucket)
+);
 ```
 
-Objects live in their own table, not `scandata`: they need the state, class, generation and parent columns, and the `parent` index is what makes a folder's page one indexed query over millions of rows. `DeleteScan` deletes all three tables' rows. `GetScanSummary` gains a `gcs` case: live objects and bytes as the item count and total, `folder_count` from `gcs_prefix_totals`, and the noncurrent and soft-deleted totals as extra fields.
+Objects live in their own table, not `scandata`: they need the state, class, generation and parent columns, and the `parent` index is what makes a folder's page one indexed query over millions of rows. `GetScanSummary` gains a `gcs` case: live objects and bytes from `gcs_scan_buckets` as the item count and total, plus the noncurrent and soft-deleted totals as extra fields.
 
 **Routes:**
 
@@ -128,28 +152,28 @@ Objects live in their own table, not `scandata`: they need the state, class, gen
 |---|---|
 | `GET /api/gcs/{client_key}/projects` | The account's active projects: `[{projectId, displayName}]`, or 409 with a message if it can't list them |
 | `GET /api/gcs/{client_key}/projects/{project}/buckets` | The project's buckets with their settings |
-| `GET /api/gcs/{scan_id}?page=&bucket=&prefix=` | A page of a scan's objects under a prefix, for the results view |
-| `GET /api/browse/google/{client_key}/gcs/children?bucket=&folder=&page=` | Browse: with no bucket, the buckets (from each one's latest complete scan); else a prefix's subfolders and objects, as the `FolderPage` Drive and agent drives use |
+| `GET /api/gcs/{scan_id}` | A scan's buckets: status, error, and totals by state and class, for the results view |
+| `GET /api/browse/google/{client_key}/gcs/children?bucket=&folder=&page=` | Browse: with no bucket, the account's buckets in the record; else a prefix's subfolders and objects, as the `FolderPage` Drive and agent drives use |
 
 The Browse route checks the account is the user's (`checkGoogleAccount`); the others check the scan's owner, or the account, as their neighbours do.
 
-### Which scan Browse reads
+### What Browse shows
 
-For each bucket, the **latest complete scan of the whole bucket**: a `gcs` scan whose `gcs_buckets` row for it is `completed` with `prefix = ''`. Prefix scans and failed buckets show on their own results pages, but never replace a bucket's tree in Browse. A bucket no longer returned by a newer whole-project scan is still shown from its last scan, marked "not seen since <date>".
+The record. A bucket appears once any scan has completed it. A bucket a later whole-project scan no longer lists (deleted, or access lost) keeps its record, marked "not seen since <date>" from `gcs_buckets.updated_at`, until a later decision to drop it (see open questions).
 
 ### UI
 
-- **Results view** (`scans.$scanId.tsx`, `gcs`): the summary (live objects and bytes, noncurrent and soft-deleted totals, bytes per storage class, and buckets that failed or were skipped), then a table of objects: name, bucket, size, class, state, updated, MD5.
-- **Browse:** a **Cloud Storage** tab on each Google account, with totals like the other tabs. Its roots are the buckets (with location and class badges), and it uses `FolderTree` as-is: folders are prefixes, with their live totals and size bars. A folder's summary card adds its noncurrent and soft-deleted bytes, and bytes per class, since those are what a folder tree hides. Objects show their class, and noncurrent or soft-deleted ones are marked.
-- `scanTypeLabel`: `gcs` → "Cloud Storage".
+- **Results view** (`scans.$scanId.tsx`, `gcs`): the summary (live objects and bytes, noncurrent and soft-deleted totals, bytes per storage class), then a table of the scan's buckets: status (with the error, or "skipped: Requester Pays"), live, noncurrent and soft-deleted totals, and a link to each bucket in Browse.
+- **Browse:** a **Google Cloud Storage** tab on each Google account, with totals like the other tabs. Its roots are the buckets (with location and class badges), and it uses `FolderTree` as-is: folders are prefixes, with their live totals and size bars. A folder's summary card adds its noncurrent and soft-deleted bytes, and bytes per class, since those are what a folder tree hides. Objects show their class, and noncurrent or soft-deleted ones are marked.
+- `scanTypeLabel`: `gcs` → "Google Cloud Storage".
 
 ## Tests
 
 - `be/collect/gcs_test.go`: a fake Cloud Storage and Resource Manager (`httptest` with `option.WithEndpoint`). It covers paging, both passes, noncurrent and soft-deleted states, composite objects (no MD5), a 403 on one bucket, skipping a Requester Pays bucket, retries, and progress under the `client_key`.
-- `be/db/gcs_test.go` (needs `BE_TEST_DB`): saving objects, the prefix totals (nesting, states, classes), the summary, `DeleteScan`, and Browse's choice of scan (latest complete whole-bucket scan, not a prefix scan or failed bucket).
+- `be/db/gcs_test.go` (needs `BE_TEST_DB`): the record across scans (added, changed, and deleted objects; a prefix scan deleting only under its prefix; a scan without the noncurrent pass keeping noncurrent rows; a failed pass deleting nothing), the prefix totals (nesting, states, classes), the per-scan totals, the summary, and `DeleteScan` leaving the record.
 - `be/web/gcs_test.go`: owner and grant checks on every route, and `checkScanRequest`'s checks for project IDs, bucket names and prefixes.
 - `be/db/accounts_test.go`: the storage scopes map to `gcs`.
-- UI: the Request page's Cloud Storage tab (projects, the fallback text box, buckets, the options), the results view, and Browse's Cloud Storage tab.
+- UI: the Request page's Google Cloud Storage tab (projects, the fallback text box, buckets, the options), the results view, and Browse's Google Cloud Storage tab.
 
 ## Implementation plan
 
@@ -166,15 +190,15 @@ One PR for the whole feature, with a commit per step. Each step leaves the branc
    Also check `Query.SoftDeleted` in the pinned client library. Record the findings here.
 1. **Cloud Storage as a linkable service:** `ServiceGcs`, the scope map, the UI `Service` type and scopes, `canListProjects`, and the tests.
 2. **Project and bucket lists:** `collect.GcsProjects`, `collect.GcsBuckets`, and their routes, tested against the fake.
-3. **The scan:** the tables, the collector with both passes, prefix totals, `DeleteScan`, `GetScanSummary`, the results route, and the tests.
-4. **Request page:** the Cloud Storage tab and its tests.
-5. **Results view and Browse:** the results view, the Browse route and its choice of scan, the Cloud Storage tab, and the tests.
+3. **The scan:** the tables, the collector with both passes, the record's upserts and deletions, prefix totals, per-scan totals, `DeleteScan`, `GetScanSummary`, the results route, and the tests.
+4. **Request page:** the Google Cloud Storage tab and its tests.
+5. **Results view and Browse:** the results view, the Browse route, the Google Cloud Storage tab, and the tests.
 6. **Docs and cleanup:** `architecture.md` (diagram, routes, collector, schema, scopes, a scan flow), `README.md`, `CLAUDE.md`. Remove `GOOGLE_APPLICATION_CREDENTIALS` and `~/keys/gae_creds.json` from the docs, since nothing needs them. Then mark this spec implemented with an "As built" section, and move it to `docs/archive/`.
 
 Then an end-to-end run on dev.sm against a copy of production, as for Photos, before the PR.
 
 ## Open questions
 
-1. **Keeping old scans' objects:** each scan stores a row per object version, so repeated scans of a large bucket add up (10 million objects is several GB of rows per scan). Should older scans of a bucket be pruned automatically, say keeping the latest two per bucket, or left to deleting scans by hand?
+1. **Buckets that disappear:** a bucket a whole-project scan no longer lists keeps its record, marked "not seen since". Should it be dropped after a while, or when the user removes it by hand? For now it stays. (Settled 2026-09-28: objects are kept as a living record, not per scan, so repeated scans don't add rows.)
 2. **Very large buckets:** listing is one call per 1000 objects per pass, so a 10-million-object bucket takes 10,000+ calls, likely most of an hour. That's fine for occasional scans. If it isn't, [Storage Insights inventory reports](https://docs.cloud.google.com/storage/docs/insights/inventory-reports) (a daily CSV or Parquet listing written to a bucket) could be read instead, but they have to be set up per bucket first. Out of scope unless step 0 shows listing is too slow.
 3. **Cost estimates:** with storage class and bytes per class recorded, Browse could estimate the monthly cost per bucket and folder. That needs per-location price tables, so it's left for later.
