@@ -92,7 +92,7 @@ describe("login", () => {
     expect(router.state.location.pathname).toBe("/login");
   });
 
-  it("says what the app is, and links to its privacy policy", async () => {
+  it("says what the app is, and links to its privacy policy and terms", async () => {
     renderRoute("/login");
 
     expect(
@@ -101,6 +101,9 @@ describe("login", () => {
     expect(
       screen.getByRole("link", { name: "Privacy policy" })
     ).toHaveAttribute("href", "/privacy.html");
+    expect(
+      screen.getByRole("link", { name: "Terms of Service" })
+    ).toHaveAttribute("href", "/terms-of-service.html");
   });
 
   it("never redirects off the site after logging in", async () => {
