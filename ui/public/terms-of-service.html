@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Terms of Service · Bhandaar</title>
+    <meta
+      name="description"
+      content="The terms for using Bhandaar, a private, invite-only storage analyzer."
+    />
+    <style>
+      :root {
+        --canvas: #f6f7f9;
+        --surface: #ffffff;
+        --fg: #1b1f24;
+        --muted: #5b6573;
+        --line: #e3e6ea;
+        --accent: #2f5bd3;
+        --code: #eef1f5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --canvas: #111418;
+          --surface: #191d22;
+          --fg: #e6e9ed;
+          --muted: #9aa4b1;
+          --line: #2b3139;
+          --accent: #8fb0ff;
+          --code: #232931;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--canvas);
+        color: var(--fg);
+        font:
+          16px/1.6 system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+      }
+      main {
+        max-width: 48rem;
+        margin: 0 auto;
+        padding: 2.5rem 1rem 4rem;
+      }
+      article {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+      }
+      @media (min-width: 640px) {
+        article {
+          padding: 2.5rem;
+        }
+      }
+      h1 {
+        font-size: 1.75rem;
+        line-height: 1.25;
+        margin: 0 0 0.25rem;
+      }
+      h2 {
+        font-size: 1.2rem;
+        margin: 2.25rem 0 0.5rem;
+      }
+      h3 {
+        font-size: 1rem;
+        margin: 1.5rem 0 0.25rem;
+      }
+      p,
+      ul {
+        margin: 0.5rem 0;
+      }
+      li {
+        margin: 0.25rem 0;
+      }
+      a {
+        color: var(--accent);
+      }
+      code {
+        background: var(--code);
+        border-radius: 0.25rem;
+        padding: 0.05rem 0.3rem;
+        font-size: 0.85em;
+        overflow-wrap: anywhere;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .note {
+        border-left: 3px solid var(--accent);
+        padding: 0.25rem 0 0.25rem 1rem;
+        margin: 1rem 0;
+      }
+      .table-wrap {
+        overflow-x: auto;
+        margin: 0.75rem 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.9rem;
+      }
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 0.5rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      header.site {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+        font-weight: 600;
+      }
+      header.site img {
+        width: 1.5rem;
+        height: 1.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="site">
+        <img src="/favicon.svg" alt="" />
+        <a href="/" style="color: inherit; text-decoration: none">Bhandaar</a>
+      </header>
+      <article>
+        <h1>Terms of Service</h1>
+        <p class="muted">Effective 1 October 2026</p>
+
+        <p>
+          Bhandaar (<a href="https://sm.jkurapati.com">sm.jkurapati.com</a>) is
+          a private storage analyzer run by Jyothrilinga Kurapati
+          (&ldquo;I&rdquo;, &ldquo;me&rdquo;) for personal use and invited
+          users. These terms apply to anyone who uses it. By logging in, or by
+          connecting a Google account, you agree to them. If you don&rsquo;t
+          agree, please don&rsquo;t use Bhandaar.
+        </p>
+        <p>
+          How Bhandaar handles your data is described in the
+          <a href="/privacy.html">Privacy Policy</a>, which is part of these
+          terms. Questions: <a href="mailto:bhandaar-contact@googlegroups.com">bhandaar-contact@googlegroups.com</a>.
+        </p>
+
+        <h2>1. The service</h2>
+        <p>
+          Bhandaar shows you what takes up space in your Google Drive, Gmail,
+          Google Photos and Google Cloud Storage, and on your own drives
+          scanned with its <code>driveagent</code> tool. It reads only
+          metadata (names, sizes, dates and similar), with read-only
+          permissions, and never changes or deletes anything in your Google
+          account.
+        </p>
+        <p>
+          Bhandaar is free. It is a personal project, not a commercial
+          product, and may change, pause or stop at any time.
+        </p>
+
+        <h2>2. Accounts</h2>
+        <ul>
+          <li>
+            There is no public sign-up. Every Bhandaar account is created by
+            me, for people I invite.
+          </li>
+          <li>
+            Keep your password to yourself. You are responsible for what is done
+            with your account, and should tell me at once if you think someone
+            else has used it.
+          </li>
+          <li>
+            I may suspend or close an account that is misused, or when
+            Bhandaar stops running. You can close yours at any time; see
+            <a href="#ending">Ending your use</a>.
+          </li>
+        </ul>
+
+        <h2>3. Connecting Google accounts</h2>
+        <ul>
+          <li>
+            Connect only Google accounts that are yours, or that you are
+            allowed to connect.
+          </li>
+          <li>
+            You choose which Google services to connect, and grant each
+            permission on Google&rsquo;s own consent screen. You can revoke
+            Bhandaar&rsquo;s access at any time at
+            <a href="https://myaccount.google.com/permissions"
+              >myaccount.google.com/permissions</a
+            >.
+          </li>
+          <li>
+            Your use of Google&rsquo;s services remains subject to
+            Google&rsquo;s own terms. Bhandaar&rsquo;s use of data from Google
+            APIs follows the
+            <a
+              href="https://developers.google.com/terms/api-services-user-data-policy"
+              >Google API Services User Data Policy</a
+            >, including the Limited Use requirements, as the Privacy Policy
+            explains.
+          </li>
+        </ul>
+
+        <h2>4. Acceptable use</h2>
+        <p>Please don&rsquo;t:</p>
+        <ul>
+          <li>try to reach another user&rsquo;s data, or get around logins or limits;</li>
+          <li>
+            probe, overload or disrupt Bhandaar or the server it runs on, or
+            scrape it with automated tools;
+          </li>
+          <li>use Bhandaar for anything unlawful.</li>
+        </ul>
+
+        <h2>5. Your data</h2>
+        <p>
+          Your data stays yours. Bhandaar uses it only to show you your own
+          storage, as the Privacy Policy describes, and never sells or shares
+          it. You can delete scans yourself, and ask me to remove a Google
+          account or your whole Bhandaar account at any time.
+        </p>
+
+        <h2>6. No warranty</h2>
+        <p>
+          Bhandaar is provided &ldquo;as is&rdquo; and &ldquo;as
+          available&rdquo;, without warranties of any kind, express or
+          implied, including fitness for a particular purpose. I don&rsquo;t
+          promise that it will always be available, free of errors, or that
+          its figures (sizes, counts, totals) are complete or exact. Check
+          anything important in Google&rsquo;s own tools before acting on it,
+          for example before deleting files to free space.
+        </p>
+
+        <h2>7. Limitation of liability</h2>
+        <p>
+          To the fullest extent the law allows, I am not liable for any
+          indirect, incidental or consequential loss, or for loss of data,
+          time or profits, arising from your use of Bhandaar or from its being
+          unavailable. Because Bhandaar only reads metadata and never changes
+          or deletes anything in your Google account, it cannot itself alter
+          your email, files, photos or storage objects. Nothing in these terms
+          limits liability that cannot be limited by law.
+        </p>
+
+        <h2 id="ending">8. Ending your use</h2>
+        <p>
+          You can stop using Bhandaar at any time: revoke its access at Google,
+          and email <a href="mailto:bhandaar-contact@googlegroups.com">bhandaar-contact@googlegroups.com</a> to have your account and all data kept for it
+          deleted. I will delete it within 30 days and confirm by email. If
+          Bhandaar stops running, I will delete the data it holds.
+        </p>
+
+        <h2>9. Changes to these terms</h2>
+        <p>
+          If these terms change, the new version will be posted here with a
+          new effective date. If a change matters to how you use Bhandaar, I
+          will tell you before it takes effect.
+        </p>
+
+        <h2>10. Contact</h2>
+        <p>
+          Jyothrilinga Kurapati<br />
+          <a href="mailto:bhandaar-contact@googlegroups.com">bhandaar-contact@googlegroups.com</a>
+        </p>
+      </article>
+    </main>
+  </body>
+</html>
