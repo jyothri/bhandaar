@@ -1,7 +1,9 @@
 version: "3.9"
 services:
   postgres:
-    image: postgres
+    # Pinned: prod runs 17, and postgres 18+ won't start with a volume at
+    # /var/lib/postgresql/data (its data moved to /var/lib/postgresql).
+    image: postgres:17
     volumes:
       - ./data/db:/var/lib/postgresql/data
     environment:
