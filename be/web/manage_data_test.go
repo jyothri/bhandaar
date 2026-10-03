@@ -12,7 +12,7 @@ import (
 	"github.com/jyothri/hdd/db"
 )
 
-// fakeDeletions fakes what the settings handlers use, for alice (user 7):
+// fakeDeletions fakes what the Manage data handlers use, for alice (user 7):
 // account "mine" (named jyo****ri@gmail.com) and agent drive 1. Jobs run
 // at once, and what they do is recorded in calls.
 type fakeDeletions struct {
@@ -71,10 +71,10 @@ func newFakeDeletions(t *testing.T) *fakeDeletions {
 	return f
 }
 
-// call sends a request as alice through the settings routes.
+// call sends a request as alice through the Manage data routes.
 func call(method, path, body string) *httptest.ResponseRecorder {
 	r := mux.NewRouter()
-	settingsRoutes(r.PathPrefix("/api/").Subrouter())
+	manageDataRoutes(r.PathPrefix("/api/").Subrouter())
 	req := withUser(httptest.NewRequest(method, path, strings.NewReader(body)), db.User{ID: 7, Username: "alice"})
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -209,7 +209,7 @@ func TestRevokeToken(t *testing.T) {
 	}{
 		{http.StatusOK, `{}`, "revoked"},
 		{http.StatusBadRequest, `{"error": "invalid_token"}`, "already revoked"},
-		{http.StatusInternalServerError, `{"error": "backend"}`, "failed: Google answered 500 backend"},
+		{http.StatusInternalServerError, `{"error": "backend"}`, "failed: Google answered 500 Internal Server Error (backend)"},
 	}
 	for _, c := range cases {
 		fakeRevoke(t, c.status, c.body)
@@ -243,5 +243,39 @@ func TestDeletionHandler(t *testing.T) {
 		if rec := call("GET", path, ""); rec.Code != http.StatusNotFound {
 			t.Errorf("%s: %d, want 404", path, rec.Code)
 		}
+	}
+}
+
+func TestDisconnectDoesntRevokeWhenTheDeletionFails(t *testing.T) {
+	f := newFakeDeletions(t)
+	tokens := fakeRevoke(t, http.StatusOK, "{}")
+	deleteAccount = func(int64, string) (map[string]int64, error) {
+		return nil, db.ErrScanRunning
+	}
+	if rec := call("DELETE", "/api/accounts/mine", `{"confirm": "jyo****ri@gmail.com"}`); rec.Code != http.StatusAccepted {
+		t.Fatalf("status %d", rec.Code)
+	}
+	// The account stays usable: nothing was revoked.
+	if len(*tokens) != 0 {
+		t.Errorf("revoked %q although the deletion failed", *tokens)
+	}
+	if len(f.finished) != 1 || !strings.Contains(f.finished[0], "a scan of this account started") {
+		t.Errorf("finished %q, want the failure", f.finished)
+	}
+}
+
+func TestAnotherDeletionOfTheAccountIsConflict(t *testing.T) {
+	f := newFakeDeletions(t)
+	startDeletion = func(user int64, kind, target, label string) (db.DeletionJob, bool, error) {
+		f.calls = append(f.calls, "start "+kind)
+		// The account's own deletion is running.
+		return db.DeletionJob{ID: 41, Kind: db.DeleteAccount, Target: target, Label: "jyo****ri@gmail.com", Status: db.JobRunning}, false, nil
+	}
+	rec := call("DELETE", "/api/accounts/mine/gmail", "")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "Another deletion of this account") {
+		t.Errorf("status %d %q, want 409", rec.Code, rec.Body)
+	}
+	if len(f.finished) != 0 {
+		t.Errorf("a job ran: %q", f.finished)
 	}
 }

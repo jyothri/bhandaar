@@ -45,7 +45,7 @@ const drive = (id: number, hostname: string, extra = {}) => ({
 
 let settings: object;
 let deletion: object;
-let deleteAnswer: Response | null;
+let deleteAnswer: Response | Promise<Response> | null;
 
 beforeEach(() => {
   stubEventSource();
@@ -66,7 +66,7 @@ beforeEach(() => {
     if (url.pathname === "/api/auth/me") {
       return loggedIn();
     }
-    if (url.pathname === "/api/settings/data") {
+    if (url.pathname === "/api/manage-data") {
       return json(200, settings);
     }
     if (init?.method === "DELETE") {
@@ -272,6 +272,38 @@ describe("Manage data", () => {
     expect(
       await screen.findByText(/couldn't revoke its access at Google/)
     ).toHaveTextContent("myaccount.google.com/permissions");
+  });
+
+  it("can't be closed while its request is out", async () => {
+    const user = userEvent.setup();
+    let answer: (r: Response) => void = () => {};
+    deleteAnswer = new Promise((resolve) => (answer = resolve));
+    renderRoute("/manage-data");
+    await user.click(
+      await screen.findByRole("button", { name: "Delete Gmail data" })
+    );
+    const dialog = screen.getByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete Gmail data" })
+    );
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Cancel" })
+    ).toBeDisabled();
+
+    answer(
+      new Response("Another deletion of this account is running.", {
+        status: 409,
+        headers: { "Content-Type": "text/plain" },
+      })
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Another deletion of this account is running."
+    );
+    // Once answered, it closes again.
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("shows the server's refusal in the dialog", async () => {

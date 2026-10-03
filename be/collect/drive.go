@@ -107,21 +107,16 @@ func CloudDrive(driveScan GDriveScan, userID int64) (int, error) {
 		}
 	}
 
-	// Phase 1: Create scan record (synchronous)
-	scanId, err := db.LogStartScan("google_drive", userID)
+	// Phase 1: Create scan record, with what it covers (synchronous)
+	scanId, err := startScan("google_drive", userID, db.ScanMeta{Name: account.Name, ClientKey: account.ClientKey,
+		SearchPath: searchPath, Filter: driveScan.QueryString})
 	if err != nil {
+		var requestErr *RequestError
+		if errors.As(err, &requestErr) {
+			return 0, err
+		}
 		return 0, fmt.Errorf("failed to start google drive scan (query=%s): %w", driveScan.QueryString, err)
 	}
-
-	// Save metadata in background
-	go func() {
-		if err := db.SaveScanMetadata(account.Name, account.ClientKey, searchPath, driveScan.QueryString, scanId); err != nil {
-			slog.Error("Failed to save scan metadata",
-				"scan_id", scanId,
-				"query", driveScan.QueryString,
-				"error", err)
-		}
-	}()
 
 	// Phase 2: Start collection in background (asynchronous)
 	scanData := make(chan db.FileData, 10)

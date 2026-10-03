@@ -95,6 +95,19 @@ func resolveAccount(userID int64, clientKey string, token string) (googleAccount
 	return account, nil
 }
 
+// startScan records a scan and what it covers (db.StartScan), and turns a
+// scan refused because of its account into a RequestError.
+func startScan(scanType string, userID int64, meta db.ScanMeta) (int, error) {
+	scanId, err := db.StartScan(scanType, userID, meta)
+	switch {
+	case errors.Is(err, db.ErrAccountBeingDeleted):
+		return 0, &RequestError{Message: "This account's data is being deleted. Try again once that's done."}
+	case errors.Is(err, db.ErrNotFound):
+		return 0, &RequestError{Message: "This account isn't linked any more. Link it again to scan it."}
+	}
+	return scanId, err
+}
+
 func isRetryError(err error) bool {
 	// Try Google API error
 	var googleErr *googleapi.Error

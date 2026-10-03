@@ -2,6 +2,7 @@ package collect
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -45,27 +46,23 @@ func getGmailService(refreshToken string) (*gmail.Service, error) {
 }
 
 func Gmail(gMailScan GMailScan, userID int64) (int, error) {
-	// Phase 1: Create scan record (synchronous)
-	scanId, err := db.LogStartScan("gmail", userID)
-	if err != nil {
-		return 0, fmt.Errorf("failed to start gmail scan (account=%s, filter=%s): %w",
-			gMailScan.ClientKey, gMailScan.Filter, err)
-	}
-
 	account, err := resolveAccount(userID, gMailScan.ClientKey, gMailScan.RefreshToken)
 	if err != nil {
-		return failStart(scanId, err)
+		return 0, err
 	}
 	gMailScan.RefreshToken = account.RefreshToken
 
-	// Save metadata in background
-	go func() {
-		if err := db.SaveScanMetadata(account.Name, account.ClientKey, "", gMailScan.Filter, scanId); err != nil {
-			slog.Error("Failed to save scan metadata",
-				"scan_id", scanId,
-				"error", err)
+	// Phase 1: Create scan record, with what it covers (synchronous)
+	scanId, err := startScan("gmail", userID, db.ScanMeta{Name: account.Name, ClientKey: account.ClientKey,
+		Filter: gMailScan.Filter})
+	if err != nil {
+		var requestErr *RequestError
+		if errors.As(err, &requestErr) {
+			return 0, err
 		}
-	}()
+		return 0, fmt.Errorf("failed to start gmail scan (account=%s, filter=%s): %w",
+			gMailScan.ClientKey, gMailScan.Filter, err)
+	}
 
 	// Get Gmail service
 	gmailService, err := getGmailService(gMailScan.RefreshToken)

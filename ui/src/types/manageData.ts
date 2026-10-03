@@ -1,4 +1,4 @@
-// The Settings page: linked accounts, uploaded drives, and deleting them.
+// The Manage data page: linked accounts, uploaded drives, and deleting them.
 // See docs/specs/data-deletion.md.
 
 import { ServiceTotals } from "./browse";
@@ -22,7 +22,7 @@ export type DeletionJob = {
 
 export type RecordedService = "gmail" | "drive" | "gcs" | "photos";
 
-export type SettingsAccount = {
+export type ManageAccount = {
   client_key: string;
   // The name to type to disconnect it.
   label: string;
@@ -36,7 +36,7 @@ export type SettingsAccount = {
   job: DeletionJob | null;
 };
 
-export type SettingsDrive = {
+export type ManageDrive = {
   id: number;
   drive_id: string;
   hostname: string;
@@ -49,7 +49,7 @@ export type SettingsDrive = {
   job: DeletionJob | null;
 };
 
-export type SettingsData = {
-  accounts: SettingsAccount[];
-  drives: SettingsDrive[];
+export type ManageData = {
+  accounts: ManageAccount[];
+  drives: ManageDrive[];
 };

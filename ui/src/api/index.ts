@@ -15,8 +15,8 @@ import { GcsBucket, GcsProject, GcsScanBucket } from "../types/gcs";
 import {
   DeletionJob,
   RecordedService,
-  SettingsData,
-} from "../types/settings";
+  ManageData,
+} from "../types/manageData";
 import { MessagePage, ScanDataPage, ScanSummary } from "../types/results";
 import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 
@@ -247,9 +247,9 @@ export const getGcsBuckets = (
 export const getGcsScanBuckets = (scanId: number): Promise<GcsScanBucket[]> =>
   fetchJson(`/api/gcs/${scanId}`);
 
-/** The user's linked accounts and uploaded drives, for Settings. */
-export const getSettingsData = (): Promise<SettingsData> =>
-  fetchJson("/api/settings/data");
+/** The user's linked accounts and uploaded drives, for Manage data. */
+export const getManageData = (): Promise<ManageData> =>
+  fetchJson("/api/manage-data");
 
 /** Deletes a drive as uploaded from one box; the deletion runs as a job. */
 export const deleteAgentDrive = (id: number): Promise<DeletionJob> =>

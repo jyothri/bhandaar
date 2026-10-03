@@ -12,7 +12,7 @@ import {
   deleteServiceData,
   disconnectAccount,
   getDeletion,
-  getSettingsData,
+  getManageData,
 } from "../api";
 import { queryKeys } from "../api/queryKeys";
 import Button from "../components/ui/Button";
@@ -25,9 +25,9 @@ import { formatAgo, formatBytes, formatCount } from "../format";
 import {
   DeletionJob,
   RecordedService,
-  SettingsAccount,
-  SettingsDrive,
-} from "../types/settings";
+  ManageAccount,
+  ManageDrive,
+} from "../types/manageData";
 
 // Manage data: linked Google accounts and uploaded drives, and deleting
 // them.
@@ -103,15 +103,15 @@ function resultText(job: DeletionJob): {
 }
 
 type Pending =
-  | { kind: "drive"; drive: SettingsDrive }
-  | { kind: "service"; account: SettingsAccount; service: RecordedService }
-  | { kind: "account"; account: SettingsAccount };
+  | { kind: "drive"; drive: ManageDrive }
+  | { kind: "service"; account: ManageAccount; service: RecordedService }
+  | { kind: "account"; account: ManageAccount };
 
 function ManageData() {
   const queryClient = useQueryClient();
   const { data, error } = useQuery({
-    queryKey: queryKeys.settingsData,
-    queryFn: getSettingsData,
+    queryKey: queryKeys.manageData,
+    queryFn: getManageData,
     // While a deletion runs, its target shows it.
     refetchInterval: (query) =>
       query.state.data &&
@@ -133,7 +133,7 @@ function ManageData() {
         if (job.status !== "running") {
           // What's gone shouldn't show anywhere.
           for (const key of [
-            queryKeys.settingsData,
+            queryKeys.manageData,
             queryKeys.browseSources,
             queryKeys.accounts,
             queryKeys.scannedAccounts,
@@ -158,7 +158,7 @@ function ManageData() {
   function started(job: DeletionJob) {
     setPending(null);
     setWatching((ids) => (ids.includes(job.id) ? ids : [...ids, job.id]));
-    queryClient.invalidateQueries({ queryKey: queryKeys.settingsData });
+    queryClient.invalidateQueries({ queryKey: queryKeys.manageData });
   }
 
   if (error) {
@@ -172,7 +172,7 @@ function ManageData() {
     return <p className="py-6 text-sm text-muted">Loading…</p>;
   }
   // Drives by the box they were uploaded from.
-  const boxes = new Map<string, SettingsDrive[]>();
+  const boxes = new Map<string, ManageDrive[]>();
   for (const d of data.drives) {
     const host = d.hostname || "Unknown machine";
     boxes.set(host, [...(boxes.get(host) ?? []), d]);
@@ -291,7 +291,7 @@ function AccountRow({
   account: a,
   onDelete,
 }: {
-  account: SettingsAccount;
+  account: ManageAccount;
   onDelete: (p: Pending) => void;
 }) {
   return (
@@ -360,7 +360,7 @@ function DriveRow({
   drive: d,
   onDelete,
 }: {
-  drive: SettingsDrive;
+  drive: ManageDrive;
   onDelete: (p: Pending) => void;
 }) {
   return (
@@ -428,11 +428,17 @@ function ConfirmDialog({
   return (
     <Dialog
       title={title}
-      onClose={onClose}
+      // Not while the request is out, so its answer (a 400 or 409) is seen.
+      onClose={busy ? () => {} : onClose}
       initialFocus={cancel}
       actions={
         <>
-          <Button ref={cancel} variant="secondary" onClick={onClose}>
+          <Button
+            ref={cancel}
+            variant="secondary"
+            disabled={busy}
+            onClick={onClose}
+          >
             Cancel
           </Button>
           <Button
@@ -461,7 +467,7 @@ function DeleteDriveDialog({
   onClose,
   onStarted,
 }: {
-  drive: SettingsDrive;
+  drive: ManageDrive;
   onClose: () => void;
   onStarted: (job: DeletionJob) => void;
 }) {
@@ -500,7 +506,7 @@ function DeleteServiceDialog({
   onClose,
   onStarted,
 }: {
-  account: SettingsAccount;
+  account: ManageAccount;
   service: RecordedService;
   onClose: () => void;
   onStarted: (job: DeletionJob) => void;
@@ -541,7 +547,7 @@ function DisconnectDialog({
   onClose,
   onStarted,
 }: {
-  account: SettingsAccount;
+  account: ManageAccount;
   onClose: () => void;
   onStarted: (job: DeletionJob) => void;
 }) {

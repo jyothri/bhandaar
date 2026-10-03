@@ -16,11 +16,11 @@ import (
 	"github.com/jyothri/hdd/db"
 )
 
-// Settings: the user's linked accounts and uploaded drives, and deleting
-// them. Deletions run as background jobs. See docs/specs/data-deletion.md.
+// Manage data: the user's linked accounts and uploaded drives, and
+// deleting them. Deletions run as background jobs. See docs/specs/data-deletion.md.
 
-func settingsRoutes(api *mux.Router) {
-	api.HandleFunc("/settings/data", SettingsDataHandler).Methods("GET")
+func manageDataRoutes(api *mux.Router) {
+	api.HandleFunc("/manage-data", ManageDataHandler).Methods("GET")
 	api.HandleFunc("/agent-drives/{drive}", DeleteAgentDriveHandler).Methods("DELETE")
 	api.HandleFunc("/accounts/{client_key}/{service:gmail|drive|gcs|photos}", DeleteServiceHandler).Methods("DELETE")
 	api.HandleFunc("/accounts/{client_key}", DeleteAccountHandler).Methods("DELETE")
@@ -29,7 +29,7 @@ func settingsRoutes(api *mux.Router) {
 
 // What the handlers use; tests replace them.
 var (
-	settingsData     = db.GetSettingsData
+	manageData     = db.GetManageData
 	requestAccounts  = db.GetRequestAccountsFromDb
 	runningScanOf    = db.RunningScanOf
 	agentDriveLabel  = db.AgentDriveLabel
@@ -44,26 +44,39 @@ var (
 	runJob = func(job func()) { go job() }
 )
 
-// deletionMu runs one deletion at a time, so two large ones don't compete.
-var deletionMu sync.Mutex
+// deletionLocks run one deletion at a time per user, so two large ones of
+// a user don't compete, and one user's never waits behind another's.
+var (
+	deletionLocksMu sync.Mutex
+	deletionLocks   = map[int64]*sync.Mutex{}
+)
+
+func deletionLock(userID int64) *sync.Mutex {
+	deletionLocksMu.Lock()
+	defer deletionLocksMu.Unlock()
+	if deletionLocks[userID] == nil {
+		deletionLocks[userID] = &sync.Mutex{}
+	}
+	return deletionLocks[userID]
+}
 
 // revokeEndpoint is Google's token revocation endpoint; tests point it at
 // a fake.
 var revokeEndpoint = "https://oauth2.googleapis.com/revoke"
 
-func SettingsDataHandler(w http.ResponseWriter, r *http.Request) {
-	data, err := settingsData(currentUser(r).ID)
+func ManageDataHandler(w http.ResponseWriter, r *http.Request) {
+	data, err := manageData(currentUser(r).ID)
 	if err != nil {
-		slog.Error("Failed to get settings data", "error", err)
+		slog.Error("Failed to get the accounts and drives to manage", "error", err)
 		http.Error(w, "Failed to list your accounts and drives", http.StatusInternalServerError)
 		return
 	}
 	writeJSONResponse(w, data, http.StatusOK)
 }
 
-// start records a deletion job and runs work in the background, unless a
-// job for the same target is already running; it answers 202 with the job
-// either way.
+// start records a deletion job and runs work in the background, unless the
+// same job is already running, which it answers with instead (202 either
+// way); a different job running for the same account is 409.
 func start(w http.ResponseWriter, r *http.Request, kind string, target string, label string,
 	work func() (counts map[string]int64, revoke string, err error)) {
 	user := currentUser(r)
@@ -73,11 +86,19 @@ func start(w http.ResponseWriter, r *http.Request, kind string, target string, l
 		http.Error(w, "Failed to start the deletion", http.StatusInternalServerError)
 		return
 	}
+	// Another deletion of the same account (the account, or another of its
+	// services) is running: one at a time per account.
+	if !started && job.Kind != kind {
+		http.Error(w, fmt.Sprintf("Another deletion of this account is running (%s). Try again when it's done.", job.Label),
+			http.StatusConflict)
+		return
+	}
 	if started {
 		slog.Info("Deletion started", "job", job.ID, "user", user.Username, "kind", kind, "target", target, "label", label)
 		runJob(func() {
-			deletionMu.Lock()
-			defer deletionMu.Unlock()
+			lock := deletionLock(user.ID)
+			lock.Lock()
+			defer lock.Unlock()
 			counts, revoke, err := work()
 			if err != nil {
 				slog.Error("Deletion failed", "job", job.ID, "kind", kind, "target", target, "error", err)
@@ -205,13 +226,18 @@ func DeleteAccountHandler(w http.ResponseWriter, r *http.Request) {
 	userID := currentUser(r).ID
 	start(w, r, db.DeleteAccount, clientKey, label,
 		func() (map[string]int64, string, error) {
+			// Read the token before its row goes, and revoke only once the
+			// deletion has committed: a failed deletion leaves a working
+			// account, and a failed revoke is shown with what to do.
 			token, err := refreshTokenOf(userID, clientKey)
 			if err != nil {
 				return nil, "", fmt.Errorf("failed to read the account's token: %w", err)
 			}
-			revoke := revokeToken(token)
 			counts, err := deleteAccount(userID, clientKey)
-			return counts, revoke, jobError(err)
+			if err != nil {
+				return nil, "", jobError(err)
+			}
+			return counts, revokeToken(token), nil
 		})
 }
 
@@ -228,17 +254,21 @@ func revokeToken(token string) string {
 		return "failed: " + err.Error()
 	}
 	defer resp.Body.Close()
+	// Google answers JSON ({"error": "invalid_token"}); anything else
+	// leaves Error empty, and the status says what happened.
 	var body struct {
 		Error string `json:"error"`
 	}
-	json.NewDecoder(resp.Body).Decode(&body)
+	_ = json.NewDecoder(resp.Body).Decode(&body)
 	switch {
 	case resp.StatusCode == http.StatusOK:
 		return "revoked"
 	case resp.StatusCode == http.StatusBadRequest && body.Error == "invalid_token":
 		return "already revoked"
+	case body.Error != "":
+		return fmt.Sprintf("failed: Google answered %s (%s)", resp.Status, body.Error)
 	default:
-		return fmt.Sprintf("failed: Google answered %d %s", resp.StatusCode, body.Error)
+		return fmt.Sprintf("failed: Google answered %s", resp.Status)
 	}
 }
 

@@ -65,10 +65,7 @@ The account stays linked, with the service's access, so it can be scanned again.
 ### A Google account (disconnect)
 
 In order:
-1. **Revoke at Google:** `POST https://oauth2.googleapis.com/revoke` with the refresh token (form-encoded `token`). This removes Bhandaar from the account's third-party access list at once.
-   - A `200`, or a `400 invalid_token` (already revoked or expired), counts as done.
-   - Anything else, including no answer within 10 s, is recorded on the job as "Couldn't revoke at Google". The deletion still goes ahead, and the page tells the user to remove access at myaccount.google.com/permissions.
-   - The endpoint is a package variable, as `tokenEndpoint` is, so tests can fake it.
+1. **Read the refresh token**, before its row goes.
 2. **Delete every scan of the account,** whatever its type. These are `scans` rows of the user whose `scanmetadata.client_key` is the account. Each is deleted with its rows, as `DeleteScan` does: `scandata`, `messagemetadata`, `photos_picked_items`, the old Photos tables, `gcs_scan_buckets`, `scanmetadata`.
 3. **Delete the living records:**
    - Google Drive: `drive_items`, `drive_accounts`
@@ -78,15 +75,25 @@ In order:
 
    All of these are keyed by `client_key`.
 4. **Delete the linked account,** the `privatetokens` row, which holds its tokens.
-5. **Mark the duplicates index stale** (once it's built).
+5. **Revoke at Google, once 2–4 have committed:** `POST https://oauth2.googleapis.com/revoke` with the refresh token (form-encoded `token`). This removes Bhandaar from the account's third-party access list at once.
+   - A `200`, or a `400 invalid_token` (already revoked or expired), counts as done.
+   - Anything else, including no answer within 10 s, is recorded on the job as "Couldn't revoke at Google", with Google's HTTP status. The page tells the user to remove access at myaccount.google.com/permissions.
+   - If the deletion fails, nothing is revoked, so the account still works. Revoking first would have left a dead but still-linked account, which could only be fixed by linking it again.
+   - The endpoint is a package variable, as `tokenEndpoint` is, so tests can fake it.
+6. **Mark the duplicates index stale** (once it's built).
 
 Steps 2–4 run in one transaction, so an account is never left half deleted. If a later account linking adds the same Google account again, it's a new account, with a new `client_key` and no history.
 
 ## Rules
 
 - **Only your own:** every deletion checks that the account or drive belongs to the logged-in user, and answers `404` otherwise, as other routes do.
-- **Not during a scan:** deleting a service's data, or disconnecting an account, is refused (`409`) while one of that account's scans is `Running`. The dialog names the scan. Agent drives have no such check, since uploads are handled as above.
-- **One job per target:** a second request for the same account or drive while its job runs returns that job.
+- **Not during a scan, and no scan during a deletion:** deleting a service's data, or disconnecting an account, is refused (`409`) while one of that account's scans is `Running`. The dialog names the scan. Both sides take a lock on the account's `privatetokens` row:
+  - **Starting a scan** (`db.StartScan`) takes `FOR SHARE` on the row. It refuses if a deletion of the account is queued or running, or if the account is gone. It then inserts the `scans` and `scanmetadata` rows in the same transaction, so a running scan always has its `client_key`.
+  - **A deletion's transaction** takes `FOR UPDATE` on the row first, waiting for any scan being started, then checks for running scans inside the transaction.
+
+  So no scan can start between the check and the deletion, and none can be left pointing at a deleted account. The handler's own check before queuing only answers early, with the scan's number. Agent drives have no such check, since uploads are handled as above.
+- **One job per account, and one per drive:** a second request for the same job returns it. A request of another kind for the same account while one runs (the account, or another of its services) is `409`. The running-job index is on `(kind = 'agent_drive', target)`.
+- **No orphaned totals:** a totals rebuild takes `FOR SHARE` on its source's row (`agent_drives` or `drive_accounts`) inside its transaction. If the row is gone, it writes nothing and removes what it marked. Deletions delete the source's row before its totals.
 - **Typed confirmation is checked by the server too:**
   - Disconnecting sends the typed text.
   - The server compares it with the account's name, exactly as Manage data shows it: the masked email (`jyo****ri@gmail.com`), plus the key suffix when two accounts share a name (`jyo****ri@gmail.com · JVVY`, as `accountLabels` does).
@@ -122,7 +129,7 @@ deletions (
 ```
 
 - A request inserts the row and starts a goroutine, then answers `202` with the job.
-- One deletion runs at a time per process, behind a mutex, so two big deletes don't compete.
+- One deletion runs at a time per user, behind a lock per user, so two big deletes of one user don't compete, and one user's never waits behind another's.
 - A job left `running` by a restart is marked `failed` ("Interrupted") at startup. Every deletion is one transaction, so an interrupted one has deleted nothing, and can simply be run again.
 
 ## API
@@ -131,13 +138,13 @@ All need the session cookie, and see only the user's own data. The three `DELETE
 
 | Route | Does |
 |---|---|
-| `GET /api/settings/data` | The user's linked accounts and uploaded drives, with what a deletion would remove (below), and any job running for each |
+| `GET /api/manage-data` | The user's linked accounts and uploaded drives, with what a deletion would remove (below), and any job running for each |
 | `DELETE /api/agent-drives/{id}` | Deletes a drive from one box → `202 {job}` |
 | `DELETE /api/accounts/{client_key}/{service}` | Deletes one service's data (`gmail`, `drive`, `gcs`, `photos`) → `202 {job}`; `409` while one of the account's scans runs |
 | `DELETE /api/accounts/{client_key}` with `{"confirm": "<typed name>"}` | Disconnects the account → `202 {job}`; `400` if the text doesn't match; `409` while one of its scans runs |
 | `GET /api/deletions/{id}` | A job's status, counts, and revoke result |
 
-`GET /api/settings/data`:
+`GET /api/manage-data`:
 
 ```json
 {
@@ -264,7 +271,7 @@ One PR each, checked on dev.sm against the prod copy:
    - the `deletions` table and job runner, including the restart and 30-day clean-up
    - the three deletions, in transactions
    - revoking at Google
-   - the settings and job API, with the owner, running-scan and typed-text checks
+   - the Manage data and job API, with the owner, running-scan and typed-text checks
    - tests (`BE_TEST_DB`): each deletion removes exactly its target and leaves other accounts, drives and users alone; the cascade from `agent_drives`; a scan running → `409`; a wrong typed name → `400` and nothing deleted; revoke against a fake endpoint (`200`, `400 invalid_token`, a failure, a timeout); an interrupted job marked failed at startup
 2. **Manage data page:**
    - the nav tab, the account and drive cards, and the three dialogs
@@ -285,10 +292,17 @@ Made 2026-10-02:
 
 ## As built
 
-- **Jobs:** each job's work runs behind one process-wide lock, so deletions run one at a time. A service job's label is the account's name plus the service, e.g. " · Gmail", and its kind is the service (`gmail`, `drive`, `gcs`, `photos`).
-- **Revoking comes first:** it happens before the deletion's transaction. If the transaction then fails, for example because a scan started in between, the job is `failed`, but its `revoke` still shows Google's answer. The access may already be gone, and the account can be disconnected again.
+- **Jobs:** each job's work runs behind its user's lock, so a user's deletions run one at a time. A drive deletion counts the drive's files inside its transaction, after locking the drive's row. A service job's label is the account's name plus the service, e.g. " · Gmail", and its kind is the service (`gmail`, `drive`, `gcs`, `photos`).
+- **Review fixes (before merge):**
+  - revoking moved after the deletion commits
+  - locking between scans and deletions
+  - one job per account
+  - no totals for a deleted source
+  - per-user job locks
+  - dialogs that can't close while their request is out
+  - the API renamed `/api/manage-data`, and Google's status included in a failed revoke
 - **Results:** the page shows each finished job's result as a dismissible line at the top. A failed revoke is shown as a warning, with what to do. Finishing a job refetches this page, Browse's sources and folders, the linked accounts, and Request History.
-- **Dialogs:** all three open with Cancel focused, including the typed one. You click or tab into the name field.
+- **Dialogs:** all three open with Cancel focused, including the typed one; you click or tab into the name field. While a dialog's request is out, Escape, the backdrop and Cancel don't close it, so a `400` or `409` is seen.
 - **Privacy policy:** sections 7 and 8 now point to Manage data for disconnecting accounts and deleting drives, effective 2 October 2026.
-- **Tests:** `be/db/deletion_test.go`, `be/web/settings_test.go` and `ui/src/test/settings.test.tsx`.
+- **Tests:** `be/db/deletion_test.go`, `be/web/manage_data_test.go` and `ui/src/test/manageData.test.tsx`.
 
