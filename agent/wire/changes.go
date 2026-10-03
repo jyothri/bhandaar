@@ -24,10 +24,9 @@ const (
 // A path or child name that isn't valid UTF-8 is sent as standard base64 of
 // its bytes in PathB64 / ChildB64 instead (never both).
 type Change struct {
-	V    int64  `json:"v"`
-	Kind string `json:"kind"`
-	Op   string `json:"op"`
-
+	V            int64      `json:"v"`
+	Kind         string     `json:"kind"`
+	Op           string     `json:"op"`
 	Path         *string    `json:"path,omitempty"`
 	PathB64      string     `json:"path_b64,omitempty"`
 	Child        *string    `json:"child,omitempty"`
