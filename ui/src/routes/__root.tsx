@@ -10,6 +10,7 @@ import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { getMe } from "../api";
 import { queryKeys } from "../api/queryKeys";
 import Header, { Brand } from "../components/Header";
+import { settingsQuery } from "../components/hooks/useSettings";
 
 export type RouterContext = { queryClient: QueryClient };
 
@@ -31,27 +32,28 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     if (!me) {
       throw redirect({ to: "/login", search: { redirect: location.href } });
     }
+    // The settings decide which tabs show; loaded once with the session, so
+    // the tabs don't shift on first paint. A failure leaves the pages to
+    // retry.
+    await queryClient.ensureQueryData(settingsQuery).catch(() => undefined);
   },
   component: RootLayout,
 });
 
 // The page's name in the browser tab: "<page> · Bhandaar".
+const pageTitles: Record<string, string> = {
+  "/": "Browse",
+  "/request": "Request",
+  "/requests": "Request History",
+  "/duplicates": "Duplicates",
+  "/manage-data": "Manage data",
+  "/settings": "Settings",
+  "/login": "Log in",
+};
+
 function pageTitle(pathname: string): string {
   const scan = pathname.match(/^\/scans\/([^/]+)/);
-  const page =
-    pathname === "/"
-      ? "Browse"
-      : pathname === "/request"
-        ? "Request"
-        : pathname === "/requests"
-          ? "Request History"
-          : pathname === "/manage-data"
-            ? "Manage data"
-            : pathname === "/login"
-              ? "Log in"
-              : scan
-                ? `Scan ${scan[1]}`
-                : "";
+  const page = pageTitles[pathname] ?? (scan ? `Scan ${scan[1]}` : "");
   return page ? `${page} · Bhandaar` : "Bhandaar";
 }
 

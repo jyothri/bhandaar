@@ -15,6 +15,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as ManageDataRouteImport } from './routes/manage-data'
 import { Route as RequestRouteImport } from './routes/request'
 import { Route as RequestsRouteImport } from './routes/requests'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as OauthGlinkRouteImport } from './routes/oauth/glink'
 import { Route as ScansScanIdRouteImport } from './routes/scans.$scanId'
 
@@ -48,6 +49,11 @@ const RequestsRoute = RequestsRouteImport.update({
   path: '/requests',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OauthGlinkRoute = OauthGlinkRouteImport.update({
   id: '/oauth/glink',
   path: '/oauth/glink',
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/manage-data': typeof ManageDataRoute
   '/request': typeof RequestRoute
   '/requests': typeof RequestsRoute
+  '/settings': typeof SettingsRoute
   '/oauth/glink': typeof OauthGlinkRoute
   '/scans/$scanId': typeof ScansScanIdRoute
 }
@@ -76,6 +83,7 @@ export interface FileRoutesByTo {
   '/manage-data': typeof ManageDataRoute
   '/request': typeof RequestRoute
   '/requests': typeof RequestsRoute
+  '/settings': typeof SettingsRoute
   '/oauth/glink': typeof OauthGlinkRoute
   '/scans/$scanId': typeof ScansScanIdRoute
 }
@@ -87,6 +95,7 @@ export interface FileRoutesById {
   '/manage-data': typeof ManageDataRoute
   '/request': typeof RequestRoute
   '/requests': typeof RequestsRoute
+  '/settings': typeof SettingsRoute
   '/oauth/glink': typeof OauthGlinkRoute
   '/scans/$scanId': typeof ScansScanIdRoute
 }
@@ -99,6 +108,7 @@ export interface FileRouteTypes {
     | '/manage-data'
     | '/request'
     | '/requests'
+    | '/settings'
     | '/oauth/glink'
     | '/scans/$scanId'
   fileRoutesByTo: FileRoutesByTo
@@ -109,6 +119,7 @@ export interface FileRouteTypes {
     | '/manage-data'
     | '/request'
     | '/requests'
+    | '/settings'
     | '/oauth/glink'
     | '/scans/$scanId'
   id:
@@ -119,6 +130,7 @@ export interface FileRouteTypes {
     | '/manage-data'
     | '/request'
     | '/requests'
+    | '/settings'
     | '/oauth/glink'
     | '/scans/$scanId'
   fileRoutesById: FileRoutesById
@@ -130,6 +142,7 @@ export interface RootRouteChildren {
   ManageDataRoute: typeof ManageDataRoute
   RequestRoute: typeof RequestRoute
   RequestsRoute: typeof RequestsRoute
+  SettingsRoute: typeof SettingsRoute
   OauthGlinkRoute: typeof OauthGlinkRoute
   ScansScanIdRoute: typeof ScansScanIdRoute
 }
@@ -178,6 +191,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RequestsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/oauth/glink': {
       id: '/oauth/glink'
       path: '/oauth/glink'
@@ -202,6 +222,7 @@ const rootRouteChildren: RootRouteChildren = {
   ManageDataRoute: ManageDataRoute,
   RequestRoute: RequestRoute,
   RequestsRoute: RequestsRoute,
+  SettingsRoute: SettingsRoute,
   OauthGlinkRoute: OauthGlinkRoute,
   ScansScanIdRoute: ScansScanIdRoute,
 }

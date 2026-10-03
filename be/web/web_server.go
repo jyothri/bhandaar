@@ -43,7 +43,7 @@ func withCORS(h http.Handler) http.Handler {
 		AllowedOrigins:   constants.FrontendOrigins(),
 		AllowCredentials: true,
 		AllowedHeaders:   []string{"Content-Type", "Authorization"},
-		AllowedMethods:   []string{"GET", "POST", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		MaxAge:           300, // Cache preflight for 5 minutes
 	}).Handler(h)
 }

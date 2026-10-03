@@ -22,7 +22,7 @@ graph TB
         subgraph BE["be: Go web app :8090"]
             MW["Middleware<br/>CORS, body limits,<br/>session check + origin check"]
             AuthH["auth.go<br/>/api/auth/login, logout, me"]
-            ApiH["api.go, browse.go, photos.go, gcs.go,<br/>duplicates.go<br/>/api/scans, /api/accounts,<br/>/api/scans/{id}/summary, results,<br/>/api/browse, /api/photos, /api/gcs,<br/>/api/duplicates"]
+            ApiH["api.go, browse.go, photos.go, gcs.go,<br/>duplicates.go, settings.go<br/>/api/scans, /api/accounts,<br/>/api/scans/{id}/summary, results,<br/>/api/browse, /api/photos, /api/gcs,<br/>/api/duplicates, /api/settings"]
             OAuthH["oauth.go<br/>/api/glink: link accounts"]
             SseH["sse.go<br/>/sse/scanprogress"]
             Collect["Collectors<br/>drive.go, gmail.go, local.go,<br/>photos.go (polls picks), gcs.go<br/>one scan at a time"]
@@ -36,7 +36,7 @@ graph TB
         end
 
         subgraph PG["PostgreSQL :5432 (one database)"]
-            BeTables[("be tables<br/>scans, scanmetadata, scandata,<br/>messagemetadata, privatetokens,<br/>web_sessions, drive_items, drive_accounts,<br/>browse_folder_totals, browse_totals_state,<br/>photos_picker_sessions, photos_picked_items,<br/>gcs_buckets, gcs_objects, gcs_prefix_totals,<br/>gcs_scan_buckets, dup_groups, dup_members,<br/>dup_state")]
+            BeTables[("be tables<br/>scans, scanmetadata, scandata,<br/>messagemetadata, privatetokens,<br/>web_sessions, drive_items, drive_accounts,<br/>browse_folder_totals, browse_totals_state,<br/>photos_picker_sessions, photos_picked_items,<br/>gcs_buckets, gcs_objects, gcs_prefix_totals,<br/>gcs_scan_buckets, dup_groups, dup_members,<br/>dup_state, user_settings")]
             AgentTables[("agentserver tables<br/>agent_users, agent_login_failures,<br/>agent_agents, agent_drives, agent_files,<br/>agent_dir_listings, agent_scan_runs, …")]
         end
     end
@@ -114,7 +114,7 @@ graph TB
 - Tailwind CSS v4 (styling): design tokens in `App.css` (`@theme`), light and dark from the system theme; no component library ([archive/ui-refresh.md](archive/ui-refresh.md))
 
 **Key Components:**
-- `/routes/__root.tsx` and `/components/Header.tsx` - The app shell: a top bar with the Bhandaar name, the nav tabs (Browse · Request · Request History · Duplicates · Manage data; a menu on phones) and the user menu (Log out); page titles `<page> · Bhandaar`. Login and the OAuth callback show just the name
+- `/routes/__root.tsx` and `/components/Header.tsx` - The app shell: a top bar with the Bhandaar name, the nav tabs (Browse · Request · Request History · Duplicates · Manage data; a menu on phones) and the user menu (Settings, Log out); page titles `<page> · Bhandaar`. Login and the OAuth callback show just the name
 - `/components/ui/` - The shared components (Button, Card, Field, Input, Select, Checkbox, Tabs, Switch, Badge, Table, Pager, Icon, Spinner), styled only with the tokens; `Table` stacks rows into cards on phones
 - `/routes/index.tsx` - Browse: source picker, service tabs (Google Drive · Gmail · Google Photos · Google Cloud Storage), a summary card per source, and the folder tree (`/components/FolderTree.tsx`: file-type icons from `fileTypes.ts`, size bars for each entry's share of its folder), the account's messages, or its picked photos and videos (`/components/PickedItemsTable.tsx`). Google Cloud Storage uses the folder tree too: buckets, then prefixes as folders (folder IDs `<bucket>/<prefix>`), every object version a row, with a card for the noncurrent and soft-deleted totals and the live bytes by class that the tree hides
 - `/routes/request.tsx` - Scan request form for Gmail, Google Drive, Google Photos and Google Cloud Storage (`?type=gmail|drive|photos|gcs`). An account without the chosen service gets a "Grant … access" button, which links it again for that service with Google's `login_hint`; the service being linked is kept in `sessionStorage` across the round trip. Drive fields build the Drive query (`driveQuery.ts`), which "Edit query" lets you replace, plus an optional folder (link or ID) with or without subfolders. Photos has no form: **Pick in Google Photos** (`/components/PhotosPick.tsx`) opens Google Photos to pick, then follows the pick until its scan is done (see [Photos Pick Flow](#photos-pick-flow)). Google Cloud Storage (`/components/GcsFields.tsx`): a project (listed, or typed when the account can't list its projects), all its buckets or one, an optional prefix, and whether to include noncurrent versions and soft-deleted objects
@@ -122,6 +122,7 @@ graph TB
 - `/components/Breadcrumbs.tsx` - The trail under the nav tabs on Request History and scan pages: `Request History › <account> › Scan N`. A scan's trail always goes through its account (the summary's `client_key`), however the scan was opened, and the Request History tab stays highlighted on it
 - `/routes/scans.$scanId.tsx` - One scan's results: its summary, then 10 rows a page: files and folders with their folder, size, file count, modified time and MD5, linked to Drive (Drive, local), new messages (Gmail), picked items with when taken, dimensions, camera and size (Google Photos), or each bucket's status and totals by state and class, linked into Browse (Google Cloud Storage)
 - `/routes/duplicates.tsx` - Duplicates: reclaimable space and per-source totals, tabs for identical files, identical folders and likely photo copies, filters (source, across sources, minimum size, hide same physical drive), and a page of groups, each expanding to its copies with links into Browse, Drive or the Cloud console. See [archive/duplicates.md](archive/duplicates.md)
+- `/routes/settings.tsx` - Settings, from the user menu: display preferences. "Show Google Cloud Storage", off by default, adds the Cloud Storage tab to the Request and Browse pages; off, a URL asking for it falls back to Gmail or Google Drive. It hides nothing else (Duplicates, Manage data and Request History still show buckets, and Cloud Storage scans are still accepted). Saved per user (`/api/settings`), and read through `/components/hooks/useSettings.ts`
 - `/routes/oauth/glink.tsx` - OAuth callback handler
 - `/api/index.ts` - Backend API client
 - `/components/ScanProgress.tsx` - Real-time progress display
@@ -168,6 +169,7 @@ Every route but health and login/logout needs a logged-in user (see [Web authent
 | `/api/browse/google/{client_key}/gmail/messages` | GET | A page (50) of the account's messages across its Gmail scans (`?sort=size|date`), each with the scan that found it |
 | `/api/browse/google/{client_key}/photos/items` | GET | A page (50) of the account's picked Photos across its scans, each item once as its latest scan found it (`?sort=size|date`, date being when taken), with that scan |
 | `/api/browse/google/{client_key}/gcs/children` | GET | A page (200) of the account's Cloud Storage record: its buckets (`?folder=` empty), or a prefix's subfolders then object versions (`?folder=<bucket>/<prefix>`), each largest first, with the folder's totals by state and class |
+| `/api/settings` | GET, PUT | The user's settings, `{show_gcs}` (off by default); PUT replaces them and answers them as saved |
 | `/api/duplicates/summary` | GET | The user's duplicates: reclaimable bytes, groups by kind, bytes per source, folders that couldn't be compared, when the index was built and whether it's being rebuilt |
 | `/api/duplicates/groups` | GET | A page (50) of groups, largest reclaimable first (`?kind=file|folder|photo&source=&across=1&min_size=&hide_same_physical=1&page=`), each with up to 10 copies |
 | `/api/duplicates/members` | GET | A page (200) of one group's copies (`?kind=&key=&page=`: groups are named by kind and key, which survive rebuilds); a group not in the user's index answers 404 |
@@ -265,6 +267,8 @@ gcs_scan_buckets (what each Cloud Storage scan found of each bucket)
 
 gcs_buckets, gcs_objects, gcs_prefix_totals (each account's Cloud Storage record,
   by client_key: buckets, object versions, folder totals; kept when scans are deleted)
+
+user_settings (each user's settings: show_gcs; no row is the defaults)
 
 dup_groups, dup_members, dup_state (each user's duplicates index: groups of copies,
   the copies, and what the index was built from)

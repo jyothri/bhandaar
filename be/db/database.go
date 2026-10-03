@@ -475,7 +475,10 @@ func migrateDB() error {
 	if err := migrateDeletions(); err != nil {
 		return err
 	}
-	return migrateDuplicates()
+	if err := migrateDuplicates(); err != nil {
+		return err
+	}
+	return migrateSettings()
 }
 
 // migrateDropCompletedAt drops scans.completed_at. Nothing ever set it, so

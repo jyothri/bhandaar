@@ -44,6 +44,7 @@ func api(r *mux.Router) {
 	browseRoutes(api)
 	manageDataRoutes(api)
 	duplicatesRoutes(api)
+	settingsRoutes(api)
 }
 
 func DoScansHandler(w http.ResponseWriter, r *http.Request) {
