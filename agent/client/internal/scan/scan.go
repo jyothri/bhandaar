@@ -10,6 +10,7 @@ package scan
 
 import (
 	"context"
+	"crypto/md5"
 	"fmt"
 	"io"
 	"io/fs"
@@ -512,7 +513,9 @@ func walkAndDispatch(ctx context.Context, st *store.Store, opts Options, driveRo
 		if err != nil {
 			return fmt.Errorf("checking checkpoint for %q: %w", relPath, err)
 		}
-		if existing != nil && existing.Status == store.StatusHashed &&
+		// A file hashed before 0.6.0 has no MD5, so it's re-read once to add
+		// it (docs/specs/duplicates.md, "MD5 in driveagent").
+		if existing != nil && existing.Status == store.StatusHashed && existing.MD5 != "" &&
 			existing.Size == info.Size() && existing.MTimeUnix == info.ModTime().Unix() {
 			statsMu.Lock()
 			stats.FilesSkipped++
@@ -550,8 +553,8 @@ func (c ctxReader) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
 
-// hashFile hashes one file. ok is false if ctx was cancelled mid-file, in
-// which case there is nothing to record.
+// hashFile hashes one file, BLAKE3 and MD5 in the same read. ok is false
+// if ctx was cancelled mid-file, in which case there is nothing to record.
 func hashFile(ctx context.Context, driveID string, j job) (rec store.FileRecord, ok bool) {
 	rec = store.FileRecord{
 		DriveID:   driveID,
@@ -573,7 +576,8 @@ func hashFile(ctx context.Context, driveID string, j job) (rec store.FileRecord,
 	defer f.Close()
 
 	h := blake3.New(32, nil)
-	if _, err := io.Copy(h, ctxReader{ctx, f}); err != nil {
+	m := md5.New()
+	if _, err := io.Copy(io.MultiWriter(h, m), ctxReader{ctx, f}); err != nil {
 		if ctx.Err() != nil {
 			return rec, false
 		}
@@ -583,6 +587,7 @@ func hashFile(ctx context.Context, driveID string, j job) (rec store.FileRecord,
 	}
 
 	rec.ContentHash = fmt.Sprintf("%x", h.Sum(nil))
+	rec.MD5 = fmt.Sprintf("%x", m.Sum(nil))
 	rec.Status = store.StatusHashed
 	return rec, true
 }

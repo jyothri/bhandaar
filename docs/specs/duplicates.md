@@ -1,6 +1,6 @@
 # Duplicates: Identical Files and Folders Across Every Source
 
-**Status:** proposed. Written 2026-10-02, after [browse.md](../archive/browse.md), [gcs-scans.md](../archive/gcs-scans.md) and [photos-picker.md](../archive/photos-picker.md) were built.
+**Status:** in progress: step 0 done, step 1 (driveagent 0.6.0, agentserver migration 4) implemented. Written 2026-10-02, after [browse.md](../archive/browse.md), [gcs-scans.md](../archive/gcs-scans.md) and [photos-picker.md](../archive/photos-picker.md) were built.
 
 ## Problem
 
@@ -55,7 +55,7 @@ An exact key is `md5:<hex>:<size>`, or `blake3:<hex>:<size>` for an agent file w
 
 ### Folders
 
-A folder's **signature** is a SHA-256 over the sorted lines `<path relative to the folder>\0<key>\n` of every file below it, at any depth, after the left-out files above.
+A folder's **signature** identifies everything below it: the same signature means the same files at the same relative paths, at any depth, after the left-out files above. It's computed bottom up, as a Merkle tree: a SHA-256 over the folder's direct children, sorted by name, each as `<name>\0<f|d>\0<key or the subfolder's signature>\n`. Each file is read once, not once per folder above it (see [step 0](#implementation-order)).
 - Two folders are **duplicates** when their signatures match. Their names may differ; their contents, paths below them and file contents may not.
 - A folder with any file that has no key isn't matched, and its page entry says why. Examples: a Google Doc, a composite Cloud Storage object, an agent file not hashed yet.
 - **Only the topmost match is reported:** when folders A and B match, their subfolders match too, so pairs inside a reported pair aren't listed again.
@@ -95,6 +95,12 @@ So that agent drives match exactly with Drive and Cloud Storage, `driveagent` re
 - **Release:** `agent/client/internal/version.Version` goes to 0.6.0, and then `AGENTSERVER_LATEST_AGENT_VERSION` in the prod `.env`. The handshake's minimum version doesn't change, so 0.5.0 agents keep working, without MD5.
 
 The remote-sync references (`remote-sync-agent.md`, `remote-sync-server.md`) and `drive-comparison-agent.md` are updated with the new column and the rehash-on-missing-MD5 rule.
+
+As built (step 1):
+- **Comparison results kept:** a file re-read only for its MD5 (same size and BLAKE3 hash) keeps its `compare` result. So the first 0.6.0 scan doesn't wipe the results `compare` computed.
+- **Server checks:** agentserver rejects an `md5` that isn't 32 lowercase hex digits, and one sent for an unreadable file.
+- **Upgrade, checked live (2026-10-03):** a test drive was scanned by 0.5.0 (no MD5 on the server), then by 0.6.0 with the same state dir. The 0.6.0 scan re-read all 3 files and uploaded MD5s equal to `md5sum`'s, and the next scan skipped them.
+- **No downgrade:** 0.5.0 then refuses that state dir (schema version 2), as with any newer schema.
 
 ## The index
 
@@ -183,13 +189,11 @@ A fourth nav tab, **Duplicates**, at `/duplicates`. Search params: `kind`, `sour
 
 One PR each, checked on dev.sm against the prod copy:
 
-0. **Measure** on the prod copy:
-   - the files grouping query
-   - a folder-signature pass over the largest drive
-   - the index size
-   - whether Drive's and Cloud Storage's MD5s really agree for the same file (both lowercase hex)
-
-   Results go into this spec.
+0. **Measure** on the prod copy. Done 2026-10-03, on a restored copy of the prod database (dump of 2026-10-03):
+   - **Hash formats:** all 60,186 Drive MD5s and all 332,916 Cloud Storage MD5s are 32-character lowercase hex, so they compare directly. All 1,462,042 hashed agent files are BLAKE3.
+   - **Files:** one grouping query over every counted live file of all sources (about 1.86 million) took **3.9 s**. It found **429,549 groups** with **1,466,503 copies**, and 1.8 TB reclaimable. That total is inflated by seagate1 being uploaded from three machines (shown, labelled "Same physical drive").
+   - **Index size:** about 1.5 million `dup_members` rows. A full rebuild writes them all, so the builder writes in batches, and the step 2 PR measures its time.
+   - **Folders:** computing signatures in SQL, by aggregating every file into every folder above it, took **134 s** for the largest drive alone (98,452 folders, 15,046 groups of identical folders). So signatures are computed bottom up in `be` as a Merkle tree, as above, in one pass over each source's files sorted by path.
 1. **driveagent 0.6.0** and **agentserver**:
    - MD5 alongside BLAKE3, and the state.db column
    - rehash when MD5 is missing

@@ -87,7 +87,7 @@ func TestNewStoreIsCurrentSchema(t *testing.T) {
 	st := quietOpen(t, t.TempDir())
 	var v int
 	st.db.QueryRow(`SELECT version FROM schema_version`).Scan(&v)
-	if v != SchemaVersion() || v != 1 {
+	if v != SchemaVersion() || v != 2 {
 		t.Errorf("schema version = %d", v)
 	}
 	if st.clock(t) != 0 {

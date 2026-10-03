@@ -155,7 +155,7 @@ func (e *env) files(drive string, paths ...string) {
 	var recs []store.FileRecord
 	for _, p := range paths {
 		recs = append(recs, store.FileRecord{DriveID: drive, RelPath: p, Size: int64(len(p)), MTimeUnix: 1726000000, Mode: 0o644,
-			ContentHash: "h-" + p, HashAlgo: "blake3", Status: store.StatusHashed, ScannedAt: time.Date(2026, 9, 24, 9, 58, 1, 0, time.UTC)})
+			ContentHash: "h-" + p, HashAlgo: "blake3", MD5: "m-" + p, Status: store.StatusHashed, ScannedAt: time.Date(2026, 9, 24, 9, 58, 1, 0, time.UTC)})
 	}
 	if err := e.st.UpsertFiles(ctx, recs); err != nil {
 		e.t.Fatal(err)

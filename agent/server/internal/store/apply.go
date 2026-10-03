@@ -378,7 +378,7 @@ func applyGroup(ctx context.Context, tx pgx.Tx, pk int64, name string, entries [
 func execFileUpserts(ctx context.Context, tx pgx.Tx, pk int64, es []*entry) (int64, error) {
 	n := len(es)
 	keys, raws := make([][]byte, n), make([][]byte, n)
-	paths, hashes, algos, statuses, msgs := make([]string, n), make([]string, n), make([]string, n), make([]string, n), make([]string, n)
+	paths, hashes, algos, statuses, msgs, md5s := make([]string, n), make([]string, n), make([]string, n), make([]string, n), make([]string, n), make([]string, n)
 	sizes, mtimes, vs := make([]int64, n), make([]int64, n), make([]int64, n)
 	modes := make([]int32, n)
 	scanned := make([]time.Time, n)
@@ -386,26 +386,26 @@ func execFileUpserts(ctx context.Context, tx pgx.Tx, pk int64, es []*entry) (int
 		c := e.change
 		keys[i], raws[i], paths[i] = e.key, e.rawPath, e.path
 		sizes[i], mtimes[i], modes[i] = *c.Size, *c.MTimeUnix, int32(*c.Mode)
-		hashes[i], algos[i], statuses[i], msgs[i] = c.ContentHash, c.HashAlgo, c.Status, c.ErrorMessage
+		hashes[i], algos[i], statuses[i], msgs[i], md5s[i] = c.ContentHash, c.HashAlgo, c.Status, c.ErrorMessage, c.MD5
 		scanned[i], vs[i] = *c.ScannedAt, e.v
 	}
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO agent_files AS f (drive_pk, path_key, relative_path, raw_path, size, mtime, mode,
-		                              content_hash, hash_algo, status, error_message, scanned_at, row_version)
+		                              content_hash, hash_algo, status, error_message, scanned_at, row_version, md5)
 		SELECT $1, u.k, u.p, u.raw, u.size, to_timestamp(u.mtime::float8), u.mode,
-		       nullif(u.ch, ''), nullif(u.ha, ''), u.st, nullif(u.em, ''), u.sa, u.v
+		       nullif(u.ch, ''), nullif(u.ha, ''), u.st, nullif(u.em, ''), u.sa, u.v, nullif(u.md5, '')
 		  FROM unnest($2::bytea[], $3::text[], $4::bytea[], $5::int8[], $6::int8[], $7::int4[],
-		              $8::text[], $9::text[], $10::text[], $11::text[], $12::timestamptz[], $13::int8[])
-		       AS u(k, p, raw, size, mtime, mode, ch, ha, st, em, sa, v)
+		              $8::text[], $9::text[], $10::text[], $11::text[], $12::timestamptz[], $13::int8[], $14::text[])
+		       AS u(k, p, raw, size, mtime, mode, ch, ha, st, em, sa, v, md5)
 		 WHERE NOT EXISTS (SELECT 1 FROM agent_tombstones t
 		                    WHERE t.drive_pk = $1 AND t.kind = 'file' AND t.key = u.k AND t.row_version >= u.v)
 		ON CONFLICT (drive_pk, path_key) DO UPDATE SET
 		       relative_path = EXCLUDED.relative_path, raw_path = EXCLUDED.raw_path, size = EXCLUDED.size,
 		       mtime = EXCLUDED.mtime, mode = EXCLUDED.mode, content_hash = EXCLUDED.content_hash,
 		       hash_algo = EXCLUDED.hash_algo, status = EXCLUDED.status, error_message = EXCLUDED.error_message,
-		       scanned_at = EXCLUDED.scanned_at, row_version = EXCLUDED.row_version
+		       scanned_at = EXCLUDED.scanned_at, row_version = EXCLUDED.row_version, md5 = EXCLUDED.md5
 		 WHERE f.row_version < EXCLUDED.row_version`,
-		pk, keys, paths, raws, sizes, mtimes, modes, hashes, algos, statuses, msgs, scanned, vs)
+		pk, keys, paths, raws, sizes, mtimes, modes, hashes, algos, statuses, msgs, scanned, vs, md5s)
 	if err != nil {
 		return 0, err
 	}

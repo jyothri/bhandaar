@@ -5,12 +5,16 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/jyothri/bhandaar/agent/wire"
 )
+
+// md5Hex is an MD5 as driveagent sends it: lowercase hex.
+var md5Hex = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // Limits on entry values. Paths have no fixed length limit in the schema
 // (rows are keyed on a hash), but a sanity cap keeps one entry small.
@@ -125,7 +129,13 @@ func prepareFile(e *entry, c wire.Change) *entry {
 		if c.ContentHash == "" || c.HashAlgo == "" {
 			return reject("a hashed file needs content_hash and hash_algo")
 		}
+		if c.MD5 != "" && !md5Hex.MatchString(c.MD5) {
+			return reject("md5 must be 32 lowercase hex digits")
+		}
 	case "error":
+		if c.MD5 != "" {
+			return reject("an unreadable file has no md5")
+		}
 	default:
 		return reject(fmt.Sprintf("unknown status %q", c.Status))
 	}

@@ -92,6 +92,31 @@ func TestUpsertAndGetFile(t *testing.T) {
 	}
 }
 
+func TestReadingAFileForItsMD5KeepsItsComparison(t *testing.T) {
+	st := open(t)
+	if err := st.UpsertFiles(ctx, []FileRecord{rec("d1", "a.txt", 10, "h1")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateComparisonStatuses(ctx, []ComparisonUpdate{{
+		DriveID: "d1", RelPath: "a.txt", ComparisonStatus: ComparisonCommon, ComparedAgainstDriveID: "d2",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	// The same content, now with its MD5: the comparison still holds.
+	withMD5 := rec("d1", "a.txt", 10, "h1")
+	withMD5.MD5 = "0123456789abcdef0123456789abcdef"
+	if err := st.UpsertFiles(ctx, []FileRecord{withMD5}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.GetFile("d1", "a.txt")
+	if got.MD5 != withMD5.MD5 || got.ComparisonStatus != ComparisonCommon || got.ComparedAgainstDriveID != "d2" {
+		t.Errorf("after adding the MD5: %+v", got)
+	}
+	if e, _ := st.Existing("d1", "a.txt"); e == nil || e.MD5 != withMD5.MD5 {
+		t.Errorf("Existing = %+v, want its MD5", e)
+	}
+}
+
 func TestUpsertResetsComparison(t *testing.T) {
 	st := open(t)
 	if err := st.UpsertFiles(ctx, []FileRecord{rec("d1", "a.txt", 10, "h1")}); err != nil {

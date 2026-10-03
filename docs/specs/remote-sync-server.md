@@ -1,6 +1,6 @@
 # Remote Sync: `agentserver` Server
 
-**Status:** implemented (migrations 1–3). This is the compact as-built reference for `agent/server/`. The original spec, with its rationale and test list, is in [`archive/remote-sync/remote-sync-server.md`](../archive/remote-sync/remote-sync-server.md). The overview is [`remote-sync.md`](remote-sync.md).
+**Status:** implemented (migrations 1–4; migration 4 adds `agent_files.md5`, for [duplicates](duplicates.md)). This is the compact as-built reference for `agent/server/`. The original spec, with its rationale and test list, is in [`archive/remote-sync/remote-sync-server.md`](../archive/remote-sync/remote-sync-server.md). The overview is [`remote-sync.md`](remote-sync.md).
 
 `agentserver` receives scan data from `driveagent` and stores it in the Bhandaar Postgres database, next to `be`; neither calls the other.
 
@@ -145,7 +145,7 @@ Migrations are numbered SQL files, applied at startup in a transaction each and 
 | `agent_refresh_tokens` | `sha256(token)`, family, `parent_id`, expiry, `rotated_at`, `grace_used_at`, `revoked_at`, `revoked_reason` (`grace`, `reuse`, `logout`, `disabled`) |
 | `agent_physical_drives` | Per user: `fs_uuid`, `fs_type`, `fs_uuid_source`, `hw_serial`, `clone_of` |
 | `agent_drives` | (`agent_id`, `drive_id`) unique: the reported identity, `physical_drive_id`, `stream_id`, `acked_version`, roots, `last_synced_at` |
-| `agent_files` | (`drive_pk`, `path_key`): readable path, `raw_path` (non-UTF-8 only), size, mtime, mode, hash, status, error, `scanned_at`, `row_version` |
+| `agent_files` | (`drive_pk`, `path_key`): readable path, `raw_path` (non-UTF-8 only), size, mtime, mode, hash, `md5` (lowercase hex, from driveagent 0.6.0; NULL until a file is re-read by one; a malformed one, or one on an unreadable file, is rejected), status, error, `scanned_at`, `row_version` |
 | `agent_dir_listings` | (`drive_pk`, `entry_key`), `parent_key`: parent and child (readable and raw), `is_dir`, `first_seen_at`, `row_version` |
 | `agent_scan_runs` | (`drive_pk`, `run_id`): times, counters, `interrupted`, `row_version` |
 | `agent_tombstones` | (`drive_pk`, kind, key), `row_version` |
