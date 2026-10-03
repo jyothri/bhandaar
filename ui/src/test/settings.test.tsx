@@ -13,12 +13,12 @@ const json = (status: number, body: unknown) =>
     headers: { "Content-Type": "application/json" },
   });
 
-let saved: { gcs_enabled: boolean };
-let putAnswer: (body: string) => Response;
+let saved: { show_gcs: boolean };
+let putAnswer: (body: string) => Response | Promise<Response>;
 
 beforeEach(() => {
   stubEventSource();
-  saved = { gcs_enabled: false };
+  saved = { show_gcs: false };
   putAnswer = (body) => {
     saved = JSON.parse(body);
     return json(200, saved);
@@ -68,7 +68,7 @@ describe("Settings", () => {
     expect(gcs).toHaveAttribute("aria-checked", "false");
 
     await user.click(gcs);
-    await waitFor(() => expect(saved).toEqual({ gcs_enabled: true }));
+    await waitFor(() => expect(saved).toEqual({ show_gcs: true }));
     await waitFor(() => expect(gcs).toHaveAttribute("aria-checked", "true"));
 
     // The Request page now has the tab.
@@ -87,6 +87,44 @@ describe("Settings", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Couldn't save: Failed to save your settings"
     );
-    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "false");
+    // Back to what the server has.
+    await waitFor(() =>
+      expect(screen.getByRole("switch")).toHaveAttribute(
+        "aria-checked",
+        "false"
+      )
+    );
+  });
+
+  it("saves quick changes in order, the last one last", async () => {
+    const user = userEvent.setup();
+    const puts: string[] = [];
+    let release: () => void = () => {};
+    const firstDone = new Promise<void>((resolve) => (release = resolve));
+    putAnswer = (body) => {
+      puts.push(body);
+      saved = JSON.parse(body);
+      return json(200, saved);
+    };
+    // The first save waits, so the second click comes while it's pending.
+    const answer = putAnswer;
+    let first = true;
+    putAnswer = (body) => {
+      if (first) {
+        first = false;
+        return firstDone.then(() => answer(body));
+      }
+      return answer(body);
+    };
+    renderRoute("/settings");
+    const gcs = await screen.findByRole("switch");
+    await user.click(gcs);
+    expect(gcs).toHaveAttribute("aria-checked", "true");
+    await user.click(gcs);
+    expect(gcs).toHaveAttribute("aria-checked", "false");
+    release();
+    await waitFor(() => expect(puts).toHaveLength(2));
+    expect(puts.map((p) => JSON.parse(p).show_gcs)).toEqual([true, false]);
+    expect(saved).toEqual({ show_gcs: false });
   });
 });

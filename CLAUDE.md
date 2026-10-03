@@ -52,7 +52,7 @@ The application consists of:
   - `deletion.go`: the deletions and their jobs (`deletions` table, one running per account and per drive, failed at restart, purged after 30 days), and `StartScan`, which every collector uses: a scan of an account and a deletion of it lock the account's `privatetokens` row (`FOR SHARE` / `FOR UPDATE`), so neither can start during the other; deleting a drive is be's only write to agentserver's tables (one `agent_drives` row, which cascades)
   - `totals.go`: the folder totals cache (`browse_folder_totals`, `browse_totals_state`) and its checker, a goroutine `main` starts that rebuilds changed agent drives every 10 minutes
   - `duplicates.go`: each user's duplicates index (`dup_groups`, `dup_members`, `dup_state`): identical files by exact key (MD5 and size, or an agent's BLAKE3), identical folders by Merkle signature (topmost only), and Google Photos items likely copied elsewhere (name and time). Its builder, a goroutine `main` starts, rebuilds a user's index when its fingerprint changes: at once, every 10 minutes, and soon after a scan or deletion ends (`WakeDuplicates`); a change to agent drives alone waits until they've been still for 5 minutes. See `docs/archive/duplicates.md`
-  - `settings.go`: each user's settings (`user_settings`; no row is the defaults): `gcs_enabled`, off by default
+  - `settings.go`: each user's settings, display preferences only (`user_settings`; no row is the defaults): `show_gcs`, off by default
   - Tables: `Scans`, `ScanData`, `messagemetadata`, `photos_picker_sessions`, `photos_picked_items`, `gcs_buckets`, `gcs_objects`, `gcs_prefix_totals`, `gcs_scan_buckets` (the Photos Library API's old tables are dropped at startup)
 - **notification/**: SSE hub for broadcasting scan progress events
 - **constants/**: Application constants and configuration
@@ -65,7 +65,7 @@ The application consists of:
   - `requests.tsx`: List view of scan requests by account (`?account=<client_key>`); each scan ID links to its results. It and a scan's page show a trail under the nav tabs (`components/Breadcrumbs.tsx`): Request History › account › Scan N
   - `scans.$scanId.tsx`: One scan's results: summary (with a link to Browse the account, and for Drive and Photos to Duplicates), then a page of files and folders (Drive, local), new messages (Gmail) or picked items (Google Photos)
   - `duplicates.tsx`: Duplicates, the fourth nav tab: reclaimable space, tabs for Files, Folders and Photos (likely), filters, and a page of groups that expand to their copies; `?kind=&source=&across=&min_size=&hide_same_physical=&page=`
-  - `settings.tsx`: Settings, from the user menu (not a nav tab): whether Google Cloud Storage is shown. With it off, the Request and Browse pages have no Cloud Storage tab, and a URL asking for it falls back to Gmail or Google Drive; recorded data is kept. Pages read it through `components/hooks/useSettings.ts`
+  - `settings.tsx`: Settings, from the user menu (not a nav tab): display preferences. "Show Google Cloud Storage" (`show_gcs`, off by default) adds the Cloud Storage tab to the Request and Browse pages; off, a URL asking for it falls back to Gmail or Google Drive, in the URL too. It hides nothing else: buckets still show in Duplicates, Manage data and Request History, and Cloud Storage scans are still accepted. The root route loads the settings with the session; pages read them through `components/hooks/useSettings.ts`, and a failure to load them keeps a page on Cloud Storage
   - `manage-data.tsx`: Manage data, the last nav tab: linked accounts and uploaded drives (by box), with confirmed deletions (`components/ui/Dialog.tsx`) that run as jobs the page watches
   - `oauth/glink.tsx`: OAuth callback handler
 - **src/api/**: Backend API client functions
@@ -284,7 +284,7 @@ All but health and login/logout need the session cookie.
 - `GET /api/duplicates/summary` - Reclaimable bytes, groups by kind, bytes per source, uncomparable folders, `built_at`, `updating`
 - `GET /api/duplicates/groups?kind=file|folder|photo&source=&across=1&min_size=&hide_same_physical=1&page=` - A page (50) of groups, largest reclaimable first, each with up to 10 copies
 - `GET /api/duplicates/members?kind=&key=&page=` - A page (200) of one group's copies; groups are named by kind and key, which survive rebuilds
-- `GET /api/settings` - The user's settings: `{gcs_enabled}`, off by default
+- `GET /api/settings` - The user's settings: `{show_gcs}`, off by default
 - `PUT /api/settings` - Replaces them; answers them as saved
 - `GET /api/manage-data` - The user's linked accounts and uploaded drives, with what deleting each removes
 - `DELETE /api/agent-drives/{id}` - Delete a drive as uploaded from one box → `202` job

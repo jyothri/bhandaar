@@ -10,6 +10,7 @@ import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { getMe } from "../api";
 import { queryKeys } from "../api/queryKeys";
 import Header, { Brand } from "../components/Header";
+import { settingsQuery } from "../components/hooks/useSettings";
 
 export type RouterContext = { queryClient: QueryClient };
 
@@ -31,6 +32,10 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     if (!me) {
       throw redirect({ to: "/login", search: { redirect: location.href } });
     }
+    // The settings decide which tabs show; loaded once with the session, so
+    // the tabs don't shift on first paint. A failure leaves the pages to
+    // retry.
+    await queryClient.ensureQueryData(settingsQuery).catch(() => undefined);
   },
   component: RootLayout,
 });

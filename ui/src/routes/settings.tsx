@@ -8,7 +8,7 @@ import Card from "../components/ui/Card";
 import Switch from "../components/ui/Switch";
 import { Settings as SettingsData } from "../types/settings";
 
-// Settings, from the user menu: what the app shows. Saved per user on the
+// Settings, from the user menu: display preferences, saved per user on the
 // server, so they follow the user to any browser.
 
 export const Route = createFileRoute("/settings")({
@@ -18,12 +18,21 @@ export const Route = createFileRoute("/settings")({
 function Settings() {
   const queryClient = useQueryClient();
   const { data, error } = useSettings();
+  // Each change shows at once and is saved in turn (one scope runs its
+  // saves in order), so quick changes all land, the last one last. A
+  // failed save puts back what the server has.
   const save = useMutation({
     mutationFn: saveSettings,
-    onSuccess: (saved) => queryClient.setQueryData(queryKeys.settings, saved),
+    scope: { id: "settings" },
+    onMutate: async (next) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.settings });
+      queryClient.setQueryData(queryKeys.settings, next);
+    },
+    onError: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings }),
   });
 
-  if (error) {
+  if (error && !data) {
     return (
       <p className="py-6 text-sm text-danger">
         Couldn't load your settings: {error.message}
@@ -33,28 +42,24 @@ function Settings() {
   if (!data) {
     return <p className="py-6 text-sm text-muted">Loading…</p>;
   }
-  // What the switches show: the change being saved, else what's saved.
-  const shown: SettingsData = save.isPending ? save.variables : data;
-  const change = (changes: Partial<SettingsData>) => {
-    if (!save.isPending) {
-      save.mutate({ ...data, ...changes });
-    }
-  };
+  const change = (changes: Partial<SettingsData>) =>
+    save.mutate({ ...data, ...changes });
 
   return (
     <div className="space-y-4 pt-6">
       <h1 className="text-xl font-semibold">Settings</h1>
-      <Card title="Sources">
+      <Card title="Display">
         <div className="space-y-1">
           <Switch
-            checked={shown.gcs_enabled}
-            onChange={(on) => change({ gcs_enabled: on })}
-            label="Google Cloud Storage"
+            checked={data.show_gcs}
+            onChange={(on) => change({ show_gcs: on })}
+            label="Show Google Cloud Storage"
           />
           <p className="text-sm text-muted">
-            Scan and browse the buckets of your Google Cloud projects. When it's
-            off, the Request and Browse pages don't show Cloud Storage; anything
-            already scanned is kept.
+            Adds a Google Cloud Storage tab to the Request and Browse pages, for
+            scanning and browsing the buckets of your Google Cloud projects.
+            Hiding it changes nothing else: buckets already scanned still show
+            in Duplicates, Manage data and Request History.
           </p>
         </div>
         {save.error && (

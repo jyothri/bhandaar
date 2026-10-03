@@ -52,13 +52,15 @@ const page = (extra: object) => ({
 });
 
 let sources: object[];
-let gcsEnabled: boolean;
+let showGcs: boolean;
+let settingsFail: boolean;
 
 beforeEach(() => {
   stubEventSource();
   localStorage.clear();
   sources = [google, agent];
-  gcsEnabled = false;
+  showGcs = false;
+  settingsFail = false;
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (input) => {
     const url = new URL(String(input));
@@ -68,7 +70,9 @@ beforeEach(() => {
       case "/api/auth/me":
         return loggedIn();
       case "/api/settings":
-        return json(200, { gcs_enabled: gcsEnabled });
+        return settingsFail
+          ? json(500, "database down")
+          : json(200, { show_gcs: showGcs });
       case "/api/browse/sources":
         return json(200, sources);
       case "/api/browse/google/JVVYZFCI0PaW/drive/children":
@@ -456,7 +460,9 @@ describe("Browse", () => {
   });
 
   it("has no Cloud Storage tab while it's off in Settings", async () => {
-    renderRoute("/?source=google:JVVYZFCI0PaW&service=gcs");
+    const { router } = renderRoute(
+      "/?source=google:JVVYZFCI0PaW&service=gcs&folder=jyo-archive/"
+    );
     expect(
       await screen.findByRole("tab", { name: /^Google Drive/, selected: true })
     ).toBeInTheDocument();
@@ -466,6 +472,23 @@ describe("Browse", () => {
     expect(
       screen.queryByRole("tab", { name: /^Google Cloud Storage/ })
     ).toBeNull();
+    // The URL says Drive too, without the bucket's folder.
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({
+        source: "google:JVVYZFCI0PaW",
+      })
+    );
+  });
+
+  it("stays on Cloud Storage when the settings can't be loaded", async () => {
+    settingsFail = true;
+    renderRoute("/?source=google:JVVYZFCI0PaW&service=gcs");
+    expect(
+      await screen.findByRole("tab", {
+        name: /^Google Cloud Storage/,
+        selected: true,
+      })
+    ).toBeInTheDocument();
   });
 
   it("shows an account's Cloud Storage buckets, and what the tree hides", async () => {
@@ -484,7 +507,7 @@ describe("Browse", () => {
         },
       },
     ];
-    gcsEnabled = true;
+    showGcs = true;
     renderRoute("/?source=google:JVVYZFCI0PaW&service=gcs");
 
     expect(
@@ -515,6 +538,7 @@ describe("Browse", () => {
   });
 
   it("points to the Request page for Cloud Storage not granted", async () => {
+    showGcs = true;
     renderRoute("/?source=google:JVVYZFCI0PaW&service=gcs");
     expect(
       await screen.findByRole("link", {

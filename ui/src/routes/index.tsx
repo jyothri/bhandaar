@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ReactNode, useEffect } from "react";
-import { useGcsEnabled } from "../components/hooks/useSettings";
+import { useShowGcs } from "../components/hooks/useSettings";
 
 import {
   getAccountMessages,
@@ -180,14 +180,21 @@ function SourceView({
   const recalled = recall(lastServiceKey(source.key));
   // Cloud Storage only when the user's settings show it; while they load,
   // a page asked for it stays on it.
-  const gcsEnabled = useGcsEnabled();
+  const showGcs = useShowGcs();
   const asked: BrowseService =
     search.service ??
     (recalled === "gmail" || recalled === "photos" || recalled === "gcs"
       ? recalled
       : "drive");
   const service: BrowseService =
-    asked === "gcs" && gcsEnabled === false ? "drive" : asked;
+    asked === "gcs" && showGcs === false ? "drive" : asked;
+  // A link to Cloud Storage while it's hidden: Drive instead, in the URL
+  // too, without the bucket's folder.
+  useEffect(() => {
+    if (search.service === "gcs" && service !== "gcs") {
+      navigate({ search: { source: id }, replace: true });
+    }
+  }, [search.service, service, id, navigate]);
 
   useEffect(() => {
     remember(lastSourceKey, id);
@@ -203,7 +210,7 @@ function SourceView({
   );
   const label = (s: BrowseSource) =>
     s.kind === "google" ? (labels.get(s.key) ?? s.name) : s.name;
-  const folder = search.folder ?? "";
+  const folder = service === asked ? (search.folder ?? "") : "";
 
   return (
     <>
@@ -426,7 +433,7 @@ function GoogleAccount({
   search: BrowseSearch;
 }) {
   const navigate = useNavigate({ from: Route.fullPath });
-  const gcsEnabled = useGcsEnabled();
+  const showGcs = useShowGcs();
   const services = source.services!;
   const sub = (name: BrowseService, st: ServiceTotals) =>
     st.files !== undefined && st.bytes !== undefined
@@ -456,7 +463,7 @@ function GoogleAccount({
             label: "Google Photos",
             sub: sub("photos", services.photos),
           },
-          ...(gcsEnabled || service === "gcs"
+          ...(showGcs || service === "gcs"
             ? [
                 {
                   id: "gcs" as const,

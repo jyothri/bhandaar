@@ -1,6 +1,6 @@
-// The user's settings, from the Settings page.
+// The user's settings, from the Settings page: display preferences.
 export type Settings = {
-  // Show Google Cloud Storage on the Request and Browse pages; off by
-  // default.
-  gcs_enabled: boolean;
+  // Show the Google Cloud Storage tab on the Request and Browse pages; off
+  // by default. It hides nothing else.
+  show_gcs: boolean;
 };

@@ -25,16 +25,16 @@ func TestSettingsRoutes(t *testing.T) {
 		r.ServeHTTP(rec, req)
 		return rec
 	}
-	if rec := call("GET", ""); rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"gcs_enabled":false}` {
+	if rec := call("GET", ""); rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"show_gcs":false}` {
 		t.Errorf("defaults: %d %s", rec.Code, rec.Body)
 	}
-	if rec := call("PUT", `{"gcs_enabled":true}`); rec.Code != http.StatusOK || !saved[7].GcsEnabled {
+	if rec := call("PUT", `{"show_gcs":true}`); rec.Code != http.StatusOK || !saved[7].ShowGcs {
 		t.Errorf("saving: %d %s, saved %+v", rec.Code, rec.Body, saved)
 	}
-	if rec := call("GET", ""); strings.TrimSpace(rec.Body.String()) != `{"gcs_enabled":true}` {
+	if rec := call("GET", ""); strings.TrimSpace(rec.Body.String()) != `{"show_gcs":true}` {
 		t.Errorf("after saving: %s", rec.Body)
 	}
-	for _, body := range []string{"", "nope", `{"gcs_enabled":"yes"}`, `{"theme":"dark"}`} {
+	for _, body := range []string{"", "nope", `{"show_gcs":"yes"}`, `{"theme":"dark"}`} {
 		if rec := call("PUT", body); rec.Code != http.StatusBadRequest {
 			t.Errorf("%q: %d, want 400", body, rec.Code)
 		}

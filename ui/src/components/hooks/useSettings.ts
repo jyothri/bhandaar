@@ -2,21 +2,28 @@ import { useQuery } from "@tanstack/react-query";
 import { getSettings } from "../../api";
 import { queryKeys } from "../../api/queryKeys";
 
-/** The user's settings, shared by every page that reads them. */
+/**
+ * The user's settings, shared by every page that reads them; the root
+ * route loads them with the session. Refetched when the window regains
+ * focus, so a change made in another tab or browser shows up.
+ */
+export const settingsQuery = {
+  queryKey: queryKeys.settings,
+  queryFn: getSettings,
+  staleTime: 60_000,
+  refetchOnWindowFocus: true,
+};
+
 export function useSettings() {
-  return useQuery({
-    queryKey: queryKeys.settings,
-    queryFn: getSettings,
-    staleTime: Infinity,
-  });
+  return useQuery(settingsQuery);
 }
 
 /**
- * Whether Google Cloud Storage is shown on the Request and Browse pages:
- * undefined until the settings have loaded, so a page asked for Cloud
- * Storage doesn't turn away from it before then.
+ * Whether the Google Cloud Storage tab is shown on the Request and Browse
+ * pages: undefined until the settings have loaded, or when they can't be,
+ * so a page asked for Cloud Storage stays on it rather than hiding data
+ * the user may be using.
  */
-export function useGcsEnabled(): boolean | undefined {
-  const { data, isError } = useSettings();
-  return isError ? false : data?.gcs_enabled;
+export function useShowGcs(): boolean | undefined {
+  return useSettings().data?.show_gcs;
 }
