@@ -250,13 +250,15 @@ func CloudStorage(scan GStorageScan, userID int64) (int, error) {
 		return 0, err
 	}
 
-	scanId, err := db.LogStartScan("gcs", userID)
+	scanId, err := startScan("gcs", userID, db.ScanMeta{Name: account.Name, ClientKey: account.ClientKey,
+		SearchPath: gcsSearchPath(scan), Filter: gcsIncludes(scan)})
 	if err != nil {
 		client.Close()
+		var requestErr *RequestError
+		if errors.As(err, &requestErr) {
+			return 0, err
+		}
 		return 0, fmt.Errorf("failed to start Cloud Storage scan of %s: %w", scan.ProjectId, err)
-	}
-	if err := db.SaveScanMetadata(account.Name, account.ClientKey, gcsSearchPath(scan), gcsIncludes(scan), scanId); err != nil {
-		slog.Error("Failed to save scan metadata", "scan_id", scanId, "error", err)
 	}
 	go func() {
 		defer client.Close()

@@ -85,10 +85,18 @@ func getTotalsState(source string) (totalsState, error) {
 	return s, err
 }
 
+// errSourceGone is a rebuild of a source deleted meanwhile.
+var errSourceGone = errors.New("source deleted")
+
 // rebuildTotals replaces source's cached totals with query's rows (folder,
 // files, bytes; its arguments start at $2), in one transaction, and
-// records version.
-func rebuildTotals(source string, version int64, query string, args ...any) error {
+// records version. lock takes a share lock on the source's own row, with
+// args[0] as $1, and finds nothing once the source is gone: then nothing
+// is written, and what the rebuild had marked is removed. A deletion
+// deletes the source's row before its totals, so it waits for a rebuild
+// holding the lock, and a rebuild after it finds the row gone; no totals
+// are left behind (docs/specs/data-deletion.md).
+func rebuildTotals(source string, version int64, lock string, query string, args ...any) error {
 	rebuildMu.Lock()
 	defer rebuildMu.Unlock()
 	if _, err := db.Exec(`INSERT INTO browse_totals_state (source, building) VALUES ($1, true)
@@ -101,6 +109,12 @@ func rebuildTotals(source string, version int64, query string, args ...any) erro
 			return err
 		}
 		defer tx.Rollback()
+		var exists bool
+		if err := tx.Get(&exists, lock, args[0]); errors.Is(err, sql.ErrNoRows) {
+			return errSourceGone
+		} else if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`DELETE FROM browse_folder_totals WHERE source = $1`, source); err != nil {
 			return err
 		}
@@ -114,6 +128,14 @@ func rebuildTotals(source string, version int64, query string, args ...any) erro
 		}
 		return tx.Commit()
 	}()
+	if errors.Is(err, errSourceGone) {
+		// Nothing of a deleted source may stay: the state row marked above,
+		// and any totals from before the deletion.
+		db.Exec(`DELETE FROM browse_totals_state WHERE source = $1`, source)
+		db.Exec(`DELETE FROM browse_folder_totals WHERE source = $1`, source)
+		slog.Info("Skipped the folder totals of a deleted source", "source", source)
+		return nil
+	}
 	if err != nil {
 		db.Exec(`UPDATE browse_totals_state SET building = false WHERE source = $1`, source)
 		return fmt.Errorf("failed to rebuild totals of %s: %w", source, err)
@@ -143,7 +165,8 @@ func agentVersion(drivePk int64) (int64, error) {
 
 func rebuildAgentTotals(drivePk int64, version int64) error {
 	start := time.Now()
-	err := rebuildTotals(agentSource(drivePk), version, agentTotalsQuery, drivePk)
+	err := rebuildTotals(agentSource(drivePk), version,
+		`SELECT true FROM agent_drives WHERE id = $1 FOR SHARE`, agentTotalsQuery, drivePk)
 	if err == nil {
 		slog.Info("Rebuilt folder totals", "source", agentSource(drivePk), "version", version, "took", time.Since(start))
 	}
@@ -166,7 +189,8 @@ const driveTotalsQuery = `WITH RECURSIVE up (folder, size, depth) AS (
 	WHERE client_key = $2 AND NOT is_dir AND NOT trashed`
 
 func rebuildDriveTotals(clientKey string) error {
-	return rebuildTotals(driveSource(clientKey), 0, driveTotalsQuery, clientKey)
+	return rebuildTotals(driveSource(clientKey), 0,
+		`SELECT true FROM drive_accounts WHERE client_key = $1 FOR SHARE`, driveTotalsQuery, clientKey)
 }
 
 // FolderTotals is the files under a folder, at any depth, and their size.

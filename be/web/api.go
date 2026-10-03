@@ -42,6 +42,7 @@ func api(r *mux.Router) {
 	photosRoutes(api)
 	gcsRoutes(api)
 	browseRoutes(api)
+	manageDataRoutes(api)
 }
 
 func DoScansHandler(w http.ResponseWriter, r *http.Request) {

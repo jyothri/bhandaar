@@ -27,6 +27,7 @@ const tabs = [
   { to: "/", label: "Browse" },
   { to: "/request", label: "Request" },
   { to: "/requests", label: "Request History" },
+  { to: "/manage-data", label: "Manage data" },
 ] as const;
 
 // Which tab a page belongs to: a scan's page is part of Request History.

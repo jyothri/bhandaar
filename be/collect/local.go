@@ -15,23 +15,12 @@ import (
 )
 
 func LocalDrive(localScan LocalScan, userID int64) (int, error) {
-	// Phase 1: Create scan record (synchronous)
-	scanId, err := db.LogStartScan("local", userID)
+	// Phase 1: Create scan record, with what it covers (synchronous)
+	path := localScan.Path
+	scanId, err := startScan("local", userID, db.ScanMeta{SearchPath: "dir=" + path})
 	if err != nil {
 		return 0, fmt.Errorf("failed to start local scan (path=%s): %w", localScan.Path, err)
 	}
-
-	path := localScan.Path
-
-	// Save metadata in background
-	go func() {
-		if err := db.SaveScanMetadata("", "", "dir="+path, "", scanId); err != nil {
-			slog.Error("Failed to save scan metadata",
-				"scan_id", scanId,
-				"path", path,
-				"error", err)
-		}
-	}()
 
 	// Phase 2: Start collection in background (asynchronous)
 	scanData := make(chan db.FileData, 10)

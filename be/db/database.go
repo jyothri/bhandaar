@@ -466,7 +466,10 @@ func migrateDB() error {
 	if err := migrateGcs(); err != nil {
 		return err
 	}
-	return migrateBrowseTotals()
+	if err := migrateBrowseTotals(); err != nil {
+		return err
+	}
+	return migrateDeletions()
 }
 
 // migrateDropCompletedAt drops scans.completed_at. Nothing ever set it, so

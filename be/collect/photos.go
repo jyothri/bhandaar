@@ -349,16 +349,14 @@ func scanPick(p pick) {
 			slog.Error("Failed to end Photos picking session", "error", err)
 		}
 	}()
-	scanId, err := db.LogStartScan("google_photos", p.userID)
+	scanId, err := startScan("google_photos", p.userID, db.ScanMeta{Name: p.account.Name,
+		ClientKey: p.account.ClientKey, SearchPath: "Picked in Google Photos"})
 	if err != nil {
 		slog.Error("Failed to start Photos scan", "client_key", p.account.ClientKey, "error", err)
 		return
 	}
 	if _, err := db.MovePickerSession(p.key, db.PickScanning, db.PickScanning, scanId); err != nil {
 		slog.Error("Failed to record the Photos scan's session", "scan_id", scanId, "error", err)
-	}
-	if err := db.SaveScanMetadata(p.account.Name, p.account.ClientKey, "Picked in Google Photos", "", scanId); err != nil {
-		slog.Error("Failed to save scan metadata", "scan_id", scanId, "error", err)
 	}
 	items, err := collectPicked(p.client, p.pickerId, scanId, p.account.ClientKey)
 	if err == nil {
