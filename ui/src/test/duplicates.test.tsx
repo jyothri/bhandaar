@@ -53,14 +53,15 @@ const member = (source: string, path: string, extra = {}) => ({
   files: 1,
   modified: "2026-09-01T10:00:00Z",
   physical_drive: null,
+  shared: false,
   ...extra,
 });
 
 const groupsPage = {
   groups: [
     {
-      id: 11,
       kind: "file",
+      key: "md5:big:2147483648",
       name: "big.iso",
       size: 2 * 1024 ** 3,
       files: 1,
@@ -74,8 +75,8 @@ const groupsPage = {
       ),
     },
     {
-      id: 12,
       kind: "file",
+      key: "md5:same:50",
       name: "same.bin",
       size: 50,
       files: 1,
@@ -85,7 +86,11 @@ const groupsPage = {
       sources: [s1, s2],
       match: "",
       members: [
-        member(drive, "My Drive/same.bin", { item: "fileid1", folder: "A" }),
+        member(drive, "My Drive/same.bin", {
+          item: "fileid1",
+          folder: "A",
+          shared: true,
+        }),
       ],
     },
   ],
@@ -97,11 +102,13 @@ const groupsPage = {
 
 let summaryReply: object;
 let groupQueries: URLSearchParams[];
+let memberQueries: URLSearchParams[];
 
 beforeEach(() => {
   stubEventSource();
   summaryReply = summary();
   groupQueries = [];
+  memberQueries = [];
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (input) => {
     const url = new URL(String(input));
@@ -115,7 +122,8 @@ beforeEach(() => {
       groupQueries.push(url.searchParams);
       return json(200, groupsPage);
     }
-    if (url.pathname === "/api/duplicates/groups/11/members") {
+    if (url.pathname === "/api/duplicates/members") {
+      memberQueries.push(url.searchParams);
       return json(200, {
         members: Array.from({ length: 12 }, (_, i) =>
           member(s1, `all/big${i}.iso`)
@@ -158,6 +166,7 @@ describe("Duplicates", () => {
       await screen.findByRole("button", { name: /same\.bin/ })
     );
     const copy = screen.getByText("My Drive/same.bin").closest("li")!;
+    expect(within(copy).getByText("Shared with you")).toBeInTheDocument();
     expect(within(copy).getByRole("link", { name: "Browse" })).toHaveAttribute(
       "href",
       "/?source=google%3Ak1&service=drive&folder=A"
@@ -173,6 +182,9 @@ describe("Duplicates", () => {
       screen.getByRole("button", { name: "Show 2 more copies" })
     );
     expect(await screen.findByText("all/big11.iso")).toBeInTheDocument();
+    expect(memberQueries[0].toString()).toBe(
+      "kind=file&key=md5%3Abig%3A2147483648&page=1"
+    );
     expect(screen.queryByText("iso/big0.iso")).not.toBeInTheDocument();
   });
 
@@ -206,6 +218,33 @@ describe("Duplicates", () => {
       screen.getByText(/They hold Google Docs, Sheets or Slides/)
     ).toBeInTheDocument();
     expect(groupQueries[0].get("kind")).toBe("folder");
+  });
+
+  it("shows a failed build, with the index it kept", async () => {
+    summaryReply = summary({
+      error: "pq: out of memory",
+      failed_at: new Date(Date.now() - 2 * 60_000).toISOString(),
+    });
+    renderRoute("/duplicates");
+    expect(
+      await screen.findByText("Couldn't update 2m ago: pq: out of memory")
+    ).toBeInTheDocument();
+    expect(await screen.findByText("big.iso")).toBeInTheDocument();
+  });
+
+  it("shows a failed first build instead of waiting for it", async () => {
+    summaryReply = summary({
+      built_at: null,
+      error: "pq: out of memory",
+      failed_at: new Date().toISOString(),
+    });
+    renderRoute("/duplicates");
+    expect(
+      await screen.findByText(
+        "Couldn't find your duplicates: pq: out of memory"
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Finding your duplicates/)).toBeNull();
   });
 
   it("says so while the first build runs", async () => {

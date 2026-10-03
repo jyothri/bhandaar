@@ -70,7 +70,6 @@ func migrateDriveItems() error {
 		`ALTER TABLE drive_items ADD COLUMN IF NOT EXISTS capture_time TIMESTAMP`,
 		`ALTER TABLE drive_items ADD COLUMN IF NOT EXISTS width INT`,
 		`ALTER TABLE drive_items ADD COLUMN IF NOT EXISTS height INT`,
-		`CREATE INDEX IF NOT EXISTS drive_items_md5 ON drive_items (client_key, md5) WHERE md5 <> ''`,
 		// Per account: its My Drive folder, and when a scan last finished.
 		`CREATE TABLE IF NOT EXISTS drive_accounts (
 			client_key   VARCHAR(100) PRIMARY KEY,

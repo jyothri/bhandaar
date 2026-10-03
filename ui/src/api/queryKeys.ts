@@ -35,6 +35,7 @@ export const queryKeys = {
   duplicates: ["duplicates"] as const,
   dupSummary: ["duplicates", "summary"] as const,
   dupGroups: (filter: DupFilter) => ["duplicates", "groups", filter] as const,
-  dupMembers: (groupId: number, page: number) =>
-    ["duplicates", "members", groupId, page] as const,
+  // builtAt: the index's, so a rebuild reloads them.
+  dupMembers: (kind: string, key: string, page: number, builtAt: string) =>
+    ["duplicates", "members", kind, key, page, builtAt] as const,
 };

@@ -33,8 +33,12 @@ export type DupSummary = {
   uncomparable: Uncomparable[];
   // null until the first build.
   built_at: string | null;
+  // A build is running (or the first is about to).
   updating: boolean;
   took_ms: number;
+  // Why the last build failed, and when: the index shown, if any, is older.
+  error?: string;
+  failed_at?: string;
 };
 
 /** One copy. */
@@ -52,11 +56,14 @@ export type DupMember = {
   files: number;
   modified: string | null;
   physical_drive: number | null;
+  // Shared with the user, not theirs: not counted as reclaimable.
+  shared: boolean;
 };
 
 export type DupGroup = {
-  id: number;
   kind: DupKind;
+  // With kind, names the group across rebuilds of the index.
+  key: string;
   name: string;
   // One copy's.
   size: number;

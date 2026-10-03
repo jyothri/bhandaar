@@ -45,11 +45,11 @@ func dupAgentFiles(t *testing.T, drive int64, files ...dupFile) {
 // buildDups builds user's index, failing the test on an error.
 func buildDups(t *testing.T, user int64) {
 	t.Helper()
-	fingerprint, err := dupFingerprint(user)
+	google, agent, err := dupFingerprint(user)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := BuildDuplicates(user, fingerprint); err != nil {
+	if err := BuildDuplicates(user, google+":"+agent); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -212,11 +212,11 @@ func TestDuplicateFiles(t *testing.T) {
 		t.Errorf("by source = %+v", summary.BySource)
 	}
 
-	members, err := GetDupMembers(alice, page.Groups[0].Id, 1)
+	members, err := GetDupMembers(alice, DupFile, page.Groups[0].Key, 1)
 	if err != nil || members.Total != 3 || len(members.Members) != 3 {
 		t.Errorf("members = %+v, %v", members, err)
 	}
-	if _, err := GetDupMembers(bob, page.Groups[0].Id, 1); err != ErrNotFound {
+	if _, err := GetDupMembers(bob, DupFile, page.Groups[0].Key, 1); err != ErrNotFound {
 		t.Errorf("bob reading alice's group: err = %v, want ErrNotFound", err)
 	}
 }
@@ -280,11 +280,11 @@ func TestSignerIgnoresOrderButNotNames(t *testing.T) {
 		s := newSigner("src", "Source", sql.NullInt64{})
 		for _, f := range files {
 			path, key, _ := strings.Cut(f, "=")
-			s.add(path, key, 1)
+			s.add(path, key, 1, true)
 		}
 		sigs := map[string]string{}
 		for _, f := range s.finish() {
-			sigs[f.path] = f.sig
+			sigs[f.key] = f.sig
 		}
 		return sigs
 	}
@@ -372,41 +372,181 @@ func TestLikelyDuplicatePhotos(t *testing.T) {
 	}
 }
 
+// useDupBuilder gives a test the builder's own state, and quiet and retry
+// periods of an hour; quiet makes a user's agent drives look still since
+// then.
+func useDupBuilder(t *testing.T) (quiet func(user int64)) {
+	t.Helper()
+	seen, agentQuiet, retryAfter := dupAgentSeen, dupAgentQuiet, dupRetryAfter
+	dupAgentSeen, dupAgentQuiet, dupRetryAfter = map[int64]agentSeen{}, time.Hour, time.Hour
+	t.Cleanup(func() { dupAgentSeen, dupAgentQuiet, dupRetryAfter = seen, agentQuiet, retryAfter })
+	return func(user int64) {
+		s := dupAgentSeen[user]
+		s.since = s.since.Add(-2 * time.Hour)
+		dupAgentSeen[user] = s
+	}
+}
+
 func TestDuplicatesRebuildWhenTheirInputsChange(t *testing.T) {
 	browseMigrated(t)
+	quiet := useDupBuilder(t)
 	alice := addUser(t, "alice")
+	linkDrive(t, alice, "sub-a", "k1")
 	drive := agentDrive(t, alice, "11111111-1111-1111-1111-111111111111", "optiplex", "seagate1")
 	dupAgentFiles(t, drive, dupFile{path: "a", size: 1, blake3: "k"}, dupFile{path: "b", size: 1, blake3: "k"})
 
-	builtAt := func() time.Time {
+	summary := func() DupSummary {
+		t.Helper()
 		s, err := GetDupSummary(alice)
 		if err != nil || s.BuiltAt == nil {
 			t.Fatalf("summary = %+v, %v", s, err)
 		}
-		return *s.BuiltAt
+		return s
 	}
-	checkDuplicates(context.Background())
+	builtAt := func() time.Time { return *summary().BuiltAt }
+	check := func() { checkDuplicates(context.Background()) }
+
+	// The first build doesn't wait for anything.
+	check()
 	first := builtAt()
-	checkDuplicates(context.Background())
-	if builtAt() != first {
+	check()
+	if !builtAt().Equal(first) {
 		t.Error("an unchanged index was rebuilt")
 	}
-	// An upload raises the drive's version.
+
+	// While a drive uploads, its changes wait until it's been still a while.
 	dupAgentFiles(t, drive, dupFile{path: "c", size: 1, blake3: "k"})
-	checkDuplicates(context.Background())
-	if builtAt() == first {
-		t.Error("the index wasn't rebuilt after an upload")
+	check()
+	dupAgentFiles(t, drive, dupFile{path: "d", size: 1, blake3: "other"})
+	check()
+	check()
+	if !builtAt().Equal(first) {
+		t.Error("the index was rebuilt while a drive was uploading")
+	}
+	quiet(alice)
+	check()
+	if builtAt().Equal(first) {
+		t.Error("the index wasn't rebuilt once the drive was still")
 	}
 	if got := dupGroups(t, alice, DupFilter{Kind: DupFile}); len(got) != 1 || !strings.HasPrefix(got[0], "a 1x3 2:") {
 		t.Errorf("groups after the upload = %v", got)
 	}
-	// So does a physical drive's match.
+
+	// A Google scan ending rebuilds at once, uploads or not.
 	second := builtAt()
+	dupAgentFiles(t, drive, dupFile{path: "e", size: 1, blake3: "k"})
+	driveScan(t, alice, wholeDrive, false, driveFile("f1", myDrive, "f1", 5))
+	check()
+	if builtAt().Equal(second) {
+		t.Error("the index wasn't rebuilt after a Drive scan")
+	}
+
+	// A physical drive's match is the agent's, so it waits too.
+	third := builtAt()
 	if _, err := db.Exec(`UPDATE agent_drives SET physical_drive_id = 3`); err != nil {
 		t.Fatal(err)
 	}
-	checkDuplicates(context.Background())
-	if builtAt() == second {
+	check()
+	if !builtAt().Equal(third) {
+		t.Error("a drive's match didn't wait")
+	}
+	quiet(alice)
+	check()
+	if builtAt().Equal(third) {
 		t.Error("the index wasn't rebuilt after a drive was matched")
+	}
+
+	// A failed build is shown, the old index kept, and not retried for a
+	// while.
+	fourth := builtAt()
+	if _, err := db.Exec(`ALTER TABLE gcs_objects RENAME TO gcs_objects_away`); err != nil {
+		t.Fatal(err)
+	}
+	driveScan(t, alice, wholeDrive, false, driveFile("f2", myDrive, "f2", 6))
+	check()
+	s := summary()
+	if !s.BuiltAt.Equal(fourth) || s.Error == "" || s.FailedAt == nil || s.Updating || s.Groups[DupFile] != 1 {
+		t.Fatalf("summary after a failed build = %+v", s)
+	}
+	failedAt := *s.FailedAt
+	check()
+	if s := summary(); !s.FailedAt.Equal(failedAt) {
+		t.Error("a failed build was retried at once")
+	}
+	if _, err := db.Exec(`ALTER TABLE gcs_objects_away RENAME TO gcs_objects`); err != nil {
+		t.Fatal(err)
+	}
+	dupRetryAfter = 0
+	check()
+	if s := summary(); s.BuiltAt.Equal(fourth) || s.Error != "" || s.FailedAt != nil {
+		t.Errorf("summary after the retry = %+v", s)
+	}
+}
+
+func TestDriveFoldersOfOneNameStayApart(t *testing.T) {
+	browseMigrated(t)
+	alice := addUser(t, "alice")
+	linkDrive(t, alice, "sub-a", "k1")
+	file := func(id, parent, name, md5 string) DriveItem {
+		f := driveFile(id, parent, name, 10)
+		f.Md5 = strings.Repeat(md5, 32)
+		return f
+	}
+	// Two folders called Photos in My Drive, and one with a "/" in its name.
+	driveScan(t, alice, wholeDrive, false,
+		dir("P1", myDrive, "Photos"), dir("P2", myDrive, "Photos"), dir("S", myDrive, "a/b"),
+		file("x", "P1", "a.jpg", "1"), file("y", "P2", "b.jpg", "2"), file("z", "S", "c.jpg", "3"))
+	drive := agentDrive(t, alice, "11111111-1111-1111-1111-111111111111", "optiplex", "seagate1")
+	dupAgentFiles(t, drive,
+		dupFile{path: "Photos/a.jpg", size: 10, md5: strings.Repeat("1", 32)},
+		dupFile{path: "Pics/b.jpg", size: 10, md5: strings.Repeat("2", 32)},
+		dupFile{path: "Slash/c.jpg", size: 10, md5: strings.Repeat("3", 32)})
+	buildDups(t, alice)
+
+	page, err := GetDupGroups(alice, DupFilter{Kind: DupFolder}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, g := range page.Groups {
+		for _, m := range g.Members {
+			if m.Source == "google:k1:drive" {
+				got[m.Item] = g.Name + " " + m.Path + " " + itoa(m.Files)
+			}
+		}
+	}
+	want := map[string]string{"P1": "Photos My Drive/Photos 1", "P2": "Photos My Drive/Photos 1", "S": "a/b My Drive/a/b 1"}
+	if len(got) != len(want) || got["P1"] != want["P1"] || got["P2"] != want["P2"] || got["S"] != want["S"] {
+		t.Errorf("Drive folders matched = %v, want %v", got, want)
+	}
+}
+
+func TestSharedCopiesAreNotReclaimable(t *testing.T) {
+	browseMigrated(t)
+	alice := addUser(t, "alice")
+	linkDrive(t, alice, "sub-a", "k1")
+	shared := driveFile("s1", "someone-elses", "s.bin", 100)
+	shared.Md5, shared.OwnedByMe = strings.Repeat("5", 32), false
+	driveScan(t, alice, wholeDrive, false, shared)
+	one := agentDrive(t, alice, "11111111-1111-1111-1111-111111111111", "optiplex", "seagate1")
+	dupAgentFiles(t, one, dupFile{path: "s.bin", size: 100, md5: strings.Repeat("5", 32)})
+	buildDups(t, alice)
+
+	page, _ := GetDupGroups(alice, DupFilter{Kind: DupFile}, 1)
+	if len(page.Groups) != 1 || page.Groups[0].Copies != 2 || page.Groups[0].Reclaimable != 0 {
+		t.Fatalf("groups = %+v; want 2 copies, nothing reclaimable", page.Groups)
+	}
+	for _, m := range page.Groups[0].Members {
+		if m.Shared != (m.Source == "google:k1:drive") {
+			t.Errorf("copy %s shared = %v", m.Source, m.Shared)
+		}
+	}
+
+	// A second copy of her own is reclaimable.
+	two := agentDrive(t, alice, "11111111-1111-1111-1111-111111111111", "optiplex", "seagate2")
+	dupAgentFiles(t, two, dupFile{path: "s.bin", size: 100, md5: strings.Repeat("5", 32)})
+	buildDups(t, alice)
+	if page, _ := GetDupGroups(alice, DupFilter{Kind: DupFile}, 1); page.Groups[0].Reclaimable != 100 {
+		t.Errorf("with two copies of her own, reclaimable = %d, want 100", page.Groups[0].Reclaimable)
 	}
 }

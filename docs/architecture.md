@@ -170,7 +170,7 @@ Every route but health and login/logout needs a logged-in user (see [Web authent
 | `/api/browse/google/{client_key}/gcs/children` | GET | A page (200) of the account's Cloud Storage record: its buckets (`?folder=` empty), or a prefix's subfolders then object versions (`?folder=<bucket>/<prefix>`), each largest first, with the folder's totals by state and class |
 | `/api/duplicates/summary` | GET | The user's duplicates: reclaimable bytes, groups by kind, bytes per source, folders that couldn't be compared, when the index was built and whether it's being rebuilt |
 | `/api/duplicates/groups` | GET | A page (50) of groups, largest reclaimable first (`?kind=file|folder|photo&source=&across=1&min_size=&hide_same_physical=1&page=`), each with up to 10 copies |
-| `/api/duplicates/groups/{id}/members` | GET | A page (200) of one group's copies; another user's group answers 404 |
+| `/api/duplicates/members` | GET | A page (200) of one group's copies (`?kind=&key=&page=`: groups are named by kind and key, which survive rebuilds); a group not in the user's index answers 404 |
 
 Browse routes answer 404 for a source that isn't the user's. See [archive/browse.md](archive/browse.md).
 

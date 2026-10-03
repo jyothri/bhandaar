@@ -1,6 +1,7 @@
 package web
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -24,6 +25,16 @@ func TestDupFilter(t *testing.T) {
 		got, ok := dupFilter(httptest.NewRequest("GET", "/api/duplicates/groups?"+c.query, nil))
 		if ok != c.ok || (ok && got != c.want) {
 			t.Errorf("%q: %+v, %v; want %+v, %v", c.query, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+func TestDupMembersNeedsAKindAndKey(t *testing.T) {
+	for _, query := range []string{"", "kind=file", "key=md5:x:1", "kind=gmail&key=x"} {
+		w := httptest.NewRecorder()
+		DupMembersHandler(w, httptest.NewRequest("GET", "/api/duplicates/members?"+query, nil))
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%q: %d, want 400", query, w.Code)
 		}
 	}
 }

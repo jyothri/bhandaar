@@ -34,7 +34,7 @@ const (
 
 // dupRulesVersion is part of every user's fingerprint: raising it, when
 // the rules below change, rebuilds every index.
-const dupRulesVersion = "1"
+const dupRulesVersion = "2"
 
 // systemFiles matches paths whose last part is a file the index leaves
 // out: .DS_Store, Thumbs.db, desktop.ini, macOS's Icon\r and resource
@@ -70,19 +70,28 @@ func migrateDuplicates() error {
 			size           BIGINT NOT NULL,
 			files          BIGINT NOT NULL DEFAULT 1,
 			modified       TIMESTAMPTZ,
-			physical_drive BIGINT
+			physical_drive BIGINT,
+			shared         BOOLEAN NOT NULL DEFAULT false
 		)`,
 		`CREATE INDEX IF NOT EXISTS dup_members_group ON dup_members (group_id)`,
 		`CREATE TABLE IF NOT EXISTS dup_state (
-			user_id      BIGINT PRIMARY KEY REFERENCES agent_users(id),
-			fingerprint  TEXT NOT NULL DEFAULT '',
-			built_at     TIMESTAMPTZ,
-			building     BOOLEAN NOT NULL DEFAULT false,
-			took_ms      BIGINT NOT NULL DEFAULT 0,
-			uncomparable JSONB NOT NULL DEFAULT '[]',
-			by_source    JSONB NOT NULL DEFAULT '[]',
-			error        TEXT NOT NULL DEFAULT ''
+			user_id            BIGINT PRIMARY KEY REFERENCES agent_users(id),
+			fingerprint        TEXT NOT NULL DEFAULT '',
+			built_at           TIMESTAMPTZ,
+			building           BOOLEAN NOT NULL DEFAULT false,
+			took_ms            BIGINT NOT NULL DEFAULT 0,
+			uncomparable       JSONB NOT NULL DEFAULT '[]',
+			by_source          JSONB NOT NULL DEFAULT '[]',
+			counts             JSONB NOT NULL DEFAULT '{}',
+			error              TEXT NOT NULL DEFAULT '',
+			failed_at          TIMESTAMPTZ,
+			failed_fingerprint TEXT NOT NULL DEFAULT ''
 		)`,
+		// Added after the first version, which dev stacks may have.
+		`ALTER TABLE dup_members ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT false`,
+		`ALTER TABLE dup_state ADD COLUMN IF NOT EXISTS counts JSONB NOT NULL DEFAULT '{}'`,
+		`ALTER TABLE dup_state ADD COLUMN IF NOT EXISTS failed_at TIMESTAMPTZ`,
+		`ALTER TABLE dup_state ADD COLUMN IF NOT EXISTS failed_fingerprint TEXT NOT NULL DEFAULT ''`,
 		// A build cut off by a restart runs again at the first check.
 		`UPDATE dup_state SET building = false WHERE building`,
 	}
@@ -127,6 +136,27 @@ func DuplicatesBuilder(ctx context.Context, interval time.Duration) {
 	}
 }
 
+// While an agent drive syncs, its acked version moves with every batch, and
+// the index would be rebuilt from a half-synced drive at every check. So a
+// change to agent drives alone rebuilds only once it has held still for
+// dupAgentQuiet, since the previous periodic check; a change to Google
+// sources (a scan or deletion ending) rebuilds at once, with the agent
+// drives as they are. A fingerprint whose build failed isn't tried again
+// for dupRetryAfter. Tests change both.
+var (
+	dupAgentQuiet = 5 * time.Minute
+	dupRetryAfter = time.Hour
+)
+
+// dupAgentSeen is, per user, the agent part of the fingerprint the builder
+// last saw, and since when. Only the builder's goroutine uses it.
+var dupAgentSeen = map[int64]agentSeen{}
+
+type agentSeen struct {
+	fingerprint string
+	since       time.Time
+}
+
 func checkDuplicates(ctx context.Context) {
 	var users []int64
 	if err := db.Select(&users, `SELECT id FROM agent_users ORDER BY id`); err != nil {
@@ -137,18 +167,39 @@ func checkDuplicates(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		fingerprint, err := dupFingerprint(user)
+		google, agent, err := dupFingerprint(user)
 		if err != nil {
 			slog.Error("Failed to fingerprint the duplicates index", "user", user, "error", err)
 			continue
 		}
-		var built string
-		err = db.Get(&built, `SELECT fingerprint FROM dup_state WHERE user_id = $1 AND built_at IS NOT NULL`, user)
-		if err == nil && built == fingerprint {
-			continue
+		fingerprint := google + ":" + agent
+		var state struct {
+			Fingerprint string     `db:"fingerprint"`
+			Built       bool       `db:"built"`
+			Failed      string     `db:"failed_fingerprint"`
+			FailedAt    *time.Time `db:"failed_at"`
 		}
+		err = db.Get(&state, `SELECT fingerprint, built_at IS NOT NULL AS built, failed_fingerprint, failed_at
+			FROM dup_state WHERE user_id = $1`, user)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			slog.Error("Failed to read the duplicates index's state", "user", user, "error", err)
+			continue
+		}
+		now := time.Now()
+		seen := dupAgentSeen[user]
+		if seen.fingerprint != agent {
+			seen = agentSeen{agent, now}
+			dupAgentSeen[user] = seen
+		}
+		builtGoogle, builtAgent, _ := strings.Cut(state.Fingerprint, ":")
+		switch {
+		case !state.Built: // the first build doesn't wait
+		case builtGoogle != google:
+		case builtAgent != agent && now.Sub(seen.since) >= dupAgentQuiet:
+		default:
+			continue
+		}
+		if state.Failed == fingerprint && state.FailedAt != nil && now.Sub(*state.FailedAt) < dupRetryAfter {
 			continue
 		}
 		if err := BuildDuplicates(user, fingerprint); err != nil {
@@ -157,29 +208,37 @@ func checkDuplicates(ctx context.Context) {
 	}
 }
 
-// dupFingerprint is what userID's index is built from: every agent drive's
-// acked version (it moves with every upload) and physical drive, every Drive record's and bucket's last
-// update, the user's Photos scans, and the rules' version.
-func dupFingerprint(userID int64) (string, error) {
+// dupFingerprint is what userID's index is built from, in two parts. The
+// Google part: every Drive record's and bucket's last update, the user's
+// Photos scans, the accounts' names, and the rules' version. The agent
+// part: every agent drive's acked version (it moves with every upload),
+// physical drive, and name.
+func dupFingerprint(userID int64) (google string, agent string, err error) {
 	var parts []sql.NullString
-	err := db.Select(&parts, `SELECT * FROM (VALUES
-		((SELECT string_agg(d.id || ':' || COALESCE(d.physical_drive_id, 0) || ':' || d.acked_version, ',' ORDER BY d.id)
+	err = db.Select(&parts, `SELECT * FROM (VALUES
+		((SELECT string_agg(d.id || ':' || COALESCE(d.physical_drive_id, 0) || ':' || d.acked_version || ':' ||
+				d.drive_id || ':' || COALESCE(a.hostname, ''), ',' ORDER BY d.id)
 			FROM agent_drives d JOIN agent_agents a ON a.id = d.agent_id WHERE a.user_id = $1)),
 		((SELECT string_agg(a.client_key || ':' || a.updated_at, ',' ORDER BY a.client_key)
 			FROM drive_accounts a JOIN privatetokens p ON p.client_key = a.client_key WHERE p.user_id = $1)),
 		((SELECT string_agg(b.client_key || '/' || b.bucket || ':' || b.updated_at, ',' ORDER BY b.client_key, b.bucket)
 			FROM gcs_buckets b JOIN privatetokens p ON p.client_key = b.client_key WHERE p.user_id = $1)),
-		((SELECT max(s.id) || ':' || count(*) FROM scans s WHERE s.user_id = $1 AND s.scan_type = 'google_photos'))
+		((SELECT max(s.id) || ':' || count(*) FROM scans s WHERE s.user_id = $1 AND s.scan_type = 'google_photos')),
+		((SELECT string_agg(client_key || ':' || COALESCE(display_name, ''), ',' ORDER BY client_key)
+			FROM privatetokens WHERE user_id = $1))
 	) v`, userID)
 	if err != nil {
-		return "", fmt.Errorf("failed to fingerprint the duplicates index of user %d: %w", userID, err)
+		return "", "", fmt.Errorf("failed to fingerprint the duplicates index of user %d: %w", userID, err)
 	}
-	h := sha256.New()
-	fmt.Fprint(h, dupRulesVersion)
-	for _, p := range parts {
-		fmt.Fprint(h, "|", p.String)
+	hash := func(parts ...sql.NullString) string {
+		h := sha256.New()
+		fmt.Fprint(h, dupRulesVersion)
+		for _, p := range parts {
+			fmt.Fprint(h, "|", p.String)
+		}
+		return hex.EncodeToString(h.Sum(nil))
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return hash(parts[1:]...), hash(parts[0]), nil
 }
 
 // dupBuildMu keeps builds one at a time.
@@ -187,32 +246,21 @@ var dupBuildMu sync.Mutex
 
 // BuildDuplicates rebuilds userID's index from scratch, replacing the old
 // one in one transaction, and records fingerprint as what it was built
-// from.
+// from. A failure is recorded in dup_state, for the page.
 func BuildDuplicates(userID int64, fingerprint string) error {
 	dupBuildMu.Lock()
 	defer dupBuildMu.Unlock()
-	start := time.Now()
 	if _, err := db.Exec(`INSERT INTO dup_state (user_id, building) VALUES ($1, true)
 		ON CONFLICT (user_id) DO UPDATE SET building = true`, userID); err != nil {
 		return fmt.Errorf("failed to mark the duplicates index as building: %w", err)
 	}
-	uncomparable, phases, err := buildDuplicates(userID)
+	took, phases, err := buildDuplicates(userID, fingerprint)
 	if err != nil {
-		db.Exec(`UPDATE dup_state SET building = false, error = $2 WHERE user_id = $1`, userID, err.Error())
+		if _, dbErr := db.Exec(`UPDATE dup_state SET building = false, error = $2, failed_at = now(),
+				failed_fingerprint = $3 WHERE user_id = $1`, userID, err.Error(), fingerprint); dbErr != nil {
+			slog.Error("Failed to record a failed duplicates build", "user", userID, "error", dbErr)
+		}
 		return err
-	}
-	encoded, _ := json.Marshal(uncomparable)
-	took := time.Since(start)
-	if _, err := db.Exec(`UPDATE dup_state SET fingerprint = $2, built_at = now(), building = false,
-			took_ms = $3, uncomparable = $4, error = '',
-			by_source = (SELECT COALESCE(jsonb_agg(s ORDER BY s.bytes DESC, s.source), '[]') FROM (
-				SELECT m.source, min(m.label) AS label, sum(m.size) AS bytes, count(*) AS files
-				FROM dup_members m JOIN dup_groups g ON g.id = m.group_id
-				WHERE g.user_id = $1 AND g.kind = 'file' AND NOT g.same_physical
-				GROUP BY m.source) s)
-			WHERE user_id = $1`,
-		userID, fingerprint, took.Milliseconds(), encoded); err != nil {
-		return fmt.Errorf("failed to record the duplicates index: %w", err)
 	}
 	slog.Info("Built the duplicates index", "user", userID, "took", took, "phases", phases)
 	return nil
@@ -227,14 +275,17 @@ type Uncomparable struct {
 	Reason  string `json:"reason"`
 }
 
-func buildDuplicates(userID int64) ([]Uncomparable, string, error) {
+// buildDuplicates writes userID's index, and its state, in one transaction,
+// and returns how long it took, overall and by phase.
+func buildDuplicates(userID int64, fingerprint string) (time.Duration, string, error) {
+	start := time.Now()
 	// A connection of its own, closed after: the temp tables need more
 	// local buffers than the default 8 MB, which a session can only set
 	// before its first temp table, and keeps once allocated.
 	ctx := context.Background()
 	conn, err := db.Connx(ctx)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get a connection: %w", err)
+		return 0, "", fmt.Errorf("failed to get a connection: %w", err)
 	}
 	defer func() {
 		conn.Raw(func(any) error { return driver.ErrBadConn })
@@ -245,7 +296,7 @@ func buildDuplicates(userID int64) ([]Uncomparable, string, error) {
 	}
 	tx, err := conn.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to begin transaction: %w", err)
+		return 0, "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 	// How long each phase took, for the log.
@@ -256,10 +307,10 @@ func buildDuplicates(userID int64) ([]Uncomparable, string, error) {
 		last = time.Now()
 	}
 	if _, err := tx.Exec(`SET LOCAL work_mem = '256MB'`); err != nil {
-		return nil, "", err
+		return 0, "", err
 	}
 	if err := gatherDupFiles(tx, userID); err != nil {
-		return nil, "", err
+		return 0, "", err
 	}
 	phase("gather")
 	// Members first: their foreign key's cascade would delete them a row
@@ -269,38 +320,65 @@ func buildDuplicates(userID int64) ([]Uncomparable, string, error) {
 		`DELETE FROM dup_groups WHERE user_id = $1`,
 	} {
 		if _, err := tx.Exec(stmt, userID); err != nil {
-			return nil, "", fmt.Errorf("failed to clear the old index: %w", err)
+			return 0, "", fmt.Errorf("failed to clear the old index: %w", err)
 		}
 	}
 	phase("clear")
 	if err := writeFileGroups(tx, userID); err != nil {
-		return nil, "", err
+		return 0, "", err
 	}
 	phase("files")
 	uncomparable, err := buildFolderGroups(tx, userID)
 	if err != nil {
-		return nil, "", err
+		return 0, "", err
 	}
 	phase("folders")
 	if err := buildPhotoGroups(tx, userID); err != nil {
-		return nil, "", err
+		return 0, "", err
 	}
 	phase("photos")
+	encoded, err := json.Marshal(uncomparable)
+	if err != nil {
+		return 0, "", err
+	}
+	// The state commits with the groups, so the page's totals always match
+	// the index.
+	if _, err := tx.Exec(`UPDATE dup_state SET fingerprint = $2, built_at = now(), building = false,
+			took_ms = $3, uncomparable = $4, error = '', failed_at = NULL, failed_fingerprint = '',
+			by_source = (SELECT COALESCE(jsonb_agg(s ORDER BY s.bytes DESC, s.source), '[]') FROM (
+				SELECT m.source, min(m.label) AS label, sum(m.size) AS bytes, count(*) AS files
+				FROM dup_members m JOIN dup_groups g ON g.id = m.group_id
+				WHERE g.user_id = $1 AND g.kind = 'file' AND NOT g.same_physical
+				GROUP BY m.source) s),
+			counts = (SELECT COALESCE(jsonb_object_agg(kind, jsonb_build_object('all', n,
+					'hide_same_physical', apart, 'across', across, 'reclaimable', reclaimable)), '{}') FROM (
+				SELECT kind, count(*) AS n, count(*) FILTER (WHERE NOT same_physical) AS apart,
+					count(*) FILTER (WHERE cardinality(sources) > 1 AND NOT same_physical) AS across,
+					sum(reclaimable) AS reclaimable
+				FROM dup_groups WHERE user_id = $1 GROUP BY kind) c)
+		WHERE user_id = $1`, userID, fingerprint, time.Since(start).Milliseconds(), encoded); err != nil {
+		return 0, "", fmt.Errorf("failed to record the duplicates index: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
-		return nil, "", fmt.Errorf("failed to commit the duplicates index: %w", err)
+		return 0, "", fmt.Errorf("failed to commit the duplicates index: %w", err)
 	}
 	phase("commit")
-	return uncomparable, strings.Join(phases, ", "), nil
+	return time.Since(start), strings.Join(phases, ", "), nil
 }
 
 // gatherDupFiles collects every live file of userID's sources, with its
-// key (” when it has no content hash, e.g. a Google Doc), into the temp
+// key (empty when it has no content hash, e.g. a Google Doc), into the temp
 // table dup_files, and the sources' names into dup_sources. Paths are as
 // Browse shows them: Drive's from "My Drive" or "Shared with me", Cloud
 // Storage's the object's name in its bucket, an agent drive's relative to
 // its root. dup_files is kept narrow, as it's read a few times over: a
 // file's name, and for most sources its item and folder, come from its
 // path (dupNameSQL, dupItemSQL, dupFolderSQL).
+//
+// Drive allows folders of the same name in one folder, so its paths don't
+// identify folders. A Drive file's sign is its path for signing folders,
+// with each folder as "<name>\x01<ID>" and any "/" in a name as "∕"; see
+// signer. Others sign by their path.
 func gatherDupFiles(tx *sqlx.Tx, userID int64) error {
 	statements := []string{
 		`CREATE TEMP TABLE dup_sources ON COMMIT DROP AS
@@ -313,47 +391,56 @@ func gatherDupFiles(tx *sqlx.Tx, userID int64) error {
 		UNION ALL
 		SELECT 'agent:' || d.id, d.drive_id || ' (' || COALESCE(a.hostname, '') || ')', d.physical_drive_id
 		FROM agent_drives d JOIN agent_agents a ON a.id = d.agent_id AND a.user_id = $1`,
+		// A folder reachable two ways (an item with several parents) takes
+		// its shallowest, then first, path, the same at every build.
 		`CREATE TEMP TABLE dup_drive_folders ON COMMIT DROP AS
 		WITH RECURSIVE acct AS (
 			SELECT p.client_key, a.my_drive_id FROM privatetokens p
 			JOIN drive_accounts a ON a.client_key = p.client_key WHERE p.user_id = $1
-		), folders (client_key, file_id, path, depth) AS (
-			SELECT i.client_key, i.file_id,
-				CASE WHEN i.parent_id = a.my_drive_id THEN 'My Drive/' ELSE 'Shared with me/' END || i.name, 0
-			FROM drive_items i JOIN acct a ON a.client_key = i.client_key
+		), folders (client_key, file_id, name, path, sign, depth) AS (
+			SELECT i.client_key, i.file_id, i.name, root || '/' || i.name,
+				root || '/' || replace(i.name, '/', '∕') || chr(1) || i.file_id, 0
+			FROM drive_items i JOIN acct a ON a.client_key = i.client_key,
+			LATERAL (SELECT CASE WHEN i.parent_id = a.my_drive_id THEN 'My Drive' ELSE 'Shared with me' END AS root) r
 			WHERE i.is_dir AND NOT i.trashed AND (i.parent_id IS NULL OR i.parent_id = a.my_drive_id
 				OR NOT EXISTS (SELECT 1 FROM drive_items p WHERE p.client_key = i.client_key AND p.file_id = i.parent_id))
 		UNION ALL
-			SELECT c.client_key, c.file_id, f.path || '/' || c.name, f.depth + 1 FROM folders f
+			SELECT c.client_key, c.file_id, c.name, f.path || '/' || c.name,
+				f.sign || '/' || replace(c.name, '/', '∕') || chr(1) || c.file_id, f.depth + 1
+			FROM folders f
 			JOIN drive_items c ON c.client_key = f.client_key AND c.parent_id = f.file_id AND c.is_dir AND NOT c.trashed
 			WHERE f.depth < 100
 		)
-		SELECT DISTINCT ON (client_key, file_id) client_key, file_id, path FROM folders`,
-		// item and folder are NULL when they follow from the path.
+		SELECT DISTINCT ON (client_key, file_id) client_key, file_id, name, path, sign FROM folders
+		ORDER BY client_key, file_id, depth, path`,
+		// item, folder and sign are NULL when they follow from the path.
 		`CREATE TEMP TABLE dup_files ON COMMIT DROP AS
 		SELECT CASE WHEN i.md5 <> '' THEN 'md5:' || i.md5 || ':' || i.size ELSE '' END AS key,
 			'google:' || i.client_key || ':drive' AS source,
 			i.file_id AS item,
-			COALESCE(f.path, CASE WHEN i.parent_id = a.my_drive_id THEN 'My Drive' ELSE 'Shared with me' END)
-				|| '/' || i.name AS path,
+			COALESCE(f.path, root) || '/' || i.name AS path,
+			COALESCE(f.sign, root) || '/' || replace(i.name, '/', '∕') AS sign,
 			CASE WHEN f.file_id IS NOT NULL OR i.parent_id = a.my_drive_id THEN i.parent_id
 				ELSE '` + SharedWithMe + `' END AS folder,
-			i.size, i.modified, NULL::bigint AS physical_drive, i.capture_time, i.width, i.height
+			i.size, i.modified, NULL::bigint AS physical_drive, i.owned_by_me AS owned, i.capture_time, i.width, i.height
 		FROM drive_items i
 		JOIN privatetokens p ON p.client_key = i.client_key AND p.user_id = $1
 		JOIN drive_accounts a ON a.client_key = i.client_key
-		LEFT JOIN dup_drive_folders f ON f.client_key = i.client_key AND f.file_id = i.parent_id
+		LEFT JOIN dup_drive_folders f ON f.client_key = i.client_key AND f.file_id = i.parent_id,
+		LATERAL (SELECT CASE WHEN i.parent_id = a.my_drive_id THEN 'My Drive' ELSE 'Shared with me' END AS root) r
 		WHERE NOT i.is_dir AND NOT i.trashed AND i.size > 0 AND i.name !~ $2
 		UNION ALL
 		SELECT CASE WHEN o.md5hash <> '' THEN 'md5:' || o.md5hash || ':' || o.size ELSE '' END,
-			'google:' || o.client_key || ':gcs:' || o.bucket, NULL, o.name, NULL, o.size, o.updated, NULL, NULL, NULL, NULL
+			'google:' || o.client_key || ':gcs:' || o.bucket, NULL, o.name, NULL, NULL, o.size, o.updated, NULL, true,
+			NULL, NULL, NULL
 		FROM gcs_objects o JOIN privatetokens p ON p.client_key = o.client_key AND p.user_id = $1
 		WHERE o.state = 'live' AND o.size > 0 AND o.name !~ $2
 		UNION ALL
 		SELECT CASE WHEN f.status <> 'hashed' THEN ''
 				WHEN f.md5 IS NOT NULL THEN 'md5:' || f.md5 || ':' || f.size
 				ELSE COALESCE('blake3:' || f.content_hash || ':' || f.size, '') END,
-			'agent:' || d.id, NULL, f.relative_path, NULL, f.size, f.mtime, d.physical_drive_id, NULL, NULL, NULL
+			'agent:' || d.id, NULL, f.relative_path, NULL, NULL, f.size, f.mtime, d.physical_drive_id, true,
+			NULL, NULL, NULL
 		FROM agent_files f JOIN agent_drives d ON d.id = f.drive_pk
 		JOIN agent_agents a ON a.id = d.agent_id AND a.user_id = $1
 		WHERE f.size > 0 AND f.relative_path !~ $2`,
@@ -384,9 +471,15 @@ const (
 		ELSE substr(f.source, strpos(f.source, ':gcs:') + 5) || '/' || regexp_replace(f.path, '[^/]*$', '') END)`
 )
 
-// distinctCopies counts a group's copies, counting each physical drive's
-// copy of a path once: seagate1 uploaded from three machines is one copy.
-const distinctCopies = `count(DISTINCT COALESCE('pd' || f.physical_drive || ':' || f.path, f.source || ':' || ` + dupItemSQL + `))`
+// copyOf names a copy, counting each physical drive's copy of a path once:
+// seagate1 uploaded from three machines is one copy. A group's reclaimable
+// space counts only the copies the user owns: a file shared with them
+// isn't theirs to delete, nor does it use their storage.
+const (
+	copyOf         = `COALESCE('pd' || f.physical_drive || ':' || f.path, f.source || ':' || ` + dupItemSQL + `)`
+	distinctCopies = `count(DISTINCT ` + copyOf + `)`
+	ownedCopies    = `count(DISTINCT CASE WHEN f.owned THEN ` + copyOf + ` END)`
+)
 
 // writeFileGroups groups dup_files by key into the index. The groups get
 // their IDs in a temp table, so their members join that, not dup_groups.
@@ -395,14 +488,15 @@ func writeFileGroups(tx *sqlx.Tx, userID int64) error {
 		`CREATE TEMP TABLE dup_file_groups ON COMMIT DROP AS
 		SELECT nextval(pg_get_serial_sequence('dup_groups', 'id')) AS id, key,
 			mode() WITHIN GROUP (ORDER BY ` + dupNameSQL + `) AS name,
-			max(size) AS size, count(*) AS copies, max(size) * (` + distinctCopies + ` - 1) AS reclaimable,
+			max(size) AS size, count(*) AS copies, max(size) * GREATEST(` + ownedCopies + ` - 1, 0) AS reclaimable,
 			` + distinctCopies + ` = 1 AS same_physical, array_agg(DISTINCT source ORDER BY source) AS sources
 		FROM dup_files f WHERE key <> '' GROUP BY key HAVING count(*) > 1`,
 		`ANALYZE dup_file_groups`,
 		`INSERT INTO dup_groups (id, user_id, kind, key, name, size, files, copies, reclaimable, same_physical, sources)
 		SELECT id, $1, 'file', key, name, size, 1, copies, reclaimable, same_physical, sources FROM dup_file_groups`,
-		`INSERT INTO dup_members (group_id, source, label, item, path, folder, size, modified, physical_drive)
-		SELECT g.id, f.source, s.label, ` + dupItemSQL + `, f.path, ` + dupFolderSQL + `, f.size, f.modified, f.physical_drive
+		`INSERT INTO dup_members (group_id, source, label, item, path, folder, size, modified, physical_drive, shared)
+		SELECT g.id, f.source, s.label, ` + dupItemSQL + `, f.path, ` + dupFolderSQL + `, f.size, f.modified,
+			f.physical_drive, NOT f.owned
 		FROM dup_files f JOIN dup_file_groups g ON g.key = f.key JOIN dup_sources s ON s.source = f.source`,
 	}
 	for _, stmt := range statements {
@@ -419,39 +513,36 @@ func writeFileGroups(tx *sqlx.Tx, userID int64) error {
 
 // dupFolder is a folder, its signature, and what's under it.
 type dupFolder struct {
-	source, label, path string
-	item                string // what Browse opens: the Drive folder's ID, "<bucket>/<prefix>/", or the path
-	physical            sql.NullInt64
-	files, bytes        int64
-	sig                 string
-	ok                  bool // every file below has a key
+	source, label string
+	key           string // its sign path: identifies it in its source
+	path, name    string // for display
+	item          string // what Browse opens: the Drive folder's ID, "<bucket>/<prefix>/", or the path
+	physical      sql.NullInt64
+	files, bytes  int64
+	sig           string
+	ok            bool // every file below has a key
+	owned         bool // and is the user's
 }
 
-// name is the folder's own name: its last path part, or for a source's
-// root, the source's label.
-func (f *dupFolder) name() string {
-	if f.path == "" {
-		return f.label
-	}
-	return f.path[strings.LastIndex(f.path, "/")+1:]
-}
-
+// parent is the key of the folder above f; false for a source's root.
 func (f *dupFolder) parent() (string, bool) {
-	if f.path == "" {
+	if f.key == "" {
 		return "", false
 	}
-	i := strings.LastIndex(f.path, "/")
+	i := strings.LastIndex(f.key, "/")
 	if i < 0 {
 		return "", true
 	}
-	return f.path[:i], true
+	return f.key[:i], true
 }
 
-// signer computes folder signatures from a source's files, given in path
-// order (bytewise, so a folder's contents are contiguous), bottom up: a
-// folder's signature is a SHA-256 over its children, sorted by name, each
+// signer computes folder signatures from a source's files, given in sign
+// path order (bytewise, so a folder's contents are contiguous), bottom up:
+// a folder's signature is a SHA-256 over its children, sorted by name, each
 // "<name>\0<f|d>\0<key or signature>\n". See docs/specs/duplicates.md,
-// "Folders".
+// "Folders". A folder's part of a sign path may be "<name>\x01<ID>", which
+// keeps apart Drive folders of one name; its name is the part before
+// \x01.
 type signer struct {
 	source, label string
 	physical      sql.NullInt64
@@ -460,24 +551,24 @@ type signer struct {
 }
 
 type openFolder struct {
-	path, name   string
+	key, part    string
 	entries      []string // "<name>\0<f|d>\0<value>"
 	files, bytes int64
-	ok           bool
+	ok, owned    bool
 }
 
 func newSigner(source, label string, physical sql.NullInt64) *signer {
 	return &signer{source: source, label: label, physical: physical,
-		stack: []*openFolder{{path: "", ok: true}}}
+		stack: []*openFolder{{ok: true, owned: true}}}
 }
 
-// add takes the next file in path order.
-func (s *signer) add(path, key string, size int64) {
-	parts := strings.Split(path, "/")
+// add takes the next file in sign path order.
+func (s *signer) add(sign, key string, size int64, owned bool) {
+	parts := strings.Split(sign, "/")
 	dirs, name := parts[:len(parts)-1], parts[len(parts)-1]
 	// Close the open folders that aren't above this file.
 	depth := 0
-	for depth < len(dirs) && depth+1 < len(s.stack) && s.stack[depth+1].name == dirs[depth] {
+	for depth < len(dirs) && depth+1 < len(s.stack) && s.stack[depth+1].part == dirs[depth] {
 		depth++
 	}
 	for len(s.stack) > depth+1 {
@@ -485,15 +576,16 @@ func (s *signer) add(path, key string, size int64) {
 	}
 	for _, d := range dirs[depth:] {
 		parent := s.stack[len(s.stack)-1]
-		path := d
-		if parent.path != "" || len(s.stack) > 1 {
-			path = parent.path + "/" + d
+		key := d
+		if len(s.stack) > 1 {
+			key = parent.key + "/" + d
 		}
-		s.stack = append(s.stack, &openFolder{path: path, name: d, ok: true})
+		s.stack = append(s.stack, &openFolder{key: key, part: d, ok: true, owned: true})
 	}
 	f := s.stack[len(s.stack)-1]
 	f.files++
 	f.bytes += size
+	f.owned = f.owned && owned
 	if key == "" {
 		f.ok = false
 		return
@@ -512,14 +604,19 @@ func (s *signer) pop() {
 		h.Write([]byte{'\n'})
 	}
 	sig := hex.EncodeToString(h.Sum(nil))
-	s.done = append(s.done, &dupFolder{source: s.source, label: s.label, path: f.path, item: f.path,
-		physical: s.physical, files: f.files, bytes: f.bytes, sig: sig, ok: f.ok})
+	name, _, _ := strings.Cut(f.part, "\x01")
+	if f.key == "" {
+		name = s.label
+	}
+	s.done = append(s.done, &dupFolder{source: s.source, label: s.label, key: f.key, path: f.key, name: name,
+		item: f.key, physical: s.physical, files: f.files, bytes: f.bytes, sig: sig, ok: f.ok, owned: f.owned})
 	if len(s.stack) > 0 {
 		parent := s.stack[len(s.stack)-1]
 		parent.files += f.files
 		parent.bytes += f.bytes
 		parent.ok = parent.ok && f.ok
-		parent.entries = append(parent.entries, f.name+"\x00d\x00"+sig)
+		parent.owned = parent.owned && f.owned
+		parent.entries = append(parent.entries, name+"\x00d\x00"+sig)
 	}
 }
 
@@ -539,7 +636,7 @@ func uncomparableReason(source string) string {
 	case strings.Contains(source, ":gcs:"):
 		return "They hold composite or encrypted objects, which have no MD5."
 	default:
-		return "They hold files driveagent couldn't read."
+		return "They hold files not hashed yet, or that driveagent couldn't read."
 	}
 }
 
@@ -559,39 +656,48 @@ func buildFolderGroups(tx *sqlx.Tx, userID int64) ([]Uncomparable, error) {
 	for _, src := range sources {
 		signers[src.Source] = newSigner(src.Source, src.Label, src.Physical)
 	}
-	// Drive folders' IDs, for their links.
-	driveIds := map[string]string{}
-	rows, err := tx.Query(`SELECT 'google:' || client_key || ':drive', path, file_id FROM dup_drive_folders
-		UNION ALL SELECT 'google:' || a.client_key || ':drive', 'My Drive', a.my_drive_id FROM drive_accounts a
+	// Drive folders by their sign path: their ID, path and name.
+	type driveFolder struct{ id, path, name string }
+	driveFolders := map[string]driveFolder{}
+	rows, err := tx.Query(`SELECT 'google:' || client_key || ':drive', sign, file_id, path,
+			name FROM dup_drive_folders
+		UNION ALL SELECT 'google:' || a.client_key || ':drive', 'My Drive', a.my_drive_id, 'My Drive', 'My Drive'
+		FROM drive_accounts a
 		JOIN privatetokens p ON p.client_key = a.client_key AND p.user_id = $1`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read Drive's folders: %w", err)
 	}
 	for rows.Next() {
-		var source, path, id string
-		if err := rows.Scan(&source, &path, &id); err != nil {
+		var d driveFolder
+		var source, sign string
+		if err := rows.Scan(&source, &sign, &d.id, &d.path, &d.name); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		driveIds[source+"\x00"+path] = id
+		driveFolders[source+"\x00"+sign] = d
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read Drive's folders: %w", err)
+	}
 
-	// One pass over every file, a source at a time, each in path order:
-	// bytewise, so a folder's contents are contiguous.
-	rows, err = tx.Query(`SELECT source, path, key, size FROM dup_files ORDER BY source, path COLLATE "C"`)
+	// One pass over every file, a source at a time, each in sign path
+	// order: bytewise, so a folder's contents are contiguous.
+	rows, err = tx.Query(`SELECT source, COALESCE(sign, path), key, size, owned FROM dup_files
+		ORDER BY source, COALESCE(sign, path) COLLATE "C"`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the files: %w", err)
 	}
 	for rows.Next() {
-		var source, path, key string
+		var source, sign, key string
 		var size int64
-		if err := rows.Scan(&source, &path, &key, &size); err != nil {
+		var owned bool
+		if err := rows.Scan(&source, &sign, &key, &size, &owned); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		if s := signers[source]; s != nil {
-			s.add(path, key, size)
+			s.add(sign, key, size, owned)
 		}
 	}
 	rows.Close()
@@ -608,7 +714,7 @@ func buildFolderGroups(tx *sqlx.Tx, userID int64) ([]Uncomparable, error) {
 		for _, f := range signers[src.Source].finish() {
 			// Drive's pseudo-roots aren't folders, nor is a source with no
 			// files (a signer's root without entries).
-			if isDrive && (f.path == "" || f.path == "Shared with me") || f.files == 0 {
+			if isDrive && (f.key == "" || f.key == "Shared with me") || f.files == 0 {
 				continue
 			}
 			if !f.ok {
@@ -617,15 +723,15 @@ func buildFolderGroups(tx *sqlx.Tx, userID int64) ([]Uncomparable, error) {
 			}
 			switch {
 			case isDrive:
-				f.item = driveIds[src.Source+"\x00"+f.path]
-				// A name with a "/" splits into folders that aren't.
-				if f.item == "" {
+				d, found := driveFolders[src.Source+"\x00"+f.key]
+				if !found {
 					continue
 				}
-			case isGcs && f.path == "":
+				f.item, f.path, f.name = d.id, d.path, d.name
+			case isGcs && f.key == "":
 				f.item = bucket + "/"
 			case isGcs:
-				f.item = bucket + "/" + f.path + "/"
+				f.item = bucket + "/" + f.key + "/"
 			}
 			bySig[f.sig] = append(bySig[f.sig], f)
 		}
@@ -637,7 +743,7 @@ func buildFolderGroups(tx *sqlx.Tx, userID int64) ([]Uncomparable, error) {
 	sort.Slice(uncomparable, func(i, j int) bool { return uncomparable[i].Source < uncomparable[j].Source })
 
 	// Groups of two or more, and which group each member folder is in.
-	type key struct{ source, path string }
+	type key struct{ source, key string }
 	var groups [][]*dupFolder
 	groupOf := map[key]int{}
 	sigs := make([]string, 0, len(bySig))
@@ -649,7 +755,7 @@ func buildFolderGroups(tx *sqlx.Tx, userID int64) ([]Uncomparable, error) {
 	sort.Strings(sigs)
 	for _, sig := range sigs {
 		for _, f := range bySig[sig] {
-			groupOf[key{f.source, f.path}] = len(groups)
+			groupOf[key{f.source, f.key}] = len(groups)
 		}
 		groups = append(groups, bySig[sig])
 	}
@@ -686,14 +792,17 @@ func buildFolderGroups(tx *sqlx.Tx, userID int64) ([]Uncomparable, error) {
 		if !keep[i] {
 			continue
 		}
-		distinct := map[string]bool{}
+		distinct, owned := map[string]bool{}, map[string]bool{}
 		sources := map[string]bool{}
 		for _, f := range g {
-			id := f.source + ":" + f.path
+			id := f.source + ":" + f.key
 			if f.physical.Valid {
-				id = fmt.Sprintf("pd%d:%s", f.physical.Int64, f.path)
+				id = fmt.Sprintf("pd%d:%s", f.physical.Int64, f.key)
 			}
 			distinct[id] = true
+			if f.owned {
+				owned[id] = true
+			}
 			sources[f.source] = true
 		}
 		list := make([]string, 0, len(sources))
@@ -702,11 +811,11 @@ func buildFolderGroups(tx *sqlx.Tx, userID int64) ([]Uncomparable, error) {
 		}
 		sort.Strings(list)
 		gKeys = append(gKeys, g[0].sig)
-		gNames = append(gNames, g[0].name())
+		gNames = append(gNames, g[0].name)
 		gSizes = append(gSizes, g[0].bytes)
 		gFiles = append(gFiles, g[0].files)
 		gCopies = append(gCopies, int64(len(g)))
-		gReclaim = append(gReclaim, g[0].bytes*int64(len(distinct)-1))
+		gReclaim = append(gReclaim, g[0].bytes*int64(max(len(owned)-1, 0)))
 		gSame = append(gSame, len(distinct) == 1)
 		gSources = append(gSources, "{"+strings.Join(quoteAll(list), ",")+"}")
 	}
@@ -726,15 +835,21 @@ func buildFolderGroups(tx *sqlx.Tx, userID int64) ([]Uncomparable, error) {
 	for rows.Next() {
 		var id int64
 		var sig string
-		rows.Scan(&id, &sig)
+		if err := rows.Scan(&id, &sig); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("failed to read the duplicate folders' IDs: %w", err)
+		}
 		ids[sig] = id
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to write the duplicate folders: %w", err)
+	}
 
 	var (
 		mGroups, mSizes, mFiles, mPhysical []int64
 		mSources, mLabels, mItems, mPaths  []string
-		mHasPhysical                       []bool
+		mHasPhysical, mShared              []bool
 	)
 	for i, g := range groups {
 		if !keep[i] {
@@ -750,14 +865,15 @@ func buildFolderGroups(tx *sqlx.Tx, userID int64) ([]Uncomparable, error) {
 				append(mItems, f.item), append(mPaths, path)
 			mSizes, mFiles = append(mSizes, f.bytes), append(mFiles, f.files)
 			mPhysical, mHasPhysical = append(mPhysical, f.physical.Int64), append(mHasPhysical, f.physical.Valid)
+			mShared = append(mShared, !f.owned)
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO dup_members (group_id, source, label, item, path, folder, size, files, physical_drive)
-		SELECT g, s, l, i, p, i, sz, f, CASE WHEN hp THEN pd END
-		FROM unnest($1::int8[], $2::text[], $3::text[], $4::text[], $5::text[], $6::int8[], $7::int8[], $8::int8[], $9::bool[])
-			AS u(g, s, l, i, p, sz, f, pd, hp)`,
+	if _, err := tx.Exec(`INSERT INTO dup_members (group_id, source, label, item, path, folder, size, files, physical_drive, shared)
+		SELECT g, s, l, i, p, i, sz, f, CASE WHEN hp THEN pd END, sh
+		FROM unnest($1::int8[], $2::text[], $3::text[], $4::text[], $5::text[], $6::int8[], $7::int8[], $8::int8[],
+			$9::bool[], $10::bool[]) AS u(g, s, l, i, p, sz, f, pd, hp, sh)`,
 		pq.Array(mGroups), pq.Array(mSources), pq.Array(mLabels), pq.Array(mItems), pq.Array(mPaths),
-		pq.Array(mSizes), pq.Array(mFiles), pq.Array(mPhysical), pq.Array(mHasPhysical)); err != nil {
+		pq.Array(mSizes), pq.Array(mFiles), pq.Array(mPhysical), pq.Array(mHasPhysical), pq.Array(mShared)); err != nil {
 		return nil, fmt.Errorf("failed to write the duplicate folders' copies: %w", err)
 	}
 	return uncomparable, nil
@@ -790,7 +906,8 @@ func buildPhotoGroups(tx *sqlx.Tx, userID int64) error {
 		WHERE s.user_id = $1 AND pi.create_time IS NOT NULL
 		ORDER BY pi.media_item_id, pi.scan_id DESC
 	)
-	SELECT pk.*, f.source, s.label, `+dupItemSQL+` AS item, f.path, `+dupFolderSQL+` AS folder, f.size AS file_size, f.modified,
+	SELECT pk.*, f.source, s.label, `+dupItemSQL+` AS item, f.path, `+dupFolderSQL+` AS folder, f.size AS file_size,
+		f.modified, f.owned,
 		CASE WHEN f.capture_time IS NOT NULL THEN 'name and capture time' ELSE 'name and modified time' END
 		|| CASE WHEN f.width IS NOT NULL AND pk.width IS NOT NULL THEN ', dimensions' ELSE '' END AS how
 	FROM picks pk
@@ -824,8 +941,8 @@ func buildPhotoGroups(tx *sqlx.Tx, userID int64) error {
 		SELECT id, 'google:' || client_key || ':photos', account || ' · Google Photos',
 			media_item_id, filename, '', size, create_time
 		FROM dup_photo_groups`,
-		`INSERT INTO dup_members (group_id, source, label, item, path, folder, size, modified)
-		SELECT g.id, m.source, m.label, m.item, m.path, m.folder, m.file_size, m.modified
+		`INSERT INTO dup_members (group_id, source, label, item, path, folder, size, modified, shared)
+		SELECT g.id, m.source, m.label, m.item, m.path, m.folder, m.file_size, m.modified, NOT m.owned
 		FROM dup_photo_matches m JOIN dup_photo_groups g ON g.media_item_id = m.media_item_id`,
 	}
 	for _, stmt := range statements {
@@ -856,8 +973,23 @@ type DupSummary struct {
 	BySource     []DupSourceTotal `json:"by_source"`
 	Uncomparable []Uncomparable   `json:"uncomparable"`
 	BuiltAt      *time.Time       `json:"built_at"`
-	Updating     bool             `json:"updating"`
-	TookMs       int64            `json:"took_ms"`
+	// A build is running, or about to: the first, before the builder has
+	// reached the user.
+	Updating bool  `json:"updating"`
+	TookMs   int64 `json:"took_ms"`
+	// The last build's failure, if it failed: the index shown, if any, is
+	// older.
+	Error    string     `json:"error,omitempty"`
+	FailedAt *time.Time `json:"failed_at,omitempty"`
+}
+
+// dupCounts is dup_state.counts: per kind, its groups, those not all on one
+// physical drive, those across sources, and the reclaimable bytes.
+type dupCounts map[string]struct {
+	All              int64 `json:"all"`
+	HideSamePhysical int64 `json:"hide_same_physical"`
+	Across           int64 `json:"across"`
+	Reclaimable      int64 `json:"reclaimable"`
 }
 
 // GetDupSummary returns userID's summary; BuiltAt is nil until the first
@@ -871,8 +1003,12 @@ func GetDupSummary(userID int64) (DupSummary, error) {
 		TookMs       int64      `db:"took_ms"`
 		Uncomparable []byte     `db:"uncomparable"`
 		BySource     []byte     `db:"by_source"`
+		Counts       []byte     `db:"counts"`
+		Error        string     `db:"error"`
+		FailedAt     *time.Time `db:"failed_at"`
 	}
-	err := db.Get(&state, `SELECT built_at, building, took_ms, uncomparable, by_source FROM dup_state WHERE user_id = $1`, userID)
+	err := db.Get(&state, `SELECT built_at, building, took_ms, uncomparable, by_source, counts, error, failed_at
+		FROM dup_state WHERE user_id = $1`, userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		summary.Updating = true
 		return summary, nil
@@ -880,30 +1016,23 @@ func GetDupSummary(userID int64) (DupSummary, error) {
 	if err != nil {
 		return DupSummary{}, fmt.Errorf("failed to read the duplicates index's state: %w", err)
 	}
-	summary.BuiltAt, summary.TookMs = state.BuiltAt, state.TookMs
-	summary.Updating = state.Building || state.BuiltAt == nil
+	summary.BuiltAt, summary.TookMs, summary.Updating = state.BuiltAt, state.TookMs, state.Building
+	summary.Error, summary.FailedAt = state.Error, state.FailedAt
 	if err := json.Unmarshal(state.Uncomparable, &summary.Uncomparable); err != nil {
 		return DupSummary{}, err
 	}
 	if err := json.Unmarshal(state.BySource, &summary.BySource); err != nil {
 		return DupSummary{}, err
 	}
-	var kinds []struct {
-		Kind        string `db:"kind"`
-		Groups      int64  `db:"groups"`
-		Reclaimable int64  `db:"reclaimable"`
+	var counts dupCounts
+	if err := json.Unmarshal(state.Counts, &counts); err != nil {
+		return DupSummary{}, err
 	}
-	if err := db.Select(&kinds, `SELECT kind, count(*) AS groups, sum(reclaimable) AS reclaimable
-		FROM dup_groups WHERE user_id = $1 GROUP BY kind`, userID); err != nil {
-		return DupSummary{}, fmt.Errorf("failed to count duplicates: %w", err)
+	for kind, c := range counts {
+		summary.Groups[kind] = c.All
 	}
-	for _, k := range kinds {
-		summary.Groups[k.Kind] = k.Groups
-		// Folders' bytes are their files', already counted.
-		if k.Kind == DupFile {
-			summary.Reclaimable = k.Reclaimable
-		}
-	}
+	// Folders' bytes are their files', already counted.
+	summary.Reclaimable = counts[DupFile].Reclaimable
 	return summary, nil
 }
 
@@ -934,11 +1063,16 @@ type DupMember struct {
 	Files         int64      `db:"files" json:"files"`
 	Modified      *time.Time `db:"modified" json:"modified"`
 	PhysicalDrive *int64     `db:"physical_drive" json:"physical_drive"`
+	// Shared with the user, not theirs: it doesn't count as reclaimable.
+	Shared bool `db:"shared" json:"shared"`
 }
 
+// DupGroup is a group of copies. Its ID changes when the index is rebuilt;
+// its kind and key don't, so groups are addressed by those.
 type DupGroup struct {
-	Id           int64          `db:"id" json:"id"`
+	Id           int64          `db:"id" json:"-"`
 	Kind         string         `db:"kind" json:"kind"`
+	Key          string         `db:"key" json:"key"`
 	Name         string         `db:"name" json:"name"`
 	Size         int64          `db:"size" json:"size"`
 	Files        int64          `db:"files" json:"files"`
@@ -958,6 +1092,8 @@ type DupGroupsPage struct {
 	PageSize int               `json:"page_size"`
 }
 
+const memberColumns = `m.source, m.label, m.item, m.path, m.folder, m.size, m.files, m.modified, m.physical_drive, m.shared`
+
 // GetDupGroups returns a page of userID's groups, largest reclaimable
 // first (photos, which reclaim nothing, largest first).
 func GetDupGroups(userID int64, filter DupFilter, pageNo int) (DupGroupsPage, error) {
@@ -975,11 +1111,11 @@ func GetDupGroups(userID int64, filter DupFilter, pageNo int) (DupGroupsPage, er
 	if filter.HideSamePhysical {
 		where += ` AND NOT same_physical`
 	}
-	if err := db.Get(&page.Total, `SELECT count(*) FROM dup_groups WHERE `+where, args...); err != nil {
-		return DupGroupsPage{}, fmt.Errorf("failed to count duplicate groups: %w", err)
+	if err := countDupGroups(userID, filter, where, args, &page.Total); err != nil {
+		return DupGroupsPage{}, err
 	}
 	args = append(args, DupGroupsPageSize, (page.Page-1)*DupGroupsPageSize)
-	if err := db.Select(&page.Groups, fmt.Sprintf(`SELECT id, kind, name, size, files, copies, reclaimable,
+	if err := db.Select(&page.Groups, fmt.Sprintf(`SELECT id, kind, key, name, size, files, copies, reclaimable,
 			same_physical, sources, match
 		FROM dup_groups WHERE %s ORDER BY reclaimable DESC, size DESC, id LIMIT $%d OFFSET $%d`,
 		where, len(args)-1, len(args)), args...); err != nil {
@@ -998,8 +1134,7 @@ func GetDupGroups(userID int64, filter DupFilter, pageNo int) (DupGroupsPage, er
 		GroupId int64 `db:"group_id"`
 		DupMember
 	}
-	if err := db.Select(&members, `SELECT m.group_id, m.source, m.label, m.item, m.path, m.folder, m.size,
-			m.files, m.modified, m.physical_drive
+	if err := db.Select(&members, `SELECT m.group_id, `+memberColumns+`
 		FROM unnest($1::int8[]) AS g(id)
 		CROSS JOIN LATERAL (SELECT * FROM dup_members m WHERE m.group_id = g.id
 			ORDER BY `+memberOrder+` LIMIT $2) m`, pq.Array(ids), DupMembersShown); err != nil {
@@ -1023,6 +1158,40 @@ func GetDupGroups(userID int64, filter DupFilter, pageNo int) (DupGroupsPage, er
 	return page, nil
 }
 
+// countDupGroups counts the groups a filter picks: from the counts the
+// build kept, unless it limits the source or size.
+func countDupGroups(userID int64, filter DupFilter, where string, args []any, total *int64) error {
+	if filter.Source == "" && filter.MinSize == 0 {
+		var encoded []byte
+		err := db.Get(&encoded, `SELECT counts FROM dup_state WHERE user_id = $1`, userID)
+		if errors.Is(err, sql.ErrNoRows) {
+			*total = 0
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read the duplicates' counts: %w", err)
+		}
+		var counts dupCounts
+		if err := json.Unmarshal(encoded, &counts); err != nil {
+			return err
+		}
+		c := counts[filter.Kind]
+		switch {
+		case filter.Across:
+			*total = c.Across
+		case filter.HideSamePhysical:
+			*total = c.HideSamePhysical
+		default:
+			*total = c.All
+		}
+		return nil
+	}
+	if err := db.Get(total, `SELECT count(*) FROM dup_groups WHERE `+where, args...); err != nil {
+		return fmt.Errorf("failed to count duplicate groups: %w", err)
+	}
+	return nil
+}
+
 // memberOrder lists a group's copies: Google Photos' item first, then by
 // source and path.
 const memberOrder = `(m.source LIKE '%:photos') DESC, m.source, m.path, m.item`
@@ -1034,22 +1203,27 @@ type DupMembersPage struct {
 	PageSize int         `json:"page_size"`
 }
 
-// GetDupMembers returns a page of a group's copies; another user's group
-// is ErrNotFound.
-func GetDupMembers(userID int64, groupID int64, pageNo int) (DupMembersPage, error) {
+// GetDupMembers returns a page of the copies of userID's group of kind and
+// key; a group that isn't in their index (any longer) is ErrNotFound.
+func GetDupMembers(userID int64, kind string, key string, pageNo int) (DupMembersPage, error) {
 	page := DupMembersPage{Members: []DupMember{}, Page: max(pageNo, 1), PageSize: DupMembersPageSize}
-	err := db.Get(&page.Total, `SELECT copies FROM dup_groups WHERE id = $1 AND user_id = $2`, groupID, userID)
+	var group struct {
+		Id     int64 `db:"id"`
+		Copies int64 `db:"copies"`
+	}
+	err := db.Get(&group, `SELECT id, copies FROM dup_groups WHERE user_id = $1 AND kind = $2 AND key = $3`,
+		userID, kind, key)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DupMembersPage{}, ErrNotFound
 	}
 	if err != nil {
-		return DupMembersPage{}, fmt.Errorf("failed to read duplicate group %d: %w", groupID, err)
+		return DupMembersPage{}, fmt.Errorf("failed to read duplicate group %s: %w", key, err)
 	}
-	if err := db.Select(&page.Members, `SELECT m.source, m.label, m.item, m.path, m.folder, m.size, m.files,
-			m.modified, m.physical_drive
+	page.Total = group.Copies
+	if err := db.Select(&page.Members, `SELECT `+memberColumns+`
 		FROM dup_members m WHERE m.group_id = $1 ORDER BY `+memberOrder+` LIMIT $2 OFFSET $3`,
-		groupID, DupMembersPageSize, (page.Page-1)*DupMembersPageSize); err != nil {
-		return DupMembersPage{}, fmt.Errorf("failed to read duplicate group %d's copies: %w", groupID, err)
+		group.Id, DupMembersPageSize, (page.Page-1)*DupMembersPageSize); err != nil {
+		return DupMembersPage{}, fmt.Errorf("failed to read duplicate group %s's copies: %w", key, err)
 	}
 	return page, nil
 }

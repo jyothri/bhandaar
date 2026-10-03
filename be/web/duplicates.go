@@ -16,7 +16,7 @@ import (
 func duplicatesRoutes(api *mux.Router) {
 	api.HandleFunc("/duplicates/summary", DupSummaryHandler).Methods("GET")
 	api.HandleFunc("/duplicates/groups", DupGroupsHandler).Methods("GET")
-	api.HandleFunc("/duplicates/groups/{id}/members", DupMembersHandler).Methods("GET")
+	api.HandleFunc("/duplicates/members", DupMembersHandler).Methods("GET")
 }
 
 func DupSummaryHandler(w http.ResponseWriter, r *http.Request) {
@@ -67,19 +67,22 @@ func DupGroupsHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, page, http.StatusOK)
 }
 
+// DupMembersHandler answers a page of a group's copies, the group named by
+// its kind and key (?kind=&key=), which stay the same when the index is
+// rebuilt.
 func DupMembersHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(mux.Vars(r)["id"], 10, 64)
-	if err != nil {
-		http.Error(w, "Group not found", http.StatusNotFound)
+	kind, key := r.URL.Query().Get("kind"), r.URL.Query().Get("key")
+	if kind != db.DupFile && kind != db.DupFolder && kind != db.DupPhoto || key == "" {
+		http.Error(w, "Invalid group", http.StatusBadRequest)
 		return
 	}
-	page, err := db.GetDupMembers(currentUser(r).ID, id, queryPage(r))
+	page, err := db.GetDupMembers(currentUser(r).ID, kind, key, queryPage(r))
 	if errors.Is(err, db.ErrNotFound) {
 		http.Error(w, "Group not found", http.StatusNotFound)
 		return
 	}
 	if err != nil {
-		slog.Error("Failed to read a duplicate group's copies", "group", id, "error", err)
+		slog.Error("Failed to read a duplicate group's copies", "kind", kind, "key", key, "error", err)
 		http.Error(w, "Failed to read the copies", http.StatusInternalServerError)
 		return
 	}

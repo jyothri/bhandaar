@@ -14,6 +14,7 @@ import {
 import {
   DupFilter,
   DupGroupsPage,
+  DupKind,
   DupMembersPage,
   DupSummary,
 } from "../types/duplicates";
@@ -313,9 +314,12 @@ export const getDupGroups = (filter: DupFilter): Promise<DupGroupsPage> => {
   return fetchJson(`/api/duplicates/groups?${params}`);
 };
 
-/** A page (200) of one group's copies. */
+/** A page (200) of one group's copies, the group named by kind and key. */
 export const getDupMembers = (
-  groupId: number,
+  kind: DupKind,
+  key: string,
   page: number
 ): Promise<DupMembersPage> =>
-  fetchJson(`/api/duplicates/groups/${groupId}/members?page=${page}`);
+  fetchJson(
+    `/api/duplicates/members?${new URLSearchParams({ kind, key, page: String(page) })}`
+  );

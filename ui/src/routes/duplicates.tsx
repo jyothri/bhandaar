@@ -129,8 +129,11 @@ function Duplicates() {
   const summary = useQuery({
     queryKey: queryKeys.dupSummary,
     queryFn: getDupSummary,
-    // Watch a build until it ends.
-    refetchInterval: (q) => (q.state.data?.updating ? 5000 : false),
+    // Watch a build until it ends, and wait for the first.
+    refetchInterval: (q) => {
+      const s = q.state.data;
+      return s && (s.updating || (!s.built_at && !s.error)) ? 5000 : false;
+    },
   });
 
   // Changing a filter starts again at page 1.
@@ -211,10 +214,16 @@ function SummaryCard({ summary: s }: { summary: DupSummary }) {
   if (!s.built_at) {
     return (
       <Card>
-        <p className="flex items-center gap-2 text-sm text-muted">
-          <Spinner />
-          Finding your duplicates. This takes a minute or two.
-        </p>
+        {s.error && !s.updating ? (
+          <p className="text-sm text-danger">
+            Couldn't find your duplicates: {s.error}
+          </p>
+        ) : (
+          <p className="flex items-center gap-2 text-sm text-muted">
+            <Spinner />
+            Finding your duplicates. This takes a minute or two.
+          </p>
+        )}
       </Card>
     );
   }
@@ -236,6 +245,12 @@ function SummaryCard({ summary: s }: { summary: DupSummary }) {
           </Badge>
         )}
       </div>
+      {s.error && !s.updating && (
+        <p className="mt-1 text-sm text-danger">
+          Couldn't update
+          {s.failed_at ? ` ${formatAgo(s.failed_at)}` : ""}: {s.error}
+        </p>
+      )}
       {s.by_source.length > 0 && (
         <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
           {s.by_source.map((t) => (
@@ -393,7 +408,12 @@ function Groups({ filter, builtAt }: { filter: DupFilter; builtAt: string }) {
       <Card flush>
         <ul className="divide-y divide-line">
           {data.groups.map((g) => (
-            <GroupRow key={g.id} group={g} labels={data.labels} />
+            <GroupRow
+              key={`${g.kind}:${g.key}`}
+              group={g}
+              labels={data.labels}
+              builtAt={builtAt}
+            />
           ))}
         </ul>
       </Card>
@@ -404,9 +424,11 @@ function Groups({ filter, builtAt }: { filter: DupFilter; builtAt: string }) {
 function GroupRow({
   group: g,
   labels,
+  builtAt,
 }: {
   group: DupGroup;
   labels: Record<DupSource, string>;
+  builtAt: string;
 }) {
   const [open, setOpen] = useState(false);
   const icon: IconName = g.kind === "folder" ? "folder" : fileKind(g.name);
@@ -447,17 +469,17 @@ function GroupRow({
           ))}
         </span>
       </button>
-      {open && <Members group={g} />}
+      {open && <Members group={g} builtAt={builtAt} />}
     </li>
   );
 }
 
-function Members({ group: g }: { group: DupGroup }) {
+function Members({ group: g, builtAt }: { group: DupGroup; builtAt: string }) {
   // The first 10 come with the group; the rest on demand.
   const [all, setAll] = useState(false);
   const rest = useQuery({
-    queryKey: queryKeys.dupMembers(g.id, 1),
-    queryFn: () => getDupMembers(g.id, 1),
+    queryKey: queryKeys.dupMembers(g.kind, g.key, 1, builtAt),
+    queryFn: () => getDupMembers(g.kind, g.key, 1),
     enabled: all,
   });
   const members = all && rest.data ? rest.data.members : g.members;
@@ -503,7 +525,14 @@ function MemberRow({ kind, member: m }: { kind: DupKind; member: DupMember }) {
         <Icon name={sourceIcon(m.source)} />
         {m.label}
       </span>
-      <span className="min-w-0 flex-1 break-all">{m.path}</span>
+      <span className="min-w-0 flex-1 break-all">
+        {m.path}
+        {m.shared && (
+          <span className="ml-2 align-middle">
+            <Badge>Shared with you</Badge>
+          </span>
+        )}
+      </span>
       {kind === "photo" && (
         <span className="text-muted tabular-nums">{formatBytes(m.size)}</span>
       )}
