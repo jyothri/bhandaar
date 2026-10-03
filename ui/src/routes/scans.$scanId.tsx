@@ -235,6 +235,20 @@ function Summary({ summary }: { summary: ScanSummary }) {
                     : "Google Drive"}
             </Link>
           )}
+          {(service === "drive" || service === "photos") &&
+            summary.client_key && (
+              <Link
+                to="/duplicates"
+                search={
+                  service === "drive"
+                    ? { source: `google:${summary.client_key}:drive` }
+                    : { kind: "photo" }
+                }
+                className={buttonClasses("secondary", "sm")}
+              >
+                Duplicates
+              </Link>
+            )}
         </>
       }
     >

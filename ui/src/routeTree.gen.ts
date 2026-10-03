@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DuplicatesRouteImport } from './routes/duplicates'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ManageDataRouteImport } from './routes/manage-data'
 import { Route as RequestRouteImport } from './routes/request'
@@ -20,6 +21,11 @@ import { Route as ScansScanIdRouteImport } from './routes/scans.$scanId'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DuplicatesRoute = DuplicatesRouteImport.update({
+  id: '/duplicates',
+  path: '/duplicates',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -55,6 +61,7 @@ const ScansScanIdRoute = ScansScanIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/duplicates': typeof DuplicatesRoute
   '/login': typeof LoginRoute
   '/manage-data': typeof ManageDataRoute
   '/request': typeof RequestRoute
@@ -64,6 +71,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/duplicates': typeof DuplicatesRoute
   '/login': typeof LoginRoute
   '/manage-data': typeof ManageDataRoute
   '/request': typeof RequestRoute
@@ -74,6 +82,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/duplicates': typeof DuplicatesRoute
   '/login': typeof LoginRoute
   '/manage-data': typeof ManageDataRoute
   '/request': typeof RequestRoute
@@ -85,6 +94,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/duplicates'
     | '/login'
     | '/manage-data'
     | '/request'
@@ -94,6 +104,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/duplicates'
     | '/login'
     | '/manage-data'
     | '/request'
@@ -103,6 +114,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/duplicates'
     | '/login'
     | '/manage-data'
     | '/request'
@@ -113,6 +125,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DuplicatesRoute: typeof DuplicatesRoute
   LoginRoute: typeof LoginRoute
   ManageDataRoute: typeof ManageDataRoute
   RequestRoute: typeof RequestRoute
@@ -128,6 +141,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/duplicates': {
+      id: '/duplicates'
+      path: '/duplicates'
+      fullPath: '/duplicates'
+      preLoaderRoute: typeof DuplicatesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -177,6 +197,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DuplicatesRoute: DuplicatesRoute,
   LoginRoute: LoginRoute,
   ManageDataRoute: ManageDataRoute,
   RequestRoute: RequestRoute,
