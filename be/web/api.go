@@ -43,6 +43,7 @@ func api(r *mux.Router) {
 	gcsRoutes(api)
 	browseRoutes(api)
 	manageDataRoutes(api)
+	duplicatesRoutes(api)
 }
 
 func DoScansHandler(w http.ResponseWriter, r *http.Request) {

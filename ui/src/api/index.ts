@@ -11,6 +11,13 @@ import {
   PhotosPick,
   PickedItemPage,
 } from "../types/photos";
+import {
+  DupFilter,
+  DupGroupsPage,
+  DupKind,
+  DupMembersPage,
+  DupSummary,
+} from "../types/duplicates";
 import { GcsBucket, GcsProject, GcsScanBucket } from "../types/gcs";
 import {
   DeletionJob,
@@ -281,3 +288,38 @@ export const disconnectAccount = (
 /** A deletion job's status. */
 export const getDeletion = (id: number): Promise<DeletionJob> =>
   fetchJson(`/api/deletions/${id}`);
+
+/** The Duplicates page's summary: reclaimable space, counts, and when built. */
+export const getDupSummary = (): Promise<DupSummary> =>
+  fetchJson("/api/duplicates/summary");
+
+/** A page (50) of groups of copies, largest reclaimable first. */
+export const getDupGroups = (filter: DupFilter): Promise<DupGroupsPage> => {
+  const params = new URLSearchParams({ kind: filter.kind });
+  if (filter.source) {
+    params.set("source", filter.source);
+  }
+  if (filter.across) {
+    params.set("across", "1");
+  }
+  if (filter.min_size) {
+    params.set("min_size", String(filter.min_size));
+  }
+  if (filter.hide_same_physical) {
+    params.set("hide_same_physical", "1");
+  }
+  if (filter.page && filter.page > 1) {
+    params.set("page", String(filter.page));
+  }
+  return fetchJson(`/api/duplicates/groups?${params}`);
+};
+
+/** A page (200) of one group's copies, the group named by kind and key. */
+export const getDupMembers = (
+  kind: DupKind,
+  key: string,
+  page: number
+): Promise<DupMembersPage> =>
+  fetchJson(
+    `/api/duplicates/members?${new URLSearchParams({ kind, key, page: String(page) })}`
+  );

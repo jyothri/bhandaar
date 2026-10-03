@@ -1,3 +1,5 @@
+import { DupFilter } from "../types/duplicates";
+
 // TanStack Query keys, defined in one place so that invalidation can't
 // drift from the keys the queries actually use.
 export const queryKeys = {
@@ -29,4 +31,11 @@ export const queryKeys = {
     ["pickedItems", scanId, page] as const,
   manageData: ["manageData"] as const,
   deletion: (id: number) => ["deletion", id] as const,
+  // Prefix of every duplicates key, for refreshing them when the index is rebuilt.
+  duplicates: ["duplicates"] as const,
+  dupSummary: ["duplicates", "summary"] as const,
+  dupGroups: (filter: DupFilter) => ["duplicates", "groups", filter] as const,
+  // builtAt: the index's, so a rebuild reloads them.
+  dupMembers: (kind: string, key: string, page: number, builtAt: string) =>
+    ["duplicates", "members", kind, key, page, builtAt] as const,
 };

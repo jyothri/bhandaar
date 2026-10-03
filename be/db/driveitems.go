@@ -24,6 +24,10 @@ type DriveItem struct {
 	Modified  time.Time
 	OwnedByMe bool
 	Trashed   bool
+	// An image's capture time, as the camera recorded it (local time, no
+	// zone), and its dimensions; zero when Drive has none.
+	CaptureTime   time.Time
+	Width, Height int64
 }
 
 // DriveRecord is what a Drive scan of a linked account covers, for
@@ -62,6 +66,10 @@ func migrateDriveItems() error {
 			PRIMARY KEY (client_key, file_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS drive_items_parent ON drive_items (client_key, parent_id)`,
+		// Images' capture time and size, for matching Google Photos items.
+		`ALTER TABLE drive_items ADD COLUMN IF NOT EXISTS capture_time TIMESTAMP`,
+		`ALTER TABLE drive_items ADD COLUMN IF NOT EXISTS width INT`,
+		`ALTER TABLE drive_items ADD COLUMN IF NOT EXISTS height INT`,
 		// Per account: its My Drive folder, and when a scan last finished.
 		`CREATE TABLE IF NOT EXISTS drive_accounts (
 			client_key   VARCHAR(100) PRIMARY KEY,
@@ -134,16 +142,21 @@ func upsertDriveItem(clientKey string, scanId int, item DriveItem) error {
 	if !item.Modified.IsZero() {
 		modified = sql.NullTime{Time: item.Modified, Valid: true}
 	}
+	var captured sql.NullTime
+	if !item.CaptureTime.IsZero() {
+		captured = sql.NullTime{Time: item.CaptureTime, Valid: true}
+	}
 	_, err := db.Exec(`INSERT INTO drive_items AS d (client_key, file_id, parent_id, name, is_dir, mime_type,
-			size, md5, modified, owned_by_me, trashed, last_seen_scan, last_seen_at)
-		VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
+			size, md5, modified, owned_by_me, trashed, last_seen_scan, last_seen_at, capture_time, width, height)
+		VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), $13, NULLIF($14, 0), NULLIF($15, 0))
 		ON CONFLICT (client_key, file_id) DO UPDATE SET
 			parent_id = EXCLUDED.parent_id, name = EXCLUDED.name, is_dir = EXCLUDED.is_dir,
 			mime_type = EXCLUDED.mime_type, size = EXCLUDED.size, md5 = EXCLUDED.md5,
 			modified = EXCLUDED.modified, owned_by_me = EXCLUDED.owned_by_me, trashed = EXCLUDED.trashed,
-			last_seen_scan = EXCLUDED.last_seen_scan, last_seen_at = EXCLUDED.last_seen_at`,
+			last_seen_scan = EXCLUDED.last_seen_scan, last_seen_at = EXCLUDED.last_seen_at,
+			capture_time = EXCLUDED.capture_time, width = EXCLUDED.width, height = EXCLUDED.height`,
 		clientKey, item.FileId, item.ParentId, item.Name, item.IsDir, item.MimeType,
-		item.Size, item.Md5, modified, item.OwnedByMe, item.Trashed, scanId)
+		item.Size, item.Md5, modified, item.OwnedByMe, item.Trashed, scanId, captured, item.Width, item.Height)
 	return err
 }
 

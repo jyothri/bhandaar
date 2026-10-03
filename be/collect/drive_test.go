@@ -478,3 +478,19 @@ func TestDriveRecord(t *testing.T) {
 		t.Errorf("a scan without a linked account has record %+v, want nil", r)
 	}
 }
+
+func TestDriveItemReadsImageMetadata(t *testing.T) {
+	item := driveItem(&drive.File{Id: "p", Name: "IMG_1.JPG", MimeType: "image/jpeg",
+		ImageMediaMetadata: &drive.FileImageMediaMetadata{Time: "2020:01:01 05:00:00", Width: 4000, Height: 3000}})
+	if want := time.Date(2020, 1, 1, 5, 0, 0, 0, time.UTC); !item.CaptureTime.Equal(want) || item.Width != 4000 || item.Height != 3000 {
+		t.Errorf("image = capture %v, %dx%d", item.CaptureTime, item.Width, item.Height)
+	}
+	// A time Drive couldn't read is left out.
+	item = driveItem(&drive.File{Id: "q", ImageMediaMetadata: &drive.FileImageMediaMetadata{Time: "0000:00:00 00:00:00"}})
+	if !item.CaptureTime.IsZero() {
+		t.Errorf("unreadable time = %v, want none", item.CaptureTime)
+	}
+	if item := driveItem(&drive.File{Id: "r", Name: "a.txt"}); !item.CaptureTime.IsZero() || item.Width != 0 {
+		t.Errorf("a file without image metadata = %+v", item)
+	}
+}

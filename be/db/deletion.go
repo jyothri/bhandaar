@@ -164,6 +164,7 @@ func FinishDeletion(id int64, counts map[string]int64, revoke string, jobErr err
 	if err != nil {
 		return fmt.Errorf("failed to record the end of deletion %d: %w", id, err)
 	}
+	WakeDuplicates()
 	return nil
 }
 

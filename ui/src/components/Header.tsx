@@ -27,6 +27,7 @@ const tabs = [
   { to: "/", label: "Browse" },
   { to: "/request", label: "Request" },
   { to: "/requests", label: "Request History" },
+  { to: "/duplicates", label: "Duplicates" },
   { to: "/manage-data", label: "Manage data" },
 ] as const;
 
