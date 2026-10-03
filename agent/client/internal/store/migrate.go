@@ -11,6 +11,7 @@ import (
 // recorded in schema_version.
 var migrations = []func(s *Store, tx *sql.Tx) error{
 	1: migrateChangeFeed,
+	2: migrateMD5,
 }
 
 // SchemaVersion is the schema this build writes.
@@ -233,4 +234,17 @@ func reserveVersions(tx *sql.Tx, n int) (int64, error) {
 		return 0, err
 	}
 	return last - int64(n) + 1, nil
+}
+
+// migrateMD5 is schema version 2: files.md5, recorded next to the BLAKE3
+// content_hash so drives can be matched with Google Drive and Cloud
+// Storage (docs/specs/duplicates.md, "MD5 in driveagent"). Existing rows
+// have none, so the next scan re-reads them.
+func migrateMD5(s *Store, tx *sql.Tx) error {
+	has, err := hasColumn(tx, "files", "md5")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec(`ALTER TABLE files ADD COLUMN md5 TEXT`)
+	return err
 }

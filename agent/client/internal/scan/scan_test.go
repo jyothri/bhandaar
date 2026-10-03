@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"crypto/md5"
 	"errors"
 	"fmt"
 	"os"
@@ -400,5 +401,53 @@ func TestOnFlushAfterEachBatch(t *testing.T) {
 		if n < 2*(i+1) {
 			t.Errorf("flush %d: only %d rows visible", i+1, n)
 		}
+	}
+}
+
+func md5Of(s string) string {
+	return fmt.Sprintf("%x", md5.Sum([]byte(s)))
+}
+
+func TestScanRecordsMD5(t *testing.T) {
+	root := t.TempDir()
+	testutil.WriteTree(t, root, tree)
+	st := open(t)
+	run(t, st, Options{RootPath: root})
+
+	f, err := st.GetFile("d1", "docs/b.txt")
+	if err != nil || f == nil || f.MD5 != md5Of("bravo") || f.ContentHash != hashOf("bravo") {
+		t.Fatalf("record = %+v, %v; want both hashes of bravo", f, err)
+	}
+}
+
+func TestRescanAddsMissingMD5Once(t *testing.T) {
+	root := t.TempDir()
+	testutil.WriteTree(t, root, tree)
+	st := open(t)
+	run(t, st, Options{RootPath: root})
+
+	// As a scan before 0.6.0 left them: hashed, with no MD5.
+	files, err := st.ListFiles("d1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range files {
+		files[i].MD5 = ""
+	}
+	if err := st.UpsertFiles(context.Background(), files); err != nil {
+		t.Fatal(err)
+	}
+
+	// The next scan re-reads every file, though none changed...
+	s := run(t, st, Options{RootPath: root})
+	if s.FilesHashed != 6 || s.FilesSkipped != 0 {
+		t.Errorf("stats = %+v; want every file re-read for its MD5", s)
+	}
+	if f, _ := st.GetFile("d1", "a.txt"); f == nil || f.MD5 != md5Of("alpha") {
+		t.Errorf("a.txt = %+v, want its MD5", f)
+	}
+	// ...and the one after skips them again.
+	if s := run(t, st, Options{RootPath: root}); s.FilesSkipped != 6 || s.FilesHashed != 0 {
+		t.Errorf("third scan stats = %+v", s)
 	}
 }

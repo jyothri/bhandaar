@@ -15,7 +15,7 @@ const (
 // Change is one entry of a drive's change feed. Which fields are set
 // depends on Kind and Op (docs/specs/remote-sync-agent.md, "Wire mapping"):
 //
-//	file upsert:      Path, Size, MTimeUnix, Mode, ContentHash, HashAlgo, Status, ErrorMessage, ScannedAt
+//	file upsert:      Path, Size, MTimeUnix, Mode, ContentHash, HashAlgo, MD5, Status, ErrorMessage, ScannedAt
 //	file delete:      Path
 //	dir_child upsert: Path (the parent; "" is the drive root), Child, IsDir, FirstSeenAt
 //	dir_child delete: Path, Child
@@ -33,11 +33,14 @@ type Change struct {
 	Child    *string `json:"child,omitempty"`
 	ChildB64 string  `json:"child_b64,omitempty"`
 
-	Size         *int64     `json:"size,omitempty"`
-	MTimeUnix    *int64     `json:"mtime_unix,omitempty"`
-	Mode         *int64     `json:"mode,omitempty"`
-	ContentHash  string     `json:"content_hash,omitempty"`
-	HashAlgo     string     `json:"hash_algo,omitempty"`
+	Size        *int64 `json:"size,omitempty"`
+	MTimeUnix   *int64 `json:"mtime_unix,omitempty"`
+	Mode        *int64 `json:"mode,omitempty"`
+	ContentHash string `json:"content_hash,omitempty"`
+	HashAlgo    string `json:"hash_algo,omitempty"`
+	// MD5 of a hashed file, lowercase hex, from driveagent 0.6.0; empty from
+	// older agents, and for files not re-read since.
+	MD5          string     `json:"md5,omitempty"`
 	Status       string     `json:"status,omitempty"` // hashed | error
 	ErrorMessage string     `json:"error_message,omitempty"`
 	ScannedAt    *time.Time `json:"scanned_at,omitempty"`

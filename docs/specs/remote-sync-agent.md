@@ -145,7 +145,7 @@ After the drive checks and before `scan.Run`, the agent reads `S = sync_clock.v`
 
 ## Change feed in `state.db`
 
-Schema version 1 (a `schema_version` table tracks Go migrations after the original `CREATE … IF NOT EXISTS` list):
+Schema version 2 (a `schema_version` table tracks Go migrations after the original `CREATE … IF NOT EXISTS` list). Version 2 (0.6.0) adds `files.md5`; a driveagent before 0.6.0 refuses a state.db at version 2. Version 1 added:
 - `sync_clock (id = 1, v)`: the global version clock.
 - `drives`: `sync_stream_id` (NULL until first uploaded), `synced_version` (the watermark), `synced_at`, and the identity columns `fs_uuid`, `fs_type`, `fs_uuid_source`, `hw_serial`, `identity_seen_at`.
 - `row_version` on `files`, `dir_listings`, `scan_runs`, with `(drive_id, row_version)` indexes.
@@ -225,7 +225,7 @@ The server acknowledges a batch's range even if some entries fail its validation
 
 | Local | Wire (`agent/wire`) |
 |---|---|
-| `files` row | `{"kind":"file","op":"upsert","v","path","size","mtime_unix","mode","content_hash","hash_algo","status","error_message","scanned_at"}` |
+| `files` row | `{"kind":"file","op":"upsert","v","path","size","mtime_unix","mode","content_hash","hash_algo","md5","status","error_message","scanned_at"}`; `md5` (lowercase hex) from 0.6.0, omitted while a file has none |
 | `file` tombstone | `{"kind":"file","op":"delete","v","path"}` |
 | `dir_listings` row | `{"kind":"dir_child","op":"upsert","v","path","child","is_dir","first_seen_at"}` |
 | `dir_child` tombstone | `{"kind":"dir_child","op":"delete","v","path","child"}` |

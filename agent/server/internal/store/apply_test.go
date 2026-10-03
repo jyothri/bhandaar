@@ -573,3 +573,49 @@ func TestAnyBatchOrderGivesTheSameState(t *testing.T) {
 		}
 	}
 }
+
+func TestFileMD5(t *testing.T) {
+	f := newApply(t)
+	md5 := "0123456789abcdef0123456789abcdef"
+	withMD5 := fileUp(5, "a", 1)
+	withMD5.MD5 = md5
+	upper := fileUp(6, "b", 1)
+	upper.MD5 = "0123456789ABCDEF0123456789ABCDEF"
+	short := fileUp(7, "c", 1)
+	short.MD5 = "0123"
+	unreadable := fileUp(8, "d", 1)
+	unreadable.Status, unreadable.ContentHash, unreadable.HashAlgo, unreadable.MD5 = "error", "", "", md5
+	// An agent before 0.6.0 sends none.
+	r := f.mustSend(t, f.batch(0, 10, withMD5, upper, short, unreadable, fileUp(9, "e", 1)))
+	if r.Applied != 2 || len(r.Rejected) != 3 {
+		t.Fatalf("response = %+v", r)
+	}
+	for i, v := range []int64{6, 7, 8} {
+		if r.Rejected[i].V != v || !strings.Contains(r.Rejected[i].Reason, "md5") {
+			t.Errorf("rejected = %+v", r.Rejected)
+		}
+	}
+	got := map[string]string{}
+	rows, err := f.st.Pool.Query(bg, `SELECT relative_path, COALESCE(md5, '') FROM agent_files`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p, m string
+		rows.Scan(&p, &m)
+		got[p] = m
+	}
+	if got["a"] != md5 || got["e"] != "" || len(got) != 2 {
+		t.Errorf("md5s = %v", got)
+	}
+
+	// A later upsert of the same file, re-read for its MD5, records it.
+	again := fileUp(15, "e", 1)
+	again.MD5 = md5
+	f.mustSend(t, f.batch(10, 20, again))
+	var m string
+	if err := f.st.Pool.QueryRow(bg, `SELECT md5 FROM agent_files WHERE relative_path = 'e'`).Scan(&m); err != nil || m != md5 {
+		t.Errorf("e's md5 = %q, %v", m, err)
+	}
+}

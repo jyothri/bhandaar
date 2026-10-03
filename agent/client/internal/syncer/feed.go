@@ -61,7 +61,7 @@ var feedQueries = []struct {
 	scan  func(*sql.Rows) (Entry, error)
 	query string
 }{
-	{scanFile, `SELECT row_version, relative_path, size, mtime_unix, mode, content_hash, hash_algo, status, error_message, scanned_at
+	{scanFile, `SELECT row_version, relative_path, size, mtime_unix, mode, content_hash, hash_algo, status, error_message, scanned_at, md5
 		FROM files WHERE drive_id = ?1 AND row_version > ?2 AND row_version <= ?3 ORDER BY row_version LIMIT ?4`},
 	{scanDirChild, `SELECT row_version, relative_path, child_name, is_dir, first_seen_at
 		FROM dir_listings WHERE drive_id = ?1 AND row_version > ?2 AND row_version <= ?3 ORDER BY row_version LIMIT ?4`},
@@ -158,17 +158,17 @@ func utc(t time.Time) *time.Time {
 
 func scanFile(rows *sql.Rows) (Entry, error) {
 	var e Entry
-	var hash, algo, errMsg sql.NullString
+	var hash, algo, errMsg, md5 sql.NullString
 	var size, mtime, mode int64
 	var scannedAt time.Time
 	c := &e.Change
-	if err := rows.Scan(&c.V, &e.Key.Path, &size, &mtime, &mode, &hash, &algo, &c.Status, &errMsg, &scannedAt); err != nil {
+	if err := rows.Scan(&c.V, &e.Key.Path, &size, &mtime, &mode, &hash, &algo, &c.Status, &errMsg, &scannedAt, &md5); err != nil {
 		return e, fmt.Errorf("reading a files row: %w", err)
 	}
 	c.Kind, c.Op = wire.KindFile, wire.OpUpsert
 	setName(&c.Path, &c.PathB64, e.Key.Path)
 	c.Size, c.MTimeUnix, c.Mode = &size, &mtime, &mode
-	c.ContentHash, c.HashAlgo, c.ErrorMessage = hash.String, algo.String, errMsg.String
+	c.ContentHash, c.HashAlgo, c.ErrorMessage, c.MD5 = hash.String, algo.String, errMsg.String, md5.String
 	c.ScannedAt = utc(scannedAt)
 	e.Key.Kind, e.Key.V = c.Kind, c.V
 	return e, nil

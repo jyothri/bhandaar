@@ -111,7 +111,7 @@ func TestFeedMapping(t *testing.T) {
 	}
 	files := byKind["file upsert"]
 	if len(files) != 1 || *files[0].Path != "ok" || *files[0].Size != 2 || *files[0].Mode != 0o644 ||
-		files[0].ContentHash != "h-ok" || files[0].Status != "hashed" || files[0].ScannedAt.Location() != time.UTC {
+		files[0].ContentHash != "h-ok" || files[0].MD5 != "m-ok" || files[0].Status != "hashed" || files[0].ScannedAt.Location() != time.UTC {
 		t.Errorf("files = %+v", files)
 	}
 	del := byKind["file delete"]

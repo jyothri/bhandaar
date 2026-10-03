@@ -41,14 +41,16 @@ const (
 // FileRecord is one row of the files table: everything known about a single
 // file on a single drive, both from scanning and from comparison.
 type FileRecord struct {
-	DriveID      string
-	RelPath      string
-	Size         int64
-	MTimeUnix    int64
-	Mode         uint32
-	QuickSig     string
-	ContentHash  string
-	HashAlgo     string
+	DriveID     string
+	RelPath     string
+	Size        int64
+	MTimeUnix   int64
+	Mode        uint32
+	QuickSig    string
+	ContentHash string
+	HashAlgo    string
+	// MD5, lowercase hex, of a hashed file; "" until re-read by 0.6.0+.
+	MD5          string
 	Status       string
 	ErrorMessage string
 	ScannedAt    time.Time
@@ -406,13 +408,13 @@ func (s *Store) FileComparisonStatus(driveID, relPath string) (string, error) {
 // any. Used by the scanner to decide whether a file can be skipped.
 func (s *Store) Existing(driveID, relPath string) (*FileRecord, error) {
 	row := s.db.QueryRow(`
-		SELECT size, mtime_unix, mode, status
+		SELECT size, mtime_unix, mode, status, COALESCE(md5, '')
 		FROM files WHERE drive_id = ? AND relative_path = ?
 	`, driveID, relPath)
 	var rec FileRecord
 	rec.DriveID = driveID
 	rec.RelPath = relPath
-	if err := row.Scan(&rec.Size, &rec.MTimeUnix, &rec.Mode, &rec.Status); err != nil {
+	if err := row.Scan(&rec.Size, &rec.MTimeUnix, &rec.Mode, &rec.Status, &rec.MD5); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -422,9 +424,10 @@ func (s *Store) Existing(driveID, relPath string) (*FileRecord, error) {
 }
 
 // UpsertFiles writes a batch of freshly-(re)hashed file records inside a
-// single transaction. Every row here represents either a brand-new file or
-// one scan just decided needed re-hashing (size/mtime changed) — in both
-// cases any previously-computed comparison_status is now stale, so it's
+// single transaction. Every row here represents a brand-new file, one scan
+// just decided needed re-hashing (size/mtime changed), or one re-read only
+// for its MD5. Unless its size and content hash are unchanged (the MD5
+// case), any previously-computed comparison_status is now stale, so it's
 // reset to NULL (uncompared) rather than carried forward silently. Each row
 // gets a new feed version, which supersedes any tombstone for its path.
 func (s *Store) UpsertFiles(ctx context.Context, recs []FileRecord) error {
@@ -437,8 +440,8 @@ func (s *Store) UpsertFiles(ctx context.Context, recs []FileRecord) error {
 			return err
 		}
 		stmt, err := tx.Prepare(`
-			INSERT INTO files (drive_id, relative_path, size, mtime_unix, mode, quick_sig, content_hash, hash_algo, status, error_message, scanned_at, row_version)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO files (drive_id, relative_path, size, mtime_unix, mode, quick_sig, content_hash, hash_algo, status, error_message, scanned_at, row_version, md5)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))
 			ON CONFLICT(drive_id, relative_path) DO UPDATE SET
 				size = excluded.size,
 				mtime_unix = excluded.mtime_unix,
@@ -450,10 +453,11 @@ func (s *Store) UpsertFiles(ctx context.Context, recs []FileRecord) error {
 				error_message = excluded.error_message,
 				scanned_at = excluded.scanned_at,
 				row_version = excluded.row_version,
-				comparison_status = NULL,
-				compared_against_drive_id = NULL,
-				counterpart_relative_path = NULL,
-				compared_at = NULL
+				md5 = excluded.md5,
+				comparison_status = CASE WHEN (files.status = 'hashed' AND excluded.status = 'hashed' AND files.size = excluded.size AND files.content_hash IS excluded.content_hash) THEN files.comparison_status END,
+				compared_against_drive_id = CASE WHEN (files.status = 'hashed' AND excluded.status = 'hashed' AND files.size = excluded.size AND files.content_hash IS excluded.content_hash) THEN files.compared_against_drive_id END,
+				counterpart_relative_path = CASE WHEN (files.status = 'hashed' AND excluded.status = 'hashed' AND files.size = excluded.size AND files.content_hash IS excluded.content_hash) THEN files.counterpart_relative_path END,
+				compared_at = CASE WHEN (files.status = 'hashed' AND excluded.status = 'hashed' AND files.size = excluded.size AND files.content_hash IS excluded.content_hash) THEN files.compared_at END
 		`)
 		if err != nil {
 			return err
@@ -466,7 +470,7 @@ func (s *Store) UpsertFiles(ctx context.Context, recs []FileRecord) error {
 		defer untomb.Close()
 
 		for i, r := range recs {
-			if _, err := stmt.Exec(r.DriveID, r.RelPath, r.Size, r.MTimeUnix, r.Mode, r.QuickSig, r.ContentHash, r.HashAlgo, r.Status, r.ErrorMessage, r.ScannedAt, first+int64(i)); err != nil {
+			if _, err := stmt.Exec(r.DriveID, r.RelPath, r.Size, r.MTimeUnix, r.Mode, r.QuickSig, r.ContentHash, r.HashAlgo, r.Status, r.ErrorMessage, r.ScannedAt, first+int64(i), r.MD5); err != nil {
 				return err
 			}
 			if _, err := untomb.Exec(r.DriveID, r.RelPath); err != nil {
@@ -478,7 +482,7 @@ func (s *Store) UpsertFiles(ctx context.Context, recs []FileRecord) error {
 }
 
 const fileCols = `relative_path, size, mtime_unix, mode, quick_sig, content_hash, hash_algo, status, error_message, scanned_at,
-	comparison_status, compared_against_drive_id, counterpart_relative_path, compared_at`
+	comparison_status, compared_against_drive_id, counterpart_relative_path, compared_at, md5`
 
 // GetFile returns the full row for one file, or nil if it has no row.
 func (s *Store) GetFile(driveID, relPath string) (*FileRecord, error) {
@@ -532,15 +536,16 @@ func scanFileRows(driveID string, rows *sql.Rows) ([]FileRecord, error) {
 	for rows.Next() {
 		var r FileRecord
 		r.DriveID = driveID
-		var contentHash, hashAlgo, errMsg sql.NullString
+		var contentHash, hashAlgo, errMsg, md5 sql.NullString
 		var compStatus, comparedAgainst, counterpart sql.NullString
 		var comparedAt sql.NullTime
 		if err := rows.Scan(&r.RelPath, &r.Size, &r.MTimeUnix, &r.Mode, &r.QuickSig, &contentHash, &hashAlgo, &r.Status, &errMsg, &r.ScannedAt,
-			&compStatus, &comparedAgainst, &counterpart, &comparedAt); err != nil {
+			&compStatus, &comparedAgainst, &counterpart, &comparedAt, &md5); err != nil {
 			return nil, err
 		}
 		r.ContentHash = contentHash.String
 		r.HashAlgo = hashAlgo.String
+		r.MD5 = md5.String
 		r.ErrorMessage = errMsg.String
 		r.ComparisonStatus = compStatus.String
 		r.ComparedAgainstDriveID = comparedAgainst.String
