@@ -24,23 +24,19 @@ const (
 // A path or child name that isn't valid UTF-8 is sent as standard base64 of
 // its bytes in PathB64 / ChildB64 instead (never both).
 type Change struct {
-	V    int64  `json:"v"`
-	Kind string `json:"kind"`
-	Op   string `json:"op"`
-
-	Path     *string `json:"path,omitempty"`
-	PathB64  string  `json:"path_b64,omitempty"`
-	Child    *string `json:"child,omitempty"`
-	ChildB64 string  `json:"child_b64,omitempty"`
-
-	Size        *int64 `json:"size,omitempty"`
-	MTimeUnix   *int64 `json:"mtime_unix,omitempty"`
-	Mode        *int64 `json:"mode,omitempty"`
-	ContentHash string `json:"content_hash,omitempty"`
-	HashAlgo    string `json:"hash_algo,omitempty"`
-	// MD5 of a hashed file, lowercase hex, from driveagent 0.6.0; empty from
-	// older agents, and for files not re-read since.
-	MD5          string     `json:"md5,omitempty"`
+	V            int64      `json:"v"`
+	Kind         string     `json:"kind"`
+	Op           string     `json:"op"`
+	Path         *string    `json:"path,omitempty"`
+	PathB64      string     `json:"path_b64,omitempty"`
+	Child        *string    `json:"child,omitempty"`
+	ChildB64     string     `json:"child_b64,omitempty"`
+	Size         *int64     `json:"size,omitempty"`
+	MTimeUnix    *int64     `json:"mtime_unix,omitempty"`
+	Mode         *int64     `json:"mode,omitempty"`
+	ContentHash  string     `json:"content_hash,omitempty"`
+	HashAlgo     string     `json:"hash_algo,omitempty"`
+	MD5          string     `json:"md5,omitempty"`    // lowercase hex; from driveagent 0.6.0, empty from older agents and files not re-read since
 	Status       string     `json:"status,omitempty"` // hashed | error
 	ErrorMessage string     `json:"error_message,omitempty"`
 	ScannedAt    *time.Time `json:"scanned_at,omitempty"`
