@@ -379,6 +379,7 @@ func MarkScanCompleted(scanId int) error {
 	}
 	slog.Info("Scan marked as completed", "scan_id", scanId)
 	notification.PublishScanEnd(scanId, notification.StatusCompleted, "")
+	WakeDuplicates()
 	return nil
 }
 
@@ -403,6 +404,8 @@ func MarkScanFailed(scanId int, errMsg string) error {
 	}
 	slog.Error("Scan marked as failed", "scan_id", scanId, "error", errMsg)
 	notification.PublishScanEnd(scanId, notification.StatusFailed, errMsg)
+	// Its upserts stay.
+	WakeDuplicates()
 	return nil
 }
 
@@ -469,7 +472,10 @@ func migrateDB() error {
 	if err := migrateBrowseTotals(); err != nil {
 		return err
 	}
-	return migrateDeletions()
+	if err := migrateDeletions(); err != nil {
+		return err
+	}
+	return migrateDuplicates()
 }
 
 // migrateDropCompletedAt drops scans.completed_at. Nothing ever set it, so

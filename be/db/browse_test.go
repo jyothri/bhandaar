@@ -23,6 +23,7 @@ CREATE TABLE agent_drives (
   agent_id          UUID NOT NULL REFERENCES agent_agents(id),
   drive_id          TEXT NOT NULL,
   physical_drive_id BIGINT,
+  acked_version     BIGINT NOT NULL DEFAULT 0,
   last_synced_at    TIMESTAMPTZ
 );
 CREATE TABLE agent_files (
@@ -33,6 +34,7 @@ CREATE TABLE agent_files (
   size           BIGINT NOT NULL,
   mtime          TIMESTAMPTZ NOT NULL,
   content_hash   TEXT,
+  md5            TEXT,
   status         TEXT NOT NULL,
   error_message  TEXT,
   row_version    BIGINT NOT NULL,
