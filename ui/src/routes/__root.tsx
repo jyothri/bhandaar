@@ -36,22 +36,19 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 });
 
 // The page's name in the browser tab: "<page> · Bhandaar".
+const pageTitles: Record<string, string> = {
+  "/": "Browse",
+  "/request": "Request",
+  "/requests": "Request History",
+  "/duplicates": "Duplicates",
+  "/manage-data": "Manage data",
+  "/settings": "Settings",
+  "/login": "Log in",
+};
+
 function pageTitle(pathname: string): string {
   const scan = pathname.match(/^\/scans\/([^/]+)/);
-  const page =
-    pathname === "/"
-      ? "Browse"
-      : pathname === "/request"
-        ? "Request"
-        : pathname === "/requests"
-          ? "Request History"
-          : pathname === "/manage-data"
-            ? "Manage data"
-            : pathname === "/login"
-              ? "Log in"
-              : scan
-                ? `Scan ${scan[1]}`
-                : "";
+  const page = pageTitles[pathname] ?? (scan ? `Scan ${scan[1]}` : "");
   return page ? `${page} · Bhandaar` : "Bhandaar";
 }
 

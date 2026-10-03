@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ReactNode, useEffect } from "react";
+import { useGcsEnabled } from "../components/hooks/useSettings";
 
 import {
   getAccountMessages,
@@ -177,11 +178,16 @@ function SourceView({
   const navigate = useNavigate({ from: Route.fullPath });
   const id = sourceId(source);
   const recalled = recall(lastServiceKey(source.key));
-  const service: BrowseService =
+  // Cloud Storage only when the user's settings show it; while they load,
+  // a page asked for it stays on it.
+  const gcsEnabled = useGcsEnabled();
+  const asked: BrowseService =
     search.service ??
     (recalled === "gmail" || recalled === "photos" || recalled === "gcs"
       ? recalled
       : "drive");
+  const service: BrowseService =
+    asked === "gcs" && gcsEnabled === false ? "drive" : asked;
 
   useEffect(() => {
     remember(lastSourceKey, id);
@@ -420,6 +426,7 @@ function GoogleAccount({
   search: BrowseSearch;
 }) {
   const navigate = useNavigate({ from: Route.fullPath });
+  const gcsEnabled = useGcsEnabled();
   const services = source.services!;
   const sub = (name: BrowseService, st: ServiceTotals) =>
     st.files !== undefined && st.bytes !== undefined
@@ -449,11 +456,15 @@ function GoogleAccount({
             label: "Google Photos",
             sub: sub("photos", services.photos),
           },
-          {
-            id: "gcs",
-            label: "Google Cloud Storage",
-            sub: sub("gcs", services.gcs),
-          },
+          ...(gcsEnabled || service === "gcs"
+            ? [
+                {
+                  id: "gcs" as const,
+                  label: "Google Cloud Storage",
+                  sub: sub("gcs", services.gcs),
+                },
+              ]
+            : []),
         ]}
       />
       <SummaryCard

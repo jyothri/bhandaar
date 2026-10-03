@@ -25,6 +25,7 @@ import {
   ManageData,
 } from "../types/manageData";
 import { MessagePage, ScanDataPage, ScanSummary } from "../types/results";
+import { Settings } from "../types/settings";
 import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 
 export const backend_url = config.backendUrl;
@@ -323,3 +324,14 @@ export const getDupMembers = (
   fetchJson(
     `/api/duplicates/members?${new URLSearchParams({ kind, key, page: String(page) })}`
   );
+
+/** The user's settings. */
+export const getSettings = (): Promise<Settings> => fetchJson("/api/settings");
+
+/** Replaces the user's settings, and answers them as saved. */
+export const saveSettings = (settings: Settings): Promise<Settings> =>
+  fetchJson("/api/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });

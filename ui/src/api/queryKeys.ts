@@ -30,6 +30,7 @@ export const queryKeys = {
   pickedItems: (scanId: number, page: number) =>
     ["pickedItems", scanId, page] as const,
   manageData: ["manageData"] as const,
+  settings: ["settings"] as const,
   deletion: (id: number) => ["deletion", id] as const,
   // Prefix of every duplicates key, for refreshing them when the index is rebuilt.
   duplicates: ["duplicates"] as const,

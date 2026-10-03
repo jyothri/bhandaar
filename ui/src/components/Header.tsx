@@ -140,6 +140,15 @@ function UserMenu({ username }: { username: string }) {
           <p className="px-3 py-2 text-xs text-muted">
             Signed in as {username}
           </p>
+          <Link
+            to="/settings"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-muted"
+          >
+            <Icon name="settings" />
+            Settings
+          </Link>
           <button
             type="button"
             role="menuitem"

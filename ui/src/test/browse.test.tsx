@@ -52,11 +52,13 @@ const page = (extra: object) => ({
 });
 
 let sources: object[];
+let gcsEnabled: boolean;
 
 beforeEach(() => {
   stubEventSource();
   localStorage.clear();
   sources = [google, agent];
+  gcsEnabled = false;
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (input) => {
     const url = new URL(String(input));
@@ -65,6 +67,8 @@ beforeEach(() => {
     switch (url.pathname) {
       case "/api/auth/me":
         return loggedIn();
+      case "/api/settings":
+        return json(200, { gcs_enabled: gcsEnabled });
       case "/api/browse/sources":
         return json(200, sources);
       case "/api/browse/google/JVVYZFCI0PaW/drive/children":
@@ -451,6 +455,19 @@ describe("Browse", () => {
     ).toHaveAttribute("href", "/request?type=photos&account=JVVYZFCI0PaW");
   });
 
+  it("has no Cloud Storage tab while it's off in Settings", async () => {
+    renderRoute("/?source=google:JVVYZFCI0PaW&service=gcs");
+    expect(
+      await screen.findByRole("tab", { name: /^Google Drive/, selected: true })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: /^Google Photos/ })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: /^Google Cloud Storage/ })
+    ).toBeNull();
+  });
+
   it("shows an account's Cloud Storage buckets, and what the tree hides", async () => {
     const user = userEvent.setup();
     sources = [
@@ -467,6 +484,7 @@ describe("Browse", () => {
         },
       },
     ];
+    gcsEnabled = true;
     renderRoute("/?source=google:JVVYZFCI0PaW&service=gcs");
 
     expect(

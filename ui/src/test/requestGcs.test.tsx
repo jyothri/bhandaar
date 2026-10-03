@@ -15,10 +15,12 @@ const json = (status: number, body: unknown) =>
   });
 
 let projects: () => Response;
+let gcsEnabled: boolean;
 
 beforeEach(() => {
   stubEventSource();
   sessionStorage.clear();
+  gcsEnabled = true;
   projects = () =>
     json(200, [
       { projectId: "backup-276614", displayName: "personal-backup" },
@@ -31,6 +33,8 @@ beforeEach(() => {
     switch (`${method} ${url.pathname}`) {
       case "GET /api/auth/me":
         return loggedIn();
+      case "GET /api/settings":
+        return json(200, { gcs_enabled: gcsEnabled });
       case "GET /api/accounts":
         return json(200, [
           { clientKey: "k1", displayName: "alice", services: ["gmail"] },
@@ -89,6 +93,17 @@ const posted = () => {
 const submit = () => screen.getByRole("button", { name: "Submit" });
 
 describe("request form, Google Cloud Storage", () => {
+  it("has no tab while Cloud Storage is off in Settings", async () => {
+    gcsEnabled = false;
+    renderRoute("/request?type=gcs");
+    expect(
+      await screen.findByRole("tab", { name: "Gmail", selected: true })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "Google Cloud Storage" })
+    ).toBeNull();
+  });
+
   it("has a tab, and asks an account without it to grant access", async () => {
     const user = await openGcs("k1");
 

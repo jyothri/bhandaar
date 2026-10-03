@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useGcsEnabled } from "../components/hooks/useSettings";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -105,8 +106,13 @@ function Request() {
   const navigate = useNavigate({ from: Route.fullPath });
   // Back from linking, the service being linked (remembered before leaving
   // for Google) wins over the URL's, until the effect below settles it.
-  const service: Service =
+  // Cloud Storage only when the user's settings show it; while they load,
+  // a page asked for it stays on it.
+  const gcsEnabled = useGcsEnabled();
+  const asked: Service =
     (linkedAccount ? linkService() : null) ?? type ?? "gmail";
+  const service: Service =
+    asked === "gcs" && gcsEnabled === false ? "gmail" : asked;
 
   // One message at a time, so a success and an error can't show together.
   const [message, setMessage] = useState<{
@@ -325,7 +331,9 @@ function Request() {
             { id: "gmail", label: serviceNames.gmail.full },
             { id: "drive", label: serviceNames.drive.full },
             { id: "photos", label: serviceNames.photos.full },
-            { id: "gcs", label: serviceNames.gcs.full },
+            ...(gcsEnabled || service === "gcs"
+              ? [{ id: "gcs" as const, label: serviceNames.gcs.full }]
+              : []),
           ]}
         />
         <div className="mt-5 grid gap-5">
