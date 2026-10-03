@@ -23,7 +23,10 @@ import (
 )
 
 // List of fields to be retreived on file resource from the drive API.
-var fields []string = []string{"size", "id", "name", "mimeType", "parents", "modifiedTime", "md5Checksum", "trashed", "ownedByMe"}
+// imageMediaMetadata is an image's capture time and dimensions, for matching
+// Google Photos items (docs/specs/duplicates.md, "Photos").
+var fields []string = []string{"size", "id", "name", "mimeType", "parents", "modifiedTime", "md5Checksum", "trashed", "ownedByMe",
+	"imageMediaMetadata(time,width,height)"}
 var paginationFields []string = []string{"nextPageToken", "incompleteSearch"}
 
 const pageSize = 1000
@@ -484,6 +487,13 @@ func driveItem(file *drive.File) *db.DriveItem {
 	}
 	if file.ModifiedTime != "" {
 		item.Modified = parseTime(file.ModifiedTime)
+	}
+	if m := file.ImageMediaMetadata; m != nil {
+		item.Width, item.Height = m.Width, m.Height
+		// EXIF's "2006:01:02 15:04:05", in the camera's local time.
+		if t, err := time.Parse("2006:01:02 15:04:05", m.Time); err == nil {
+			item.CaptureTime = t
+		}
 	}
 	return item
 }
