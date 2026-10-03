@@ -28,11 +28,10 @@ type Change struct {
 	Kind string `json:"kind"`
 	Op   string `json:"op"`
 
-	Path     *string `json:"path,omitempty"`
-	PathB64  string  `json:"path_b64,omitempty"`
-	Child    *string `json:"child,omitempty"`
-	ChildB64 string  `json:"child_b64,omitempty"`
-
+	Path         *string    `json:"path,omitempty"`
+	PathB64      string     `json:"path_b64,omitempty"`
+	Child        *string    `json:"child,omitempty"`
+	ChildB64     string     `json:"child_b64,omitempty"`
 	Size         *int64     `json:"size,omitempty"`
 	MTimeUnix    *int64     `json:"mtime_unix,omitempty"`
 	Mode         *int64     `json:"mode,omitempty"`
