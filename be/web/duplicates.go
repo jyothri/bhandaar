@@ -11,7 +11,7 @@ import (
 )
 
 // Duplicates: identical files and folders across a user's sources, and
-// likely copies of their Google Photos. See docs/specs/duplicates.md, "API".
+// likely copies of their Google Photos. See docs/archive/duplicates.md, "API".
 
 func duplicatesRoutes(api *mux.Router) {
 	api.HandleFunc("/duplicates/summary", DupSummaryHandler).Methods("GET")

@@ -1,5 +1,5 @@
 // The Manage data page: linked accounts, uploaded drives, and deleting them.
-// See docs/specs/data-deletion.md.
+// See docs/archive/data-deletion.md.
 
 import { ServiceTotals } from "./browse";
 

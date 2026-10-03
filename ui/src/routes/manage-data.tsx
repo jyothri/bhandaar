@@ -32,7 +32,7 @@ import {
 // Manage data: linked Google accounts and uploaded drives, and deleting
 // them.
 // Each deletion is confirmed, then runs as a job on the server; the page
-// watches it until it ends. See docs/specs/data-deletion.md.
+// watches it until it ends. See docs/archive/data-deletion.md.
 
 export const Route = createFileRoute("/manage-data")({
   component: ManageData,

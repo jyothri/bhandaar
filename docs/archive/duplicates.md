@@ -1,6 +1,6 @@
 # Duplicates: Identical Files and Folders Across Every Source
 
-**Status:** implemented: step 0 measured, step 1 (driveagent 0.6.0, agentserver migration 4), and steps 2–4 (the index, the API and the Duplicates page, in one PR). See [As built](#as-built-steps-24). Written 2026-10-02, after [browse.md](../archive/browse.md), [gcs-scans.md](../archive/gcs-scans.md) and [photos-picker.md](../archive/photos-picker.md) were built.
+**Status:** implemented: step 0 measured, step 1 (driveagent 0.6.0, agentserver migration 4), and steps 2–4 (the index, the API and the Duplicates page, in one PR). See [As built](#as-built-steps-24). Written 2026-10-02, after [browse.md](browse.md), [gcs-scans.md](gcs-scans.md) and [photos-picker.md](photos-picker.md) were built.
 
 ## Problem
 
@@ -132,7 +132,7 @@ Only groups with two or more copies are stored. A rebuild replaces a user's rows
 1. **Files:**
    - Gather the exact keys of every live, counted file of the user, from the three sources' tables.
    - Group by key, keep groups of two or more copies, and write them with their members.
-   - On the prod copy, seagate1 alone had 129,856 groups of identical files, found in 0.76 s with `agent_files`' hash index ([browse.md](../archive/browse.md#scope)).
+   - On the prod copy, seagate1 alone had 129,856 groups of identical files, found in 0.76 s with `agent_files`' hash index ([browse.md](browse.md#scope)).
 2. **Folders:**
    - Walk each source's tree bottom up in `be`, computing signatures in one streaming pass per source, ordered by path.
    - Group the signatures, and drop pairs nested inside a reported pair.

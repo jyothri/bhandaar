@@ -23,7 +23,7 @@ import (
 // Google Drive, Cloud Storage and agent drives, and Google Photos items
 // that are likely copies of files elsewhere. Each user's duplicates are
 // worked out ahead of time into an index (dup_groups, dup_members), rebuilt
-// when its inputs change. See docs/specs/duplicates.md.
+// when its inputs change. See docs/archive/duplicates.md.
 
 // Kinds of duplicate groups.
 const (
@@ -539,7 +539,7 @@ func (f *dupFolder) parent() (string, bool) {
 // signer computes folder signatures from a source's files, given in sign
 // path order (bytewise, so a folder's contents are contiguous), bottom up:
 // a folder's signature is a SHA-256 over its children, sorted by name, each
-// "<name>\0<f|d>\0<key or signature>\n". See docs/specs/duplicates.md,
+// "<name>\0<f|d>\0<key or signature>\n". See docs/archive/duplicates.md,
 // "Folders". A folder's part of a sign path may be "<name>\x01<ID>", which
 // keeps apart Drive folders of one name; its name is the part before
 // \x01.

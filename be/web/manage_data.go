@@ -17,7 +17,7 @@ import (
 )
 
 // Manage data: the user's linked accounts and uploaded drives, and
-// deleting them. Deletions run as background jobs. See docs/specs/data-deletion.md.
+// deleting them. Deletions run as background jobs. See docs/archive/data-deletion.md.
 
 func manageDataRoutes(api *mux.Router) {
 	api.HandleFunc("/manage-data", ManageDataHandler).Methods("GET")

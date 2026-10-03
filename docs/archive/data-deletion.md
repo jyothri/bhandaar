@@ -39,7 +39,7 @@ Kept:
 - **The drive's `agent_physical_drives` row**, which links copies of one physical drive. It's kept even if no drive points at it any more, so a later upload links to the same physical drive again.
 - **The same physical drive as uploaded from other boxes:** those are separate `agent_drives` rows.
 
-`be` has only read `agentserver`'s tables so far. This is the one place it writes them: one `DELETE` of one `agent_drives` row. The data the cascade removes is what `agentserver` itself clears when a drive's stream restarts ([remote-sync-server.md](remote-sync-server.md), `PUT /agent/v1/drives`). Here the row goes too, so the drive leaves Browse.
+`be` has only read `agentserver`'s tables so far. This is the one place it writes them: one `DELETE` of one `agent_drives` row. The data the cascade removes is what `agentserver` itself clears when a drive's stream restarts ([remote-sync-server.md](../specs/remote-sync-server.md), `PUT /agent/v1/drives`). Here the row goes too, so the drive leaves Browse.
 
 The `DELETE` takes the drive row's lock, so it waits for any upload batch in progress to commit, then removes everything.
 

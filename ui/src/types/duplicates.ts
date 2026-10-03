@@ -1,5 +1,5 @@
 // The Duplicates page: identical files and folders across a user's sources,
-// and likely copies of their Google Photos. See docs/specs/duplicates.md.
+// and likely copies of their Google Photos. See docs/archive/duplicates.md.
 
 export type DupKind = "file" | "folder" | "photo";
 
