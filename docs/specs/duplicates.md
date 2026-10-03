@@ -1,6 +1,6 @@
 # Duplicates: Identical Files and Folders Across Every Source
 
-**Status:** in progress: step 0 done, step 1 (driveagent 0.6.0, agentserver migration 4) implemented. Written 2026-10-02, after [browse.md](../archive/browse.md), [gcs-scans.md](../archive/gcs-scans.md) and [photos-picker.md](../archive/photos-picker.md) were built.
+**Status:** implemented: step 0 measured, step 1 (driveagent 0.6.0, agentserver migration 4), and steps 2–4 (the index, the API and the Duplicates page, in one PR). See [As built](#as-built-steps-24). Written 2026-10-02, after [browse.md](../archive/browse.md), [gcs-scans.md](../archive/gcs-scans.md) and [photos-picker.md](../archive/photos-picker.md) were built.
 
 ## Problem
 
@@ -223,3 +223,18 @@ Made 2026-10-02:
 - **Copies of one physical drive:** shown by default, labelled "Same physical drive", with zero reclaimable space; the hide filter starts off. Deleting the extra uploads, keeping one per physical drive, is a planned separate feature.
 - **Deleted copies:** live copies only.
 - **UI:** a Duplicates tab.
+
+## As built (steps 2–4)
+
+Steps 2–4 shipped together, in `be/db/duplicates.go`, `be/web/duplicates.go` and `ui/src/routes/duplicates.tsx`. Where it differs from the plan above:
+
+- **Tables:** `dup_members` has `source` (as in the API: `google:<client_key>:drive`, `google:<client_key>:gcs:<bucket>`, `google:<client_key>:photos`, `agent:<id>`) and `label` in place of `source_kind` and `source_key`, and `folder`, what Browse opens for the copy: Drive's folder ID, `<bucket>/<prefix>`, or an agent drive's folder path. `dup_groups` adds `files` (a folder's) and `match` (a likely photo's: "name and capture time, dimensions"). `dup_state` adds `uncomparable` and `by_source`, worked out at build time, and `error`.
+- **Representative name:** a group's most common name (`mode()`), not the first.
+- **Per-source totals:** a source's bytes in groups of identical files that aren't all on one physical drive, so a group in two sources counts in both. They link to the page filtered by that source.
+- **Building:** in one transaction on a connection of its own, with `temp_buffers` raised to 512 MB and the connection closed after. The first try, with the default 8 MB and an index on the temp table, took 12 minutes on the dev box under memory pressure. `dup_files` is kept narrow: a file's name, and for agent drives and Cloud Storage its item and folder, are derived from its path. Members are cleared before groups, not by the foreign key's cascade, and new groups get their IDs in a temp table that their members join.
+- **Folders:** one pass over every file, ordered by source then path (`COLLATE "C"`). A Drive name with a `/` splits into folders that aren't real; those, having no Drive ID, are skipped. The topmost-only rule drops a group when every member's parent is in one other group of the same size.
+- **Photos:** a Drive image's capture time is EXIF's, without a zone, so it may differ from the item's UTC time by whole quarter-hours up to 14 hours, within a minute. Images match either way round (portrait or landscape dimensions).
+- **Wake-ups:** `MarkScanCompleted`, `MarkScanFailed` and the end of each deletion job call `WakeDuplicates`; the builder waits 5 s for a burst to settle. Agent uploads are caught by the 10-minute check, through each drive's `acked_version` (in the fingerprint with its physical drive), since `agent_files` has no index on `row_version`.
+- **Elsewhere:** a Drive scan's page links to Duplicates filtered by the account's Drive; a Photos scan's to Photos (likely).
+
+Measured on the restored prod copy (1.86 million files), 2026-10-03: 429,530 groups of identical files, 6,583 of folders, 1,232 likely photos. A full rebuild took 2.5 minutes, mostly writing 1.47 million members, on a box with no free memory. Pages of folders and photos took 15–30 ms, and of files 0.3–0.8 s. On the dev stack's copy, with the largest drives deleted, a rebuild takes 12 s.
