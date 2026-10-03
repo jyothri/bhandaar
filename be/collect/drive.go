@@ -24,7 +24,7 @@ import (
 
 // List of fields to be retreived on file resource from the drive API.
 // imageMediaMetadata is an image's capture time and dimensions, for matching
-// Google Photos items (docs/specs/duplicates.md, "Photos").
+// Google Photos items (docs/archive/duplicates.md, "Photos").
 var fields []string = []string{"size", "id", "name", "mimeType", "parents", "modifiedTime", "md5Checksum", "trashed", "ownedByMe",
 	"imageMediaMetadata(time,width,height)"}
 var paginationFields []string = []string{"nextPageToken", "incompleteSearch"}

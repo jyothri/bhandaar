@@ -14,7 +14,7 @@ import (
 // Deleting data from Manage data: a drive as uploaded from one box, one
 // service's data of an account, or a whole Google account. Each runs as
 // a job.
-// See docs/specs/data-deletion.md.
+// See docs/archive/data-deletion.md.
 
 // Kinds of deletion: a drive from one box, a whole account, or one
 // service of an account (its name: "gmail", "drive", "gcs", "photos").
@@ -205,7 +205,7 @@ type ScanMeta struct {
 // transaction holds the account (which locks it for update), and it's
 // refused with ErrAccountBeingDeleted while a deletion of the account is
 // queued or running, or ErrNotFound once the account is gone. See
-// docs/specs/data-deletion.md, "Rules".
+// docs/archive/data-deletion.md, "Rules".
 func StartScan(scanType string, userID int64, meta ScanMeta) (int, error) {
 	tx, err := db.Beginx()
 	if err != nil {

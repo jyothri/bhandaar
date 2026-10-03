@@ -1,6 +1,6 @@
 # Remote Sync: `agentserver` Server
 
-**Status:** implemented (migrations 1–4; migration 4 adds `agent_files.md5`, for [duplicates](duplicates.md)). This is the compact as-built reference for `agent/server/`. The original spec, with its rationale and test list, is in [`archive/remote-sync/remote-sync-server.md`](../archive/remote-sync/remote-sync-server.md). The overview is [`remote-sync.md`](remote-sync.md).
+**Status:** implemented (migrations 1–4; migration 4 adds `agent_files.md5`, for [duplicates](../archive/duplicates.md)). This is the compact as-built reference for `agent/server/`. The original spec, with its rationale and test list, is in [`archive/remote-sync/remote-sync-server.md`](../archive/remote-sync/remote-sync-server.md). The overview is [`remote-sync.md`](remote-sync.md).
 
 `agentserver` receives scan data from `driveagent` and stores it in the Bhandaar Postgres database, next to `be`; neither calls the other.
 

@@ -26,7 +26,7 @@ import {
 
 // Duplicates: identical files and folders across every source, and likely
 // copies of picked Google Photos. The server works them out ahead of time;
-// this page reads that index. See docs/specs/duplicates.md, "Duplicates
+// this page reads that index. See docs/archive/duplicates.md, "Duplicates
 // page".
 
 type DuplicatesSearch = {

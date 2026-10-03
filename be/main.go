@@ -49,9 +49,9 @@ func main() {
 
 	// Keeps Browse's folder totals current (docs/archive/browse.md).
 	go db.TotalsChecker(context.Background(), 10*time.Minute)
-	// Keeps each user's duplicates index current (docs/specs/duplicates.md).
+	// Keeps each user's duplicates index current (docs/archive/duplicates.md).
 	go db.DuplicatesBuilder(context.Background(), 10*time.Minute)
-	// Deletion jobs are kept 30 days (docs/specs/data-deletion.md).
+	// Deletion jobs are kept 30 days (docs/archive/data-deletion.md).
 	go func() {
 		for range time.Tick(24 * time.Hour) {
 			if err := db.PurgeDeletionJobs(); err != nil {

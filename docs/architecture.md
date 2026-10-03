@@ -121,7 +121,7 @@ graph TB
 - `/routes/requests.tsx` - List view of scan requests by account, with readable scan types; each scan ID links to its results. The selected account is in the URL (`?account=<client_key>`), so links and Back return to it
 - `/components/Breadcrumbs.tsx` - The trail under the nav tabs on Request History and scan pages: `Request History › <account> › Scan N`. A scan's trail always goes through its account (the summary's `client_key`), however the scan was opened, and the Request History tab stays highlighted on it
 - `/routes/scans.$scanId.tsx` - One scan's results: its summary, then 10 rows a page: files and folders with their folder, size, file count, modified time and MD5, linked to Drive (Drive, local), new messages (Gmail), picked items with when taken, dimensions, camera and size (Google Photos), or each bucket's status and totals by state and class, linked into Browse (Google Cloud Storage)
-- `/routes/duplicates.tsx` - Duplicates: reclaimable space and per-source totals, tabs for identical files, identical folders and likely photo copies, filters (source, across sources, minimum size, hide same physical drive), and a page of groups, each expanding to its copies with links into Browse, Drive or the Cloud console. See [specs/duplicates.md](specs/duplicates.md)
+- `/routes/duplicates.tsx` - Duplicates: reclaimable space and per-source totals, tabs for identical files, identical folders and likely photo copies, filters (source, across sources, minimum size, hide same physical drive), and a page of groups, each expanding to its copies with links into Browse, Drive or the Cloud console. See [archive/duplicates.md](archive/duplicates.md)
 - `/routes/oauth/glink.tsx` - OAuth callback handler
 - `/api/index.ts` - Backend API client
 - `/components/ScanProgress.tsx` - Real-time progress display
@@ -174,7 +174,7 @@ Every route but health and login/logout needs a logged-in user (see [Web authent
 
 Browse routes answer 404 for a source that isn't the user's. See [archive/browse.md](archive/browse.md).
 
-Duplicates are read from an index of each user's, rebuilt by a goroutine (`db.DuplicatesBuilder`) when a scan or deletion ends, and every 10 minutes when its inputs changed. See [specs/duplicates.md](specs/duplicates.md).
+Duplicates are read from an index of each user's, rebuilt by a goroutine (`db.DuplicatesBuilder`) when a scan or deletion ends, and every 10 minutes when its inputs changed. See [archive/duplicates.md](archive/duplicates.md).
 
 #### Linking Google accounts (`web/oauth.go`)
 - The UI sends the user to Google asking for `openid email` plus a service's scope, with `include_granted_scopes=true` and `access_type=offline`, and Google returns to `/oauth/glink`, which hands the code to `GET /api/glink`.

@@ -95,7 +95,7 @@ var errSourceGone = errors.New("source deleted")
 // is written, and what the rebuild had marked is removed. A deletion
 // deletes the source's row before its totals, so it waits for a rebuild
 // holding the lock, and a rebuild after it finds the row gone; no totals
-// are left behind (docs/specs/data-deletion.md).
+// are left behind (docs/archive/data-deletion.md).
 func rebuildTotals(source string, version int64, lock string, query string, args ...any) error {
 	rebuildMu.Lock()
 	defer rebuildMu.Unlock()
