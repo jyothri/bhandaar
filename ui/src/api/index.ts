@@ -12,6 +12,11 @@ import {
   PickedItemPage,
 } from "../types/photos";
 import { GcsBucket, GcsProject, GcsScanBucket } from "../types/gcs";
+import {
+  DeletionJob,
+  RecordedService,
+  SettingsData,
+} from "../types/settings";
 import { MessagePage, ScanDataPage, ScanSummary } from "../types/results";
 import { RequestScanResponse, ScanMetadata, ScanRequest } from "../types/scans";
 
@@ -241,3 +246,38 @@ export const getGcsBuckets = (
 /** What a Cloud Storage scan did with each bucket. */
 export const getGcsScanBuckets = (scanId: number): Promise<GcsScanBucket[]> =>
   fetchJson(`/api/gcs/${scanId}`);
+
+/** The user's linked accounts and uploaded drives, for Settings. */
+export const getSettingsData = (): Promise<SettingsData> =>
+  fetchJson("/api/settings/data");
+
+/** Deletes a drive as uploaded from one box; the deletion runs as a job. */
+export const deleteAgentDrive = (id: number): Promise<DeletionJob> =>
+  fetchJson(`/api/agent-drives/${id}`, { method: "DELETE" });
+
+/** Deletes one service's data of an account (its scans and records), as a job. */
+export const deleteServiceData = (
+  clientKey: string,
+  service: RecordedService
+): Promise<DeletionJob> =>
+  fetchJson(`/api/accounts/${encodeURIComponent(clientKey)}/${service}`, {
+    method: "DELETE",
+  });
+
+/**
+ * Disconnects an account and deletes everything recorded for it, as a
+ * job; confirm is the account's name, as the user typed it.
+ */
+export const disconnectAccount = (
+  clientKey: string,
+  confirm: string
+): Promise<DeletionJob> =>
+  fetchJson(`/api/accounts/${encodeURIComponent(clientKey)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirm }),
+  });
+
+/** A deletion job's status. */
+export const getDeletion = (id: number): Promise<DeletionJob> =>
+  fetchJson(`/api/deletions/${id}`);

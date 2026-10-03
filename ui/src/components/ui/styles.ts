@@ -6,6 +6,9 @@ const buttonVariants = {
     "border border-line bg-surface text-fg hover:bg-surface-muted shadow-sm",
   ghost: "text-fg hover:bg-surface-muted",
   danger: "bg-danger-solid text-white hover:opacity-90 shadow-sm",
+  // A destructive action that opens a confirmation, not one that acts.
+  dangerOutline:
+    "border border-danger/40 bg-surface text-danger hover:bg-danger/10",
 };
 
 const buttonSizes = {

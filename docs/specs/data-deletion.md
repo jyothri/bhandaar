@@ -1,12 +1,12 @@
-# Deleting Data: Drives, Gmail, and Google Accounts
+# Deleting Data: Drives, Services, and Google Accounts
 
-**Status:** proposed. Written 2026-10-02.
+**Status:** implemented 2026-10-02 (see [As built](#as-built)). Written the same day.
 
 ## Problem
 
 Bhandaar keeps adding data and offers no way to remove it, other than deleting one scan at a time from Request History. Three removals are missing:
 1. **A drive uploaded from one box**, e.g. seagate1 as uploaded from `JyothriingasMBP.attlocal.net`. One physical drive is often uploaded from several machines, and only one copy is wanted.
-2. **An account's Gmail data**, while keeping the account and its other services.
+2. **One service's data of an account** (Gmail, Google Drive, Cloud Storage or Google Photos), while keeping the account and its other services.
 3. **A whole Google account**: disconnect it, and delete everything recorded for it (Gmail, Google Drive, Cloud Storage, Google Photos).
 
 The privacy policy promises deletion on request by email (section 8). These let users do it themselves.
@@ -14,7 +14,7 @@ The privacy policy promises deletion on request by email (section 8). These let 
 ## Scope
 
 In:
-- A **Settings** page, reached from the user menu, listing the user's linked Google accounts and uploaded drives, with the three deletions.
+- A **Manage data** page, a nav tab, listing the user's linked Google accounts and uploaded drives, with the three deletions.
 - **Confirmation before every deletion:** a dialog saying exactly what goes. Disconnecting an account also requires typing its name, like deleting a GitHub repository.
 - Deletions run as **background jobs**, with progress on the page.
 - **Revoking Bhandaar's access at Google** when an account is disconnected.
@@ -25,7 +25,6 @@ Out:
 - **Deleting anything at Google or on a disk.** Bhandaar removes only its own records. Its Google access is read-only, and agents' local `state.db` files are left alone.
 - **Stopping a box from re-uploading a deleted drive.** As decided, if that box scans or syncs the drive again, it's uploaded again in full. The dialog says so.
 - **Deleting a Bhandaar user.** That stays `agentserver user disable`, plus an email request.
-- Deleting one service other than Gmail (Drive, Cloud Storage or Photos alone). Disconnecting covers all of them; per-scan deletion stays in Request History.
 
 ## What each deletion removes
 
@@ -44,14 +43,24 @@ Kept:
 
 The `DELETE` takes the drive row's lock, so it waits for any upload batch in progress to commit, then removes everything.
 
-**If the box uploads again:** the agent's next batch gets `404 DRIVE_NOT_OPEN`, and it re-opens the drive ([remote-sync-agent.md](remote-sync-agent.md)). That creates a new `agent_drives` row with nothing acked, and the drive is uploaded again. The dialog warns that this happens.
+**If the box uploads again**, the drive comes back. Step 0 checked this with `driveagent` 0.5.0 against a test drive:
+- **A `scan`** re-opens the drive under a new stream, creating a new `agent_drives` row. It uploads only its own changes, so the drive shows with only what that scan found changed, often no files. It ends with `driveagent`'s usual hint, `1 drive(s) have history not yet uploaded; run "driveagent sync"`.
+- **A `sync`** sees that the server's acked ranges no longer cover what it acknowledged before. It starts a new stream and uploads the whole drive. Its message blames a server restored from an older copy, which is wrong here but harmless.
 
-Step 0 confirms the agent then uploads the drive's *whole* current state from that box, not just what changed since its last acked version. If it doesn't, `driveagent` needs a small fix so a re-opened drive with no acked ranges starts a new stream, as it already does when its `state.db` is older than the server's.
+So `driveagent` needs no change. The dialog warns that the drive comes back.
 
-### An account's Gmail data
+### One service's data of an account
 
-- **Removed:** the account's Gmail scans: every `scans` row of the user whose `scanmetadata.client_key` is the account and whose `scan_type` is `gmail`. With them go their `messagemetadata` and `scanmetadata` rows.
-- **Kept:** the account stays linked, Gmail access included, so it can be scanned again later. Its other services are untouched.
+The account's scans of that service, with their rows as `DeleteScan` removes them, and the service's living records:
+
+| Service | Its scans (`scan_type`) | Its living records |
+|---|---|---|
+| Gmail | `gmail` (with their `messagemetadata`) | none |
+| Google Drive | `google_drive` | `drive_items`, `drive_accounts`, Browse's totals for `drive:<client_key>` |
+| Cloud Storage | `gcs` | `gcs_objects`, `gcs_prefix_totals`, `gcs_buckets` |
+| Google Photos | `google_photos` (with their `photos_picked_items`) | `photos_picker_sessions` |
+
+The account stays linked, with the service's access, so it can be scanned again. Its other services are untouched. Gmail was the first of these; the other three were added on review (2026-10-02).
 
 ### A Google account (disconnect)
 
@@ -76,17 +85,25 @@ Steps 2–4 run in one transaction, so an account is never left half deleted. If
 ## Rules
 
 - **Only your own:** every deletion checks that the account or drive belongs to the logged-in user, and answers `404` otherwise, as other routes do.
-- **Not during a scan:** deleting Gmail data, or disconnecting an account, is refused (`409`) while one of that account's scans is `Running`. The dialog names the scan. Agent drives have no such check, since uploads are handled as above.
+- **Not during a scan:** deleting a service's data, or disconnecting an account, is refused (`409`) while one of that account's scans is `Running`. The dialog names the scan. Agent drives have no such check, since uploads are handled as above.
 - **One job per target:** a second request for the same account or drive while its job runs returns that job.
 - **Typed confirmation is checked by the server too:**
   - Disconnecting sends the typed text.
-  - The server compares it with the account's name, exactly as Settings shows it: the masked email (`jyo****ri@gmail.com`), plus the key suffix when two accounts share a name (`jyo****ri@gmail.com · JVVY`, as `accountLabels` does).
+  - The server compares it with the account's name, exactly as Manage data shows it: the masked email (`jyo****ri@gmail.com`), plus the key suffix when two accounts share a name (`jyo****ri@gmail.com · JVVY`, as `accountLabels` does).
   - A mismatch is `400` and nothing happens, so a UI bug can't skip the safeguard.
 - **Logged:** every deletion is logged, with user, target and counts. Its job row is kept for 30 days, then deleted by `be` at startup and daily.
 
 ## Deletion jobs
 
-Deleting seagate1 means removing about 2 million rows, and `be`'s HTTP writes time out after 10 s. So deletions run in the background:
+Deleting seagate1 means removing about 2 million rows, and `be`'s HTTP writes time out after 10 s. Measured on a restored copy of the prod database (step 0):
+
+| Deletion | Rows | Time |
+|---|---|---|
+| seagate1 from optiplex7070 | 888,902 files, 1,013,808 listings, plus 99,371 cached totals | 22 s |
+| One account's Gmail data | 37,004 messages, 2 scans | 0.6 s |
+| A whole account (Drive, Cloud Storage, all scans) | about 640,000 rows | 6 s |
+
+So deletions run in the background:
 
 ```sql
 deletions (
@@ -94,7 +111,7 @@ deletions (
   user_id     BIGINT NOT NULL REFERENCES agent_users(id),
   kind        TEXT NOT NULL,          -- 'agent_drive' | 'gmail' | 'account'
   target      TEXT NOT NULL,          -- the agent_drives id, or the client_key
-  label       TEXT NOT NULL,          -- what Settings showed, e.g. 'seagate1 (JyothriingasMBP.attlocal.net)'
+  label       TEXT NOT NULL,          -- what Manage data showed, e.g. 'seagate1 (JyothriingasMBP.attlocal.net)'
   status      TEXT NOT NULL,          -- 'running' | 'done' | 'failed'
   counts      JSONB NOT NULL DEFAULT '{}',   -- e.g. {"files": 888902, "scans": 7}
   revoke      TEXT NOT NULL DEFAULT '',      -- for accounts: 'revoked' | 'already revoked' | 'failed: …'
@@ -116,7 +133,7 @@ All need the session cookie, and see only the user's own data. The three `DELETE
 |---|---|
 | `GET /api/settings/data` | The user's linked accounts and uploaded drives, with what a deletion would remove (below), and any job running for each |
 | `DELETE /api/agent-drives/{id}` | Deletes a drive from one box → `202 {job}` |
-| `DELETE /api/accounts/{client_key}/gmail` | Deletes an account's Gmail data → `202 {job}`; `409` while one of its scans runs |
+| `DELETE /api/accounts/{client_key}/{service}` | Deletes one service's data (`gmail`, `drive`, `gcs`, `photos`) → `202 {job}`; `409` while one of the account's scans runs |
 | `DELETE /api/accounts/{client_key}` with `{"confirm": "<typed name>"}` | Disconnects the account → `202 {job}`; `400` if the text doesn't match; `409` while one of its scans runs |
 | `GET /api/deletions/{id}` | A job's status, counts, and revoke result |
 
@@ -127,11 +144,13 @@ All need the session cookie, and see only the user's own data. The three `DELETE
   "accounts": [{
     "client_key": "JVVYZFCI0PaW", "label": "jyo****ri@gmail.com",
     "services": ["gmail", "drive"],
-    "gmail": {"scans": 4, "messages": 5744, "bytes": 516703723},
-    "drive": {"files": 504, "bytes": 3961682114},
-    "gcs":   {"buckets": 0, "objects": 0, "bytes": 0},
-    "photos": {"items": 0},
-    "scans": 9, "running_scan": null, "job": null
+    "recorded": {
+      "gmail": {"granted": false, "files": 5744, "bytes": 516703723, "updated_at": "…"},
+      "drive": {"granted": false, "files": 504, "bytes": 3961682114, "updated_at": "…"},
+      "gcs": {"granted": false},
+      "photos": {"granted": false}
+    },
+    "gmail_scans": 4, "scans": 9, "running_scan": 12, "job": null
   }],
   "drives": [{
     "id": 5, "drive_id": "seagate1", "hostname": "JyothriingasMBP.attlocal.net",
@@ -142,19 +161,20 @@ All need the session cookie, and see only the user's own data. The three `DELETE
 }
 ```
 
-The counts come from Browse's totals where cached. Otherwise they're counted.
+`service_scans` counts the account's scans per service (`scans` is them all). `recorded` has one entry per service, with the same totals Browse's tabs show (`files` is messages for Gmail, objects for Cloud Storage, items for Photos). It has none when nothing is recorded, and `granted` isn't used here. `running_scan` is there only while one runs. The counts come from Browse's totals where cached, otherwise they're counted.
 
-## Settings page
+## Manage data page
 
-`/settings`, from the user menu, which gains **Settings** above **Log out**:
+`/manage-data`, the fourth nav tab, after Request History:
 
 ```
- Settings
+ Manage data
  ┌ Linked Google accounts ──────────────────────────────────────────────┐
  │ jyo****ri@gmail.com                                                   │
- │ Gmail 5,744 messages · 493 MB   Drive 504 files · 3.7 GB              │
+ │ Gmail          5,744 messages · 493 MB     [ Delete Gmail data ]       │
+ │ Google Drive   504 files · 3.7 GB          [ Delete Google Drive data ]│
  │ Cloud Storage —   Photos —      9 scans                               │
- │                       [ Delete Gmail data ]  [ Disconnect account ]   │
+ │                                            [ Disconnect account ]     │
  ├───────────────────────────────────────────────────────────────────────┤
  │ jyo****i2@gmail.com  …                                                │
  └───────────────────────────────────────────────────────────────────────┘
@@ -169,7 +189,7 @@ The counts come from Browse's totals where cached. Otherwise they're counted.
  └───────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Accounts:** a card per linked account: its name, what's recorded per service, the scan count, and its two buttons. The buttons use the danger style, outlined, not filled. "Delete Gmail data" is disabled when there's none.
+- **Accounts:** a card per linked account: its name, what's recorded per service, each with a "Delete … data" button when it has data, the scan count, and "Disconnect account". The buttons use the danger style, outlined, not filled. "Delete Gmail data" is disabled when there's none.
 - **Drives:** grouped by box (hostname), one row per drive: files, size, last sync. A drive linked to the same physical drive on other boxes lists those boxes, which helps pick the copy to delete.
 - **A deletion in progress** replaces the target's buttons with "Deleting…" and a spinner. The page polls the job every 2 seconds. When it ends, the page shows the result:
   - **Done:** for example "Deleted seagate1 from JyothriingasMBP.attlocal.net: 29 files". The account or drive then leaves the list.
@@ -189,12 +209,13 @@ A modal dialog (`role="dialog"`, `aria-modal`, focus trapped, Escape and Cancel 
  This deletes what Bhandaar holds for this drive as uploaded from this box:
  29 files (596 MB recorded) and its scan history. Nothing on the drive, or
  in the copies uploaded from optiplex7070 and jkurapati-apple.local, is touched.
- If JyothriingasMBP.attlocal.net scans or syncs seagate1 again, it's
- uploaded again in full. This can't be undone.
+ If JyothriingasMBP.attlocal.net scans or syncs seagate1 again, it comes
+ back: a scan re-creates it, and the next sync uploads all of it. This
+ can't be undone.
                                    [ Cancel ]  [ Delete drive ]
 ```
 
-**Delete Gmail data** (a simple confirmation):
+**Delete a service's data** (a simple confirmation; Gmail shown):
 
 ```
  Delete Gmail data for jyo****ri@gmail.com?
@@ -225,8 +246,8 @@ A modal dialog (`role="dialog"`, `aria-modal`, focus trapped, Escape and Cancel 
 ## Privacy policy
 
 Section 8 ("Your choices, and deleting your data") changes when this ships:
-- Removing a Google account, or its Gmail data, can be done in **Settings**, which also revokes access at Google. The email address stays for anything else, including deleting a whole Bhandaar account.
-- Uploaded drives can be deleted per box in Settings.
+- Removing a Google account, or one service's data of it, can be done in **Manage data**, which also revokes access at Google. The email address stays for anything else, including deleting a whole Bhandaar account.
+- Uploaded drives can be deleted per box in Manage data.
 
 The effective date moves to the release date.
 
@@ -234,7 +255,7 @@ The effective date moves to the release date.
 
 One PR each, checked on dev.sm against the prod copy:
 
-0. **Measure and check** on the prod copy:
+0. **Measure and check** on the prod copy (done 2026-10-02; results above):
    - how long deleting the largest agent drive takes (about 888,902 files and 99k folders' listings), and deleting an account with everything, which confirms the background jobs
    - what a `driveagent` 0.5.0 does after its drive is deleted on the server: it should re-open the drive and upload all of it, on both its next `scan` and its next `sync`
 
@@ -245,8 +266,8 @@ One PR each, checked on dev.sm against the prod copy:
    - revoking at Google
    - the settings and job API, with the owner, running-scan and typed-text checks
    - tests (`BE_TEST_DB`): each deletion removes exactly its target and leaves other accounts, drives and users alone; the cascade from `agent_drives`; a scan running → `409`; a wrong typed name → `400` and nothing deleted; revoke against a fake endpoint (`200`, `400 invalid_token`, a failure, a timeout); an interrupted job marked failed at startup
-2. **Settings page:**
-   - the user menu entry, the account and drive cards, and the three dialogs
+2. **Manage data page:**
+   - the nav tab, the account and drive cards, and the three dialogs
    - polling and the result messages, and refetching the other pages
    - the privacy policy update
    - tests: Cancel is focused first; Escape closes; the typed confirmation enables only on an exact match, and Enter submits only then; the right request for each action; results and errors shown
@@ -255,9 +276,19 @@ One PR each, checked on dev.sm against the prod copy:
 
 Made 2026-10-02:
 - **Re-uploads:** a deleted drive comes back if its box scans or syncs it again; nothing blocks it, and the dialog says so.
-- **Gmail:** removes the messages and the account's Gmail scans; the account stays connected.
+- **One service:** Gmail, Google Drive, Cloud Storage or Google Photos, each with its scans and records; the account stays connected. Gmail was first; the other three were added on review.
 - **Disconnect:** also revokes access at Google.
 - **Typed confirmation:** the account's name as shown, masked.
-- **Placement:** a Settings page.
+- **Placement:** a Manage data page, as a nav tab (first planned as Settings in the user menu; moved on review).
 - **Undo:** none; deletions are immediate.
 - **Confirmation:** a dialog for every deletion, with a typed name for disconnecting.
+
+## As built
+
+- **Jobs:** each job's work runs behind one process-wide lock, so deletions run one at a time. A service job's label is the account's name plus the service, e.g. " · Gmail", and its kind is the service (`gmail`, `drive`, `gcs`, `photos`).
+- **Revoking comes first:** it happens before the deletion's transaction. If the transaction then fails, for example because a scan started in between, the job is `failed`, but its `revoke` still shows Google's answer. The access may already be gone, and the account can be disconnected again.
+- **Results:** the page shows each finished job's result as a dismissible line at the top. A failed revoke is shown as a warning, with what to do. Finishing a job refetches this page, Browse's sources and folders, the linked accounts, and Request History.
+- **Dialogs:** all three open with Cancel focused, including the typed one. You click or tab into the name field.
+- **Privacy policy:** sections 7 and 8 now point to Manage data for disconnecting accounts and deleting drives, effective 2 October 2026.
+- **Tests:** `be/db/deletion_test.go`, `be/web/settings_test.go` and `ui/src/test/settings.test.tsx`.
+

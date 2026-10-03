@@ -45,11 +45,13 @@ function pageTitle(pathname: string): string {
         ? "Request"
         : pathname === "/requests"
           ? "Request History"
-          : pathname === "/login"
-            ? "Log in"
-            : scan
-              ? `Scan ${scan[1]}`
-              : "";
+          : pathname === "/manage-data"
+            ? "Manage data"
+            : pathname === "/login"
+              ? "Log in"
+              : scan
+                ? `Scan ${scan[1]}`
+                : "";
   return page ? `${page} · Bhandaar` : "Bhandaar";
 }
 

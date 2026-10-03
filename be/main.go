@@ -49,6 +49,14 @@ func main() {
 
 	// Keeps Browse's folder totals current (docs/archive/browse.md).
 	go db.TotalsChecker(context.Background(), 10*time.Minute)
+	// Deletion jobs are kept 30 days (docs/specs/data-deletion.md).
+	go func() {
+		for range time.Tick(24 * time.Hour) {
+			if err := db.PurgeDeletionJobs(); err != nil {
+				slog.Error("Failed to purge deletion jobs", "error", err)
+			}
+		}
+	}()
 
 	slog.Info("Starting web server")
 	web.Server()

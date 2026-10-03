@@ -27,4 +27,6 @@ export const queryKeys = {
     ["accountPhotos", clientKey, sort, page] as const,
   pickedItems: (scanId: number, page: number) =>
     ["pickedItems", scanId, page] as const,
+  settingsData: ["settingsData"] as const,
+  deletion: (id: number) => ["deletion", id] as const,
 };
