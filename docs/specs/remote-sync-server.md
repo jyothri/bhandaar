@@ -55,7 +55,7 @@ Errors have `be`'s shape: `{"error": {"code", "message", "details", "timestamp"}
 
 | Endpoint | Does |
 |---|---|
-| `GET /agent/health` | No auth. DB ping (1 s): `200 {"status":"ok", …}` or `503 {"status":"unavailable","reason":"database"}` |
+| `GET /agent/health` | No auth. DB ping (1 s): `200 {"status":"ok", "server_version":"0.1.0+<commit>", …}` or `503 {"status":"unavailable","reason":"database"}`. `server_version` is the version number (never bumped) plus the commit the image was built from, stamped by CI (`+unknown` in a local build) |
 | `POST /agent/v1/handshake` | No auth. `{agent_version, protocols, os, arch}` → `{decision, protocol, min_agent_version, latest_agent_version, download_url, message, limits}`. Decisions: `ok`, `upgrade_recommended`, `upgrade_required`, `unsupported_protocol`. `limits`: `max_changes_per_batch` 1000, `max_batch_bytes` 1 MiB |
 | `POST /agent/v1/auth/login` | `{username, password, agent_id, hostname, os, arch}` → tokens. Registers the agent (`403 AGENT_OWNED_BY_OTHER_USER` if another user has it). Same `401 INVALID_CREDENTIALS` for every failure, in constant time. 10 failures per (username, `X-Real-IP`) in 15 minutes → `429` with `Retry-After` |
 | `POST /agent/v1/auth/refresh` | See [below](#post-agentv1authrefresh) |

@@ -62,6 +62,8 @@ jobs:
           pushImage: ${{ github.event_name == 'push' }}
           registry: docker.io
           dockerfile: ./agent/server/build/Dockerfile
+          # Stamped into agentserver: its server_version is 0.1.0+<short sha>.
+          buildArgs: COMMIT=${{ github.sha }}
           # Needed for agent/server/build/Dockerfile.dockerignore (the build context is the repo root).
           enableBuildKit: true
           username: ${{ secrets.DOCKER_USERNAME }}

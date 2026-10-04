@@ -12,8 +12,27 @@ import (
 	"github.com/jyothri/bhandaar/agent/wire"
 )
 
-// ServerVersion is agentserver's own version, reported by health.
-const ServerVersion = "0.1.0"
+// ServerVersion is agentserver's own version, reported by health and the
+// startup log: Version, with the commit it was built from as semver build
+// metadata, such as "0.1.0+d5f4746".
+var ServerVersion = Version + "+" + shortCommit(Commit)
+
+// Version is agentserver's version number. Nothing bumps it; the commit
+// says which build is running.
+const Version = "0.1.0"
+
+// Commit is the commit agentserver was built from, stamped by the image
+// build with -ldflags "-X github.com/jyothri/bhandaar/agent/server/internal/api.Commit=<sha>";
+// "unknown" in a local build.
+var Commit = "unknown"
+
+// shortCommit is the first 7 characters of a commit SHA.
+func shortCommit(c string) string {
+	if len(c) > 7 {
+		return c[:7]
+	}
+	return c
+}
 
 // Pinger checks the database for health.
 type Pinger interface {
