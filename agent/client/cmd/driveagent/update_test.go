@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"github.com/jyothri/bhandaar/agent/client/internal/update"
 	"github.com/jyothri/bhandaar/agent/client/internal/version"
 	"github.com/jyothri/bhandaar/agent/wire"
+	"golang.org/x/sys/unix"
 )
 
 // Tests for driveagent updating itself (docs/specs/agent-auto-update.md).
@@ -482,4 +484,124 @@ func TestUpdateEndToEnd(t *testing.T) {
 		t.Fatalf("joining afterwards: %v", err)
 	}
 	m.Release()
+}
+
+// A verified instance-lock fd that isn't adopted (a process joining
+// alone) is closed, so Join doesn't wait for it.
+func TestJoinAloneLetsGoOfAHandedLock(t *testing.T) {
+	state := t.TempDir()
+	dir, _ := runlock.Dir()
+	fd, err := unix.Open(filepath.Join(dir, "instance.lock"), unix.O_RDWR|unix.O_CREAT, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Flock(fd, unix.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(update.EnvInstanceFD, strconv.Itoa(fd))
+	done := make(chan error, 1)
+	go func() {
+		m, err := joinInstance(context.Background(), state, true)
+		if err == nil {
+			m.Release()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("joining alone waited for its own handed lock")
+	}
+	if unix.Fstat(fd, &unix.Stat_t{}) == nil {
+		t.Error("the handed fd is still open")
+		unix.Close(fd)
+	}
+}
+
+// Interrupted mid-download, the update isn't recorded as failed.
+func TestACancelledDownloadIsntAFailure(t *testing.T) {
+	state := t.TempDir()
+	srv := loggedIn(t, state)
+	newFakeRelease(t, newer)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inner := updateSource
+	updateSource = func() update.Source {
+		src := inner()
+		src.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			cancel()
+			<-r.Context().Done()
+			return nil, r.Context().Err()
+		})}
+		return src
+	}
+	srv.Lock()
+	srv.Latest, srv.Decision = newer, wire.DecisionUpgradeRecommended
+	srv.Unlock()
+	r := syncCmd(t, ctx, state, srv.URL)
+	if !errors.Is(r.err, context.Canceled) {
+		t.Errorf("sync: %v\n%s", r.err, r.stderr)
+	}
+	dir, _ := runlock.Dir()
+	if f := update.LoadFailure(dir); f.Version != "" {
+		t.Errorf("recorded %+v", f)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// Only an upgrade decision makes an update required: unsupported_protocol
+// does, deliberately; an unknown decision is an error, not an upgrade.
+func TestWhichHandshakeErrorsUpdate(t *testing.T) {
+	for decision, wantUpdate := range map[string]bool{wire.DecisionUnsupportedProtocol: true, "bogus": false} {
+		t.Run(decision, func(t *testing.T) {
+			state := t.TempDir()
+			srv := loggedIn(t, state)
+			f := newFakeRelease(t, newer)
+			srv.Lock()
+			srv.Latest, srv.Decision = newer, decision
+			srv.Unlock()
+			r := syncCmd(t, context.Background(), state, srv.URL)
+			if got := errors.Is(r.err, errReexeced); got != wantUpdate {
+				t.Errorf("updated %v (%v), want %v\n%s", got, r.err, wantUpdate, r.stderr)
+			}
+			if !wantUpdate && (r.code() != exitRemote || f.fetches != 0) {
+				t.Errorf("exit %d, %d fetches", r.code(), f.fetches)
+			}
+		})
+	}
+}
+
+func TestUpdateVersionMustBeAVersion(t *testing.T) {
+	state := t.TempDir()
+	srv := loggedIn(t, state)
+	f := newFakeRelease(t, newer)
+	if r := updateCmd(t, state, srv.URL, "--version", "../x"); r.code() != exitUsage || f.fetches != 0 {
+		t.Errorf("--version ../x: exit %d, %v, %d fetches", r.code(), r.err, f.fetches)
+	}
+}
+
+// A platform without builds never downloads anything.
+func TestNoBuildsForThisPlatform(t *testing.T) {
+	state := t.TempDir()
+	srv := loggedIn(t, state)
+	f := newFakeRelease(t, newer)
+	inner := updateSource
+	updateSource = func() update.Source {
+		src := inner()
+		src.GOOS, src.GOARCH = "linux", "arm64"
+		return src
+	}
+	srv.Lock()
+	srv.Latest, srv.Decision = newer, wire.DecisionUpgradeRecommended
+	srv.Unlock()
+	r := syncCmd(t, context.Background(), state, srv.URL)
+	if r.err != nil || !strings.Contains(r.stderr, "no driveagent builds are published for linux/arm64") || f.fetches != 0 {
+		t.Errorf("sync: %v, %d fetches\n%s", r.err, f.fetches, r.stderr)
+	}
 }

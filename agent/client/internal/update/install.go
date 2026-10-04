@@ -93,6 +93,12 @@ func Install(ctx context.Context, exe string, bin []byte, want string) (err erro
 	if err := os.Rename(tmp, exe); err != nil {
 		return fmt.Errorf("replacing %s: %w", exe, err)
 	}
+	// Make the rename durable. The update is done either way; at worst a
+	// power cut leaves the old binary, which still works.
+	if d, err := os.Open(filepath.Dir(exe)); err == nil {
+		d.Sync()
+		d.Close()
+	}
 	return nil
 }
 

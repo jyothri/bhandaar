@@ -16,6 +16,7 @@ import (
 	"github.com/jyothri/bhandaar/agent/client/internal/store"
 	"github.com/jyothri/bhandaar/agent/client/internal/update"
 	"github.com/jyothri/bhandaar/agent/client/internal/version"
+	"golang.org/x/sys/unix"
 )
 
 // joinInstance takes the instance lock for a command using stateDir
@@ -38,9 +39,18 @@ func joinInstance(ctx context.Context, stateDir string, alone bool) (*runlock.Me
 	}
 	if s := os.Getenv(update.EnvInstanceFD); s != "" {
 		os.Unsetenv(update.EnvInstanceFD)
-		if fd, err := strconv.Atoi(s); err == nil && fd > 2 && !alone {
-			if m, err := runlock.Adopt(ctx, dir, uintptr(fd), stateDir, version.Version); err == nil {
-				return m, nil
+		// Only ever touch an fd that is the instance lock: the variable may
+		// have leaked into a process where the number is something else.
+		if fd, err := strconv.Atoi(s); err == nil && fd > 2 && runlock.IsInstanceLock(dir, uintptr(fd)) {
+			if alone {
+				// Not adopted, so let it go, or Join would wait for it.
+				unix.Close(fd)
+			} else {
+				m, err := runlock.Adopt(ctx, dir, uintptr(fd), stateDir, version.Version)
+				if err == nil {
+					return m, nil
+				}
+				fmt.Fprintf(os.Stderr, "note: couldn't take over the instance lock from the update (%v); joining as usual\n", err)
 			}
 		}
 	}

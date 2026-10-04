@@ -327,3 +327,14 @@ func TestFailureRecord(t *testing.T) {
 		t.Error("cleared, but still there")
 	}
 }
+
+func TestValidAndPublished(t *testing.T) {
+	for v, want := range map[string]bool{"0.7.1": true, "../x": false, "0.7": false, "v0.7.1": false, "0.07.1": false} {
+		if Valid(v) != want {
+			t.Errorf("Valid(%q) = %v", v, !want)
+		}
+	}
+	if !Published("darwin", "arm64") || Published("linux", "arm64") {
+		t.Error("Published")
+	}
+}

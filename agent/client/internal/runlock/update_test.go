@@ -217,6 +217,12 @@ func TestAdoptRefusesAnotherFile(t *testing.T) {
 	if _, err := Adopt(context.Background(), dir, uintptr(fd), state, "0.7.1"); !errors.Is(err, ErrNotInstanceLock) {
 		t.Errorf("Adopt of another file: %v", err)
 	}
+	// It left the fd alone: still open, still that file.
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		t.Errorf("Adopt closed a fd that wasn't the lock: %v", err)
+	}
+	unix.Close(fd)
 }
 
 func TestTakeBackAfterAFailedExec(t *testing.T) {

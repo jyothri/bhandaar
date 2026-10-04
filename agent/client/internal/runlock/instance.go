@@ -356,21 +356,27 @@ func (m *Membership) TakeBack(ctx context.Context) error {
 // the lock dir's instance.lock.
 var ErrNotInstanceLock = errors.New("the handed-over fd isn't the instance lock")
 
+// IsInstanceLock reports whether fd is the lock dir's instance.lock (the
+// same device and inode), without wrapping or closing it: an fd named by a
+// leaked environment variable may be anything.
+func IsInstanceLock(dir string, fd uintptr) bool {
+	var got, want unix.Stat_t
+	if unix.Fstat(int(fd), &got) != nil || unix.Stat(filepath.Join(dir, instanceLock), &want) != nil {
+		return false
+	}
+	return got.Dev == want.Dev && got.Ino == want.Ino
+}
+
 // Adopt takes over the instance lock a driveagent handed to this one
 // across exec, held exclusively (HandOver): it records this process's
-// version in instance.json, then holds the lock shared, as Join would.
-// The fd is closed on any error.
+// version in instance.json, then holds the lock shared, as Join would. An
+// fd that isn't instance.lock is left alone (ErrNotInstanceLock); the
+// lock's fd is closed on any other error, which releases it.
 func Adopt(ctx context.Context, dir string, fd uintptr, stateDir, version string) (*Membership, error) {
+	if !IsInstanceLock(dir, fd) {
+		return nil, ErrNotInstanceLock
+	}
 	f := os.NewFile(fd, filepath.Join(dir, instanceLock))
-	if f == nil {
-		return nil, ErrNotInstanceLock
-	}
-	fi, err := f.Stat()
-	want, werr := os.Stat(filepath.Join(dir, instanceLock))
-	if err != nil || werr != nil || !os.SameFile(fi, want) {
-		f.Close()
-		return nil, ErrNotInstanceLock
-	}
 	unix.CloseOnExec(int(fd))
 	lock := &fileLock{f: f}
 	// Exclusive, as handed over: holding it is what keeps everyone out.

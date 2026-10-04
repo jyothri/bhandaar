@@ -310,6 +310,13 @@ Where 0.7.0 differs from the design above, or adds to it:
   - The update starts with `updating driveagent 0.7.0 → 0.7.1`, then `updated …` once installed, so a slow download isn't silent.
   - A required update on a busy machine says `… is required, and will be installed by the next run once the other driveagent has finished`, without the pid.
   - A failed update says `… but couldn't update: <reason>`. The next hour's runs say when it failed and that `driveagent update` overrides.
+- **What counts as required:** only the handshake's upgrade errors (`ErrUpgrade`): `upgrade_required`, and `unsupported_protocol` on purpose, since a newer agent is the fix for that too. Any other handshake error is returned as it is, without updating.
+- **Handed fds are checked before they're touched.** `runlock.IsInstanceLock` compares the fd's device and inode with `instance.lock` (`fstat`) before `Adopt` wraps it, so a leaked `DRIVEAGENT_INSTANCE_FD` naming some other fd leaves that fd alone. A verified lock fd that isn't adopted (a process joining alone) is closed, so `Join` doesn't wait for it. A failed adoption is reported, and the process joins as usual.
+- **Rejoining failures are fatal.** If `EndUpdate` or `TakeBack` can't rejoin the instance after an update that didn't happen, the command exits 1 rather than carry on outside it.
+- **Interruptions aren't failures.** A download or install cut short by Ctrl-C or `SIGTERM` isn't recorded in `update.json`; the command ends as interrupted.
+- **Platforms:** `update.Platforms` lists the builds releases have, kept in step with `driveagent.yml`'s matrix. Any other platform (linux/arm64) says so and never downloads anything.
+- **`--version`** must be `MAJOR.MINOR.PATCH`, or it's a usage error.
+- **Durability:** the directory is fsynced after the rename.
 - **The smoke test** runs the new binary with `DRIVEAGENT_UPDATED_FROM` and `DRIVEAGENT_INSTANCE_FD` stripped from its environment.
 - **Testing.** The signing key exists only in the `driveagent-release` environment; it was made on 2026-10-04, its public key is in `keys.go`, and the local copy was deleted. So no local build can make a release that a release build accepts. Instead, `TestUpdateEndToEnd` runs the whole update across a real exec, with a test key: the test binary as driveagent fetches a fake release, installs it, and execs it, and the new process adopts the lock and finishes the `sync`. `internal/update` checks that a signature made by OpenSSL with the release key (as the release job makes them) verifies with Go's `crypto/ed25519`. The manual check in [Tests](#tests) is done once 0.7.0 is released, with 0.7.1.
 

@@ -8,6 +8,9 @@ import (
 
 // A signature made by openssl with the release key, as the release job
 // makes them, over Message("0.0.0", "test\n"): Go's ed25519 must accept it.
+// It can't be regenerated: the private key exists only in the
+// driveagent-release environment. After a key rotation, keep this fixture
+// while the old key is still in Keys; drop the test with the key.
 const opensslSig = "a9c57f17671a18c846dd615b7b748e2daab8532039084d49e45b13b1b0e95c79522b84e73826e54ec684843bf4b88b8c60696e78ac25150ffc22bde075fc570f"
 
 func TestVerifySumsAcceptsTheReleaseKeysOpenSSLSignature(t *testing.T) {

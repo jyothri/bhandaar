@@ -21,6 +21,28 @@ const (
 	EnvNoAutoUpdate = "DRIVEAGENT_NO_AUTO_UPDATE"
 )
 
+// Valid reports whether v is a version: MAJOR.MINOR.PATCH, digits only,
+// no leading zeros.
+func Valid(v string) bool {
+	_, ok := parse(v)
+	return ok
+}
+
+// Platforms are those releases have builds for, as driveagent.yml's build
+// matrix makes them; keep the two in step. Another platform never updates
+// itself, and needn't download anything to find that out.
+var Platforms = []string{"linux/amd64", "darwin/amd64", "darwin/arm64"}
+
+// Published reports whether releases have a build for goos/goarch.
+func Published(goos, goarch string) bool {
+	for _, p := range Platforms {
+		if p == goos+"/"+goarch {
+			return true
+		}
+	}
+	return false
+}
+
 // Newer reports whether version b is newer than a, both MAJOR.MINOR.PATCH;
 // anything else is never newer.
 func Newer(a, b string) bool {

@@ -63,6 +63,8 @@ driveagent update --version 0.7.0  # install exactly this one (a rollback)
   `~/.local/bin`, not a root-owned `/usr/local/bin`.
 - `driveagent remote-status` says what an update would do, without updating.
 - A failed update isn't tried again automatically for an hour.
+- The binary's directory needs free space for about twice the binary
+  (the new one, and the old one kept as `driveagent.prev`): roughly 30 MB.
 
 ## Build
 

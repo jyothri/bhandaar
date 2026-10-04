@@ -72,7 +72,13 @@ func selfUpdate(ctx context.Context, env *remoteEnv, inst *runlock.Membership, s
 		noteUpgrade(hs, stderr)
 		return hs, herr
 	}
-	required := herr != nil
+	// Required: upgrade_required, and also unsupported_protocol, on
+	// purpose, when the server names a newer version: that's the fix. Any
+	// other error isn't an upgrade, and stands.
+	required := errors.Is(herr, remote.ErrUpgrade)
+	if herr != nil && !required {
+		return hs, herr
+	}
 	exe, why := canUpdate(latest)
 	if why != "" {
 		return hs, notUpdated(stderr, herr, latest, why)
@@ -111,10 +117,16 @@ func selfUpdate(ctx context.Context, env *remoteEnv, inst *runlock.Membership, s
 		err = update.Install(ctx, exe, bin, latest)
 	}
 	if err != nil {
+		if eerr := inst.EndUpdate(); eerr != nil {
+			return hs, leftInstance(eerr)
+		}
+		if ctx.Err() != nil {
+			// Interrupted (Ctrl-C, SIGTERM): not a failed release.
+			return hs, ctx.Err()
+		}
 		if lockDir != "" {
 			update.RecordFailure(lockDir, latest, err)
 		}
-		inst.EndUpdate()
 		return hs, notUpdated(stderr, herr, latest, "couldn't update: "+err.Error())
 	}
 	if lockDir != "" {
@@ -133,17 +145,28 @@ func selfUpdate(ctx context.Context, env *remoteEnv, inst *runlock.Membership, s
 		if err = reexec(exe, argv, envv); err == nil {
 			return hs, errReexeced
 		}
-		inst.TakeBack(ctx)
-	} else {
-		inst.EndUpdate()
+		if terr := inst.TakeBack(ctx); terr != nil {
+			return hs, leftInstance(terr)
+		}
+	} else if eerr := inst.EndUpdate(); eerr != nil {
+		return hs, leftInstance(eerr)
 	}
 	return hs, &exitError{code: exitLocal, err: fmt.Errorf("updated to driveagent %s, but couldn't run it: %v; run the command again", latest, err)}
+}
+
+// leftInstance is a failure to rejoin the instance after an update that
+// didn't happen: the command can't carry on outside it.
+func leftInstance(err error) error {
+	return &exitError{code: exitLocal, err: fmt.Errorf("after the update: %w", err)}
 }
 
 // canUpdate is the binary an automatic update would replace, or why there
 // won't be one.
 func canUpdate(latest string) (exe, why string) {
+	src := updateSource()
 	switch {
+	case !update.Published(src.GOOS, src.GOARCH):
+		return "", "no driveagent builds are published for " + src.GOOS + "/" + src.GOARCH
 	case !releaseBuild():
 		return "", "this build isn't a release, so it doesn't update itself"
 	case os.Getenv(update.EnvUpdatedFrom) != "":
@@ -225,6 +248,9 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	defer inst.Release()
 
 	target := *want
+	if target != "" && !update.Valid(target) {
+		return usageErr("update: --version %q isn't a version (MAJOR.MINOR.PATCH, such as 0.7.1)", target)
+	}
 	if target == "" {
 		env, err := rf.open()
 		if err != nil {
