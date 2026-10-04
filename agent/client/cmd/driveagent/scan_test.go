@@ -33,6 +33,7 @@ import (
 // don't exclude each other. Tests of the disk lock set diskKeys themselves.
 func TestMain(m *testing.M) {
 	if os.Getenv("DRIVEAGENT_TEST_MAIN") == "1" {
+		updateTestChild()
 		main()
 		return
 	}

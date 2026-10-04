@@ -29,6 +29,8 @@ type Server struct {
 
 	// Decision is the handshake decision (default ok).
 	Decision string
+	// Latest is the handshake's latest_agent_version (default 0.1.0).
+	Latest string
 	// Users maps username to password.
 	Users map[string]string
 	// AccessTTL is access_expires_in, in seconds (default 900).
@@ -97,7 +99,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if d == "" {
 			d = wire.DecisionOK
 		}
-		resp := wire.HandshakeResponse{Decision: d, Protocol: 1, MinAgentVersion: "0.1.0", LatestAgentVersion: "0.1.0",
+		latest := s.Latest
+		if latest == "" {
+			latest = "0.1.0"
+		}
+		resp := wire.HandshakeResponse{Decision: d, Protocol: 1, MinAgentVersion: "0.1.0", LatestAgentVersion: latest,
 			Limits: wire.Limits{MaxChangesPerBatch: 1000, MaxBatchBytes: 1 << 20}}
 		if s.Limits != nil {
 			resp.Limits = *s.Limits

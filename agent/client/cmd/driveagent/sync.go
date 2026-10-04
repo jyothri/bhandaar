@@ -41,14 +41,20 @@ func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if *remoteTimeout <= 0 {
 		return usageErr("sync: --remote-timeout must be positive")
 	}
-	release, err := joinInstance(ctx, *rf.stateDir, false)
+	inst, err := joinInstance(ctx, *rf.stateDir, false)
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer inst.Release()
 	env, err := rf.open()
 	if err != nil {
 		return err
+	}
+	// The handshake, updating driveagent first if the server names a newer
+	// one (docs/specs/agent-auto-update.md), before state.db is opened.
+	hs, err := selfUpdate(ctx, env, inst, stderr)
+	if err != nil {
+		return remoteErr(err)
 	}
 	if !stateDBExists(env.stateDir) {
 		fmt.Fprintf(stdout, "nothing to upload: no state.db in %s\n", env.stateDir)
@@ -78,10 +84,6 @@ func runSync(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	}
 
 	// Nothing is uploaded before the handshake and the token.
-	hs, err := preflight(ctx, env.client, stderr)
-	if err != nil {
-		return remoteErr(err)
-	}
 	sess := env.session()
 	if _, err := sess.AccessToken(ctx); err != nil {
 		return remoteErr(err)
