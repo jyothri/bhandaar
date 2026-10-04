@@ -27,6 +27,8 @@ mkdir -p ~/.local/bin && install -m 0755 driveagent ~/.local/bin/
 driveagent version
 ```
 
+That's needed once: from 0.7.0, driveagent [updates itself](#updates).
+
 **macOS:** the binaries aren't signed or notarized. Downloaded with `curl` as
 above they run as-is; downloaded through a browser, Gatekeeper blocks them
 until you run `xattr -d com.apple.quarantine driveagent` once.
@@ -37,6 +39,32 @@ about 20 s for 3 million rows, with progress), and an older binary must then
 never run against it: its writes wouldn't be recorded for upload, and nothing
 would tell you. A `driveagent` started while another is upgrading gives up
 after a few seconds; just re-run it.
+
+## Updates
+
+From 0.7.0, `scan`, `sync` and `login` keep driveagent current. When the
+server names a newer version (the operator sets it), they download that
+release from GitHub, check its signature (made when the release was
+published, for that version) and checksum, check that it runs, replace the
+binary (keeping the old one as `driveagent.prev`), and run the same command
+again on the new one. It happens before the command does anything, and only
+while no other driveagent runs on the machine; otherwise the next run does
+it. See [`docs/specs/agent-auto-update.md`](../../docs/specs/agent-auto-update.md).
+
+```bash
+driveagent update --check          # is a newer version available?
+driveagent update                  # update now (no re-run)
+driveagent update --version 0.7.0  # install exactly this one (a rollback)
+```
+
+- `DRIVEAGENT_NO_AUTO_UPDATE=1` turns automatic updates off (`update` still
+  works): set it in a machine's environment, or its cron line, to hold it back.
+- The binary's directory must be writable by you: install it in
+  `~/.local/bin`, not a root-owned `/usr/local/bin`.
+- `driveagent remote-status` says what an update would do, without updating.
+- A failed update isn't tried again automatically for an hour.
+- The binary's directory needs free space for about twice the binary
+  (the new one, and the old one kept as `driveagent.prev`): roughly 30 MB.
 
 ## Build
 

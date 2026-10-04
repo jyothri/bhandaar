@@ -40,6 +40,10 @@ Both run their tests on pull requests and never publish from one.
 | Push to `main` or manual run | The tag exists, and relevant files changed since | **Fail**: a bump was skipped or doubled; fix with a follow-up bump |
 | Push to `main` or manual run | The tag exists, nothing relevant changed | Pass, no release |
 
+### Signing
+
+The `release` job runs in the `driveagent-release` GitHub environment (deployments from `main` only; each run waits for the owner's approval), which holds `DRIVEAGENT_SIGNING_KEY`, an Ed25519 private key (PEM, base64). It signs `driveagent/v<V>\n` followed by `SHA256SUMS` into `SHA256SUMS.sig`, checks that signature with the public keys built into driveagent (`internal/update/keys.go`, via `go run ./scripts/verifysig`), and uploads it with the release. driveagent's [self-update](agent-auto-update.md) installs only releases signed this way. The private key isn't kept anywhere else; if it's lost, make a new one and add its public key to `keys.go` (see [Signing in CI](agent-auto-update.md#signing-in-ci)).
+
 ### Installing a release
 
 ```bash
@@ -53,8 +57,8 @@ mkdir -p ~/.local/bin && install -m 0755 driveagent ~/.local/bin/
 driveagent version
 ```
 
-The repo is public, so no authentication is needed. Asset names carry no version, so `releases/latest/download/<asset>` is stable. The macOS binaries aren't signed or notarized: a `curl` download runs as-is, and a browser download needs `xattr -d com.apple.quarantine driveagent` once.
+From 0.7.0 this is needed once per machine: driveagent then [updates itself](agent-auto-update.md). The repo is public, so no authentication is needed. Asset names carry no version, so `releases/latest/download/<asset>` is stable. The macOS binaries aren't signed or notarized: a `curl` download runs as-is, and a browser download needs `xattr -d com.apple.quarantine driveagent` once.
 
 ### Linking releases to the server's version check
 
-After each release, the user raises `AGENTSERVER_LATEST_AGENT_VERSION` in the prod `.env` and restarts `agentserver` (older agents then get `upgrade_recommended`). `AGENTSERVER_MIN_AGENT_VERSION` is raised only when a release is required. The handshake's `download_url` defaults to `…/releases/latest`.
+After each release (approved in the `driveagent-release` environment), the user raises `AGENTSERVER_LATEST_AGENT_VERSION` in the prod `.env` and restarts `agentserver`. Older agents then get `upgrade_recommended`, and from 0.7.0 they update themselves to exactly that version. `AGENTSERVER_MIN_AGENT_VERSION` is raised only when a release is required. The handshake's `download_url` defaults to `…/releases/latest`.

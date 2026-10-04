@@ -7,13 +7,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/jyothri/bhandaar/agent/client/internal/creds"
 	"github.com/jyothri/bhandaar/agent/client/internal/identity"
 	"github.com/jyothri/bhandaar/agent/client/internal/runlock"
 	"github.com/jyothri/bhandaar/agent/client/internal/store"
+	"github.com/jyothri/bhandaar/agent/client/internal/update"
 	"github.com/jyothri/bhandaar/agent/client/internal/version"
+	"golang.org/x/sys/unix"
 )
 
 // joinInstance takes the instance lock for a command using stateDir
@@ -21,7 +24,12 @@ import (
 // driveagent running on the machine uses one state dir and one version.
 // With alone, no other driveagent may run until release. A refusal exits
 // 5.
-func joinInstance(ctx context.Context, stateDir string, alone bool) (release func(), err error) {
+//
+// A driveagent just updated adopts the lock its old binary handed it
+// (docs/specs/agent-auto-update.md, "Handing the lock to the new binary"),
+// or else joins as usual. While another driveagent updates itself, it
+// waits.
+func joinInstance(ctx context.Context, stateDir string, alone bool) (*runlock.Membership, error) {
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating state dir: %w", err)
 	}
@@ -29,11 +37,30 @@ func joinInstance(ctx context.Context, stateDir string, alone bool) (release fun
 	if err != nil {
 		return nil, err
 	}
-	release, err = runlock.JoinInstance(ctx, dir, stateDir, version.Version, alone)
+	if s := os.Getenv(update.EnvInstanceFD); s != "" {
+		os.Unsetenv(update.EnvInstanceFD)
+		// Only ever touch an fd that is the instance lock: the variable may
+		// have leaked into a process where the number is something else.
+		if fd, err := strconv.Atoi(s); err == nil && fd > 2 && runlock.IsInstanceLock(dir, uintptr(fd)) {
+			if alone {
+				// Not adopted, so let it go, or Join would wait for it.
+				unix.Close(fd)
+			} else {
+				m, err := runlock.Adopt(ctx, dir, uintptr(fd), stateDir, version.Version)
+				if err == nil {
+					return m, nil
+				}
+				fmt.Fprintf(os.Stderr, "note: couldn't take over the instance lock from the update (%v); joining as usual\n", err)
+			}
+		}
+	}
+	m, err := runlock.Join(ctx, dir, stateDir, version.Version, alone, func(i runlock.Instance) {
+		fmt.Fprintf(os.Stderr, "waiting for driveagent to finish updating itself (pid %d)\n", i.PID)
+	})
 	if errors.Is(err, runlock.ErrBusy) {
 		return nil, &exitError{code: exitBusy, err: err}
 	}
-	return release, err
+	return m, err
 }
 
 // diskKeys is identity.DiskKeys; tests replace it.

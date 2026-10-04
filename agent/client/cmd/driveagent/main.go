@@ -45,6 +45,7 @@ func main() {
 	}
 
 	ctx, drain, stop := withSignals(context.Background())
+	commandLine = os.Args[1:]
 
 	var err error
 	switch os.Args[1] {
@@ -56,6 +57,8 @@ func main() {
 		err = runSync(ctx, os.Args[2:], os.Stdout, os.Stderr)
 	case "remote-status":
 		err = runRemoteStatus(ctx, os.Args[2:], os.Stdout, os.Stderr)
+	case "update":
+		err = runUpdate(ctx, os.Args[2:], os.Stdout, os.Stderr)
 	case "scan":
 		err = runScan(ctx, drain, os.Args[2:], os.Stdout, os.Stderr)
 	case "compare":
@@ -98,10 +101,13 @@ Usage:
   driveagent logout        [--state-dir <dir>]
   driveagent sync          [--drive-id <id,id,...>] [--remote-timeout 2m] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
   driveagent remote-status [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
+  driveagent update        [--check] [--version <V>] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
   driveagent version
 
 Remote settings: flag > $DRIVEAGENT_REMOTE_URL / $DRIVEAGENT_LAN_ADDR > <state-dir>/config.json > https://sm.jkurapati.com.
 Every scan uploads what it writes; log in first ("driveagent login"), and run "driveagent sync" for older data.
+scan, sync and login update driveagent first when the server names a newer version, then run again on it
+(a signed release from GitHub; only while no other driveagent runs). $DRIVEAGENT_NO_AUTO_UPDATE=1 turns that off.
 One machine runs one state dir and one driveagent version at a time, and one scan per disk (--wait to queue behind another).
 The locks are in ~/.driveagent-locks ($DRIVEAGENT_LOCK_DIR overrides it; nothing is coordinated across lock dirs).
 Exit codes: 0 ok, 1 local error, 2 usage, 3 remote unavailable, login needed or upload failed, 4 driveagent upgrade required,
@@ -140,16 +146,19 @@ func splitList(s string) []string {
 // upload is part of its success (docs/specs/remote-sync-agent.md, "Remote
 // is required"), in this order:
 //
-//  0. join the instance, then take the physical-drive lock of the disk
-//     holding the drive root, failing (exit 5) or, with --wait, waiting
-//     while another scan reads it (docs/archive/agent-hardening.md): the
-//     instance lock is taken first by every command, and the disk lock
-//     always before the upload lock, which sync takes alone;
+//  0. join the instance; health and handshake, updating driveagent and
+//     re-running the scan on the new binary if the server names a newer
+//     one (docs/specs/agent-auto-update.md), exit 3 or 4 on failure; then
+//     take the physical-drive lock of the disk holding the drive root,
+//     failing (exit 5) or, with --wait, waiting while another scan reads
+//     it (docs/archive/agent-hardening.md): the instance lock is taken
+//     first by every command, and the disk lock always before the upload
+//     lock, which sync takes alone;
 //  1. take the drive's upload lock, waiting for a sync of it to finish:
 //     it keeps --replace-root's ClearDrive away from a sync of the drive,
 //     and two scans of one drive id on different disks apart;
-//  2. preflight (health, handshake, token), before the drive or state.db
-//     is touched: exit 3 or 4 on failure;
+//  2. the token, before the drive or state.db is touched: exit 3 on
+//     failure;
 //  3. scan.Prepare (the drive-root check; --replace-root clears the drive
 //     here, so it gets a new stream before anything is uploaded);
 //  4. the wrong-drive guard;
@@ -186,12 +195,21 @@ func runScan(ctx, drain context.Context, args []string, stdout, stderr io.Writer
 	}
 	stateDir := *rf.stateDir
 
-	// 0. The instance, then the disk.
-	release, err := joinInstance(ctx, stateDir, false)
+	// 0. The instance, the handshake (updating driveagent first, if the
+	// server names a newer one, before any other lock), then the disk.
+	inst, err := joinInstance(ctx, stateDir, false)
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer inst.Release()
+	env, err := rf.open()
+	if err != nil {
+		return err
+	}
+	hs, err := selfUpdate(ctx, env, inst, stderr)
+	if err != nil {
+		return remoteErr(err)
+	}
 	root := *driveRoot
 	if root == "" {
 		root = *path
@@ -211,15 +229,7 @@ func runScan(ctx, drain context.Context, args []string, stdout, stderr io.Writer
 	}
 	defer lock.Unlock()
 
-	// 2. Preflight.
-	env, err := rf.open()
-	if err != nil {
-		return err
-	}
-	hs, err := preflight(ctx, env.client, stderr)
-	if err != nil {
-		return remoteErr(err)
-	}
+	// 2. The token (the handshake came first).
 	sess := env.session()
 	if _, err := sess.AccessToken(ctx); err != nil {
 		return remoteErr(err)
@@ -421,11 +431,11 @@ func runCompare(args []string) error {
 		fs.Usage()
 		return fmt.Errorf("--drive-a and --drive-b are required")
 	}
-	release, err := joinInstance(context.Background(), *stateDir, false)
+	inst, err := joinInstance(context.Background(), *stateDir, false)
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer inst.Release()
 
 	st, err := store.Open(*stateDir)
 	if err != nil {
@@ -462,11 +472,11 @@ func runReport(args []string) error {
 		fs.Usage()
 		return fmt.Errorf("--drives is required")
 	}
-	release, err := joinInstance(context.Background(), *stateDir, false)
+	inst, err := joinInstance(context.Background(), *stateDir, false)
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer inst.Release()
 
 	st, err := store.Open(*stateDir)
 	if err != nil {

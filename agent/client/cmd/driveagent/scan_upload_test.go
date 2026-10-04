@@ -283,8 +283,10 @@ func TestScanWaitsForTheUploadLock(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	time.Sleep(200 * time.Millisecond)
-	if got := len(srv.Paths()); got != n {
-		t.Errorf("the waiting scan sent %d requests", got-n)
+	// Only the health check and the handshake, which come before the
+	// locks: nothing authenticated while it waits.
+	if got := strings.Join(srv.Paths()[n:], " "); got != "/agent/health /agent/v1/handshake" {
+		t.Errorf("the waiting scan sent %s", got)
 	}
 	select {
 	case err := <-finished:

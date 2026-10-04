@@ -97,17 +97,19 @@ func health(ctx context.Context, c *remote.Client) (wire.HealthResponse, error) 
 // preflight is health, then handshake. Nothing that sends credentials runs
 // before it succeeds.
 func preflight(ctx context.Context, c *remote.Client, stderr io.Writer) (wire.HandshakeResponse, error) {
-	if _, err := health(ctx, c); err != nil {
-		return wire.HandshakeResponse{}, fmt.Errorf("%s is not reachable: %w", c.BaseURL(), err)
-	}
-	hs, err := c.Handshake(ctx)
+	hs, err := handshake(ctx, c)
 	if err != nil {
 		return hs, err
 	}
+	noteUpgrade(hs, stderr)
+	return hs, nil
+}
+
+// noteUpgrade prints the server's note about a newer driveagent.
+func noteUpgrade(hs wire.HandshakeResponse, stderr io.Writer) {
 	if hs.Decision == wire.DecisionUpgradeRecommended && hs.Message != "" {
 		fmt.Fprintf(stderr, "note: %s (%s)\n", hs.Message, hs.DownloadURL)
 	}
-	return hs, nil
 }
 
 func runLogin(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -126,12 +128,13 @@ func runLogin(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	if *passwordStdin && *username == "" {
 		return usageErr("login: --password-stdin needs --username")
 	}
-	release, err := joinInstance(ctx, *rf.stateDir, *newAgent)
+	inst, err := joinInstance(ctx, *rf.stateDir, *newAgent)
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer inst.Release()
 	if *newAgent {
+		// Doesn't update itself: a re-run would make yet another new agent.
 		id, err := startNewAgent(*rf.stateDir)
 		if err != nil {
 			return err
@@ -142,7 +145,13 @@ func runLogin(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	if err != nil {
 		return err
 	}
-	if _, err := preflight(ctx, env.client, stderr); err != nil {
+	if *newAgent {
+		_, err = preflight(ctx, env.client, stderr)
+	} else {
+		// Before the password is read: the re-exec'd binary reads it.
+		_, err = selfUpdate(ctx, env, inst, stderr)
+	}
+	if err != nil {
 		return remoteErr(err)
 	}
 
@@ -218,11 +227,11 @@ func runLogout(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	if err := fs.Parse(args); err != nil {
 		return usageErr("%v", err)
 	}
-	release, err := joinInstance(ctx, *rf.stateDir, false)
+	inst, err := joinInstance(ctx, *rf.stateDir, false)
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer inst.Release()
 	c, err := creds.Load(*rf.stateDir)
 	if err != nil {
 		return err
@@ -270,11 +279,11 @@ func runRemoteStatus(ctx context.Context, args []string, stdout, stderr io.Write
 	if err := fs.Parse(args); err != nil {
 		return usageErr("%v", err)
 	}
-	release, err := joinInstance(ctx, *rf.stateDir, false)
+	inst, err := joinInstance(ctx, *rf.stateDir, false)
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer inst.Release()
 	env, err := rf.open()
 	if err != nil {
 		return err
@@ -304,6 +313,9 @@ func runRemoteStatus(ctx context.Context, args []string, stdout, stderr io.Write
 			line("handshake", "%s, protocol %d: %s (%s)", hs.Decision, hs.Protocol, hs.Message, hs.DownloadURL)
 		default:
 			line("handshake", "%s, protocol %d", hs.Decision, hs.Protocol)
+		}
+		if hs.LatestAgentVersion != "" {
+			line("update", "%s", updateStatus(hs))
 		}
 	}
 

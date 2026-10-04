@@ -88,15 +88,39 @@ jobs:
     if: github.event_name != 'pull_request' && needs.version-check.outputs.release == 'true'
     needs: [build, version-check]
     runs-on: ubuntu-latest
+    # Holds the signing key: main only, and each release waits for approval
+    # (docs/specs/agent-auto-update.md, "Signing in CI").
+    environment: driveagent-release
     permissions:
       contents: write                         # create the tag and the release
     steps:
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: agent/client/go.mod
+          cache-dependency-path: agent/client/go.sum
       - uses: actions/download-artifact@v7
         with: { path: dist, merge-multiple: true }
       - name: Checksums
         run: cd dist && sha256sum -- *.tar.gz > SHA256SUMS
+      - name: Sign
+        # Over the tag and SHA256SUMS (update.Message), so a signature is
+        # good only for this version.
+        env:
+          DRIVEAGENT_SIGNING_KEY: ${{ secrets.DRIVEAGENT_SIGNING_KEY }}
+          V: ${{ needs.version-check.outputs.version }}
+        run: |
+          umask 077
+          printf '%s' "$DRIVEAGENT_SIGNING_KEY" | base64 -d > "$RUNNER_TEMP/key.pem"
+          { printf 'driveagent/v%s\n' "$V"; cat dist/SHA256SUMS; } > "$RUNNER_TEMP/signed"
+          openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/key.pem" -in "$RUNNER_TEMP/signed" -out dist/SHA256SUMS.sig
+          rm -f "$RUNNER_TEMP/key.pem" "$RUNNER_TEMP/signed"
+      - name: Check the signature with the built-in keys
+        working-directory: agent/client
+        env:
+          V: ${{ needs.version-check.outputs.version }}
+        run: go run ./scripts/verifysig "$V" ../../dist/SHA256SUMS ../../dist/SHA256SUMS.sig
       - name: Create tag and GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -104,5 +128,5 @@ jobs:
         run: |
           prev=$(git tag --list 'driveagent/v*' --sort=-v:refname | head -1)
           notes=$(git log --no-merges --format='- %s (%h)' ${prev:+$prev..}HEAD -- agent/client agent/wire)
-          gh release create "driveagent/v$V" dist/*.tar.gz dist/SHA256SUMS \
+          gh release create "driveagent/v$V" dist/*.tar.gz dist/SHA256SUMS dist/SHA256SUMS.sig \
             --target "$GITHUB_SHA" --title "driveagent v$V" --notes "$notes" --latest

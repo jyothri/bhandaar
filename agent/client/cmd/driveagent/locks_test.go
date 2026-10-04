@@ -59,8 +59,10 @@ func TestScanOfABusyDiskExits5(t *testing.T) {
 			t.Errorf("error %q lacks %q", r.err, want)
 		}
 	}
-	if got := len(srv.Paths()); got != n {
-		t.Errorf("the refused scan sent %d requests", got-n)
+	// Only the health check and the handshake, which come before the disk
+	// lock (they decide whether to update first): nothing authenticated.
+	if got := strings.Join(srv.Paths()[n:], " "); got != "/agent/health /agent/v1/handshake" {
+		t.Errorf("the refused scan sent %s", got)
 	}
 	if stateDBExists(state) {
 		t.Error("the refused scan created state.db")
