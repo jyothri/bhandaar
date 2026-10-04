@@ -9,7 +9,12 @@ COPY agent/wire/go.mod ../wire/
 RUN go mod download
 COPY agent/wire/ ../wire/
 COPY agent/server/ .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/agentserver ./cmd/agentserver
+# The commit it's built from, shown as server_version "0.1.0+<sha>" (CI
+# passes it; a local build without it says "unknown").
+ARG COMMIT=unknown
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags "-s -w -X github.com/jyothri/bhandaar/agent/server/internal/api.Commit=${COMMIT}" \
+      -o /out/agentserver ./cmd/agentserver
 
 FROM alpine
 RUN apk --no-cache add ca-certificates && adduser -D -H agentserver
