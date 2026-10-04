@@ -38,9 +38,12 @@ A file unchanged since a scan that never uploaded isn't in a later scan's data (
 
 `scan` runs in this order:
 
-0. **Join the instance, and take the disk's lock** ([agent hardening](../archive/agent-hardening.md)): another state dir or version running exits 5, and so does another scan reading the same disk, unless `--wait`.
+0. **Join the instance, handshake, and take the disk's lock**:
+   - The instance ([agent hardening](../archive/agent-hardening.md)): another state dir or version running exits 5.
+   - Health (5 s timeout, 2 retries 1 s apart), then the handshake. If the server names a newer version, driveagent [updates itself](agent-auto-update.md) and runs the scan again on the new binary. Failure exits 3, or 4 for an upgrade. This comes before the disk lock (from 0.7.0), so a scan with the server unreachable fails at once, rather than after waiting for a busy disk.
+   - The disk's lock: another scan reading the same disk exits 5, unless `--wait`.
 1. **Take the drive's [upload lock](#upload-lock)**, waiting (with a message) while a `sync` holds it.
-2. **Preflight**, before the drive or `state.db` is touched: health (5 s timeout, 2 retries 1 s apart) → handshake → token. Failure exits 3, or 4 for an upgrade.
+2. **The token**, before the drive or `state.db` is touched. Failure exits 3.
 3. **Drive checks** (`scan.Prepare`): the `--drive-root` check (`--replace-root` clears the drive here, so it gets a new stream before anything is uploaded), recording the drive, then the [wrong-drive guard](#wrong-drive-guard).
 4. **Read `S`**, open the drive (`PUT`) and [reconcile](#reconciling); work out where the session starts.
 5. **Scan and upload side by side.** The uploader is woken after each of the scan's flushes, and by a 2 s tick. A slow remote never slows the scan (the queue is `state.db` itself).
@@ -58,7 +61,7 @@ A transient failure is retried with backoff (1 s, doubling to 30 s, ±25% jitter
 | 1 | Local error (including a drive that went away mid-scan) |
 | 2 | Usage error |
 | 3 | Remote unavailable, login needed, or upload failed |
-| 4 | This `driveagent` needs upgrading |
+| 4 | This `driveagent` needs upgrading, and couldn't [update itself](agent-auto-update.md) |
 | 5 | Busy: another `driveagent` runs with another state dir or version, or scans the same disk ([agent hardening](../archive/agent-hardening.md)) |
 | 130 / 143 | Interrupted by `SIGINT` / `SIGTERM` |
 
@@ -71,6 +74,8 @@ Precedence: flag > environment > `<state-dir>/config.json` > default.
 | Remote URL | `--remote-url` | `DRIVEAGENT_REMOTE_URL` | `https://sm.jkurapati.com` |
 | LAN address to try first | `--lan-addr` | `DRIVEAGENT_LAN_ADDR` | none |
 | Give-up budget for a failing remote | `--remote-timeout` (`scan`, `sync`) | | `2m` |
+| No automatic updates | | `DRIVEAGENT_NO_AUTO_UPDATE` | updates on |
+| Where releases come from | | `DRIVEAGENT_UPDATE_URL` | `https://github.com/jyothri/bhandaar/releases/download` |
 
 ```json
 {"remote_url": "https://sm.jkurapati.com", "lan_addr": "192.168.1.118:443"}
@@ -125,17 +130,19 @@ driveagent login          [--username <name>] [--password-stdin] [--new-agent] [
 driveagent logout         [--state-dir <dir>]
 driveagent sync           [--drive-id <id,id,...>] [--remote-timeout 2m] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
 driveagent remote-status  [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
+driveagent update         [--check] [--version <V>] [--remote-url <url>] [--lan-addr <host:port>] [--state-dir <dir>]
 driveagent version
 ```
 
-- **`login`**: preflight, then username and password (no echo), then `/auth/login`. `--password-stdin` for scripts; there's no password flag or environment variable. `--new-agent` first makes the state dir a new agent on this machine: every drive's stream and marker are forgotten, the old login is deleted without revoking it, and `agent.json` gets a new id; it needs the state dir to itself.
+- **`login`**: preflight (updating driveagent first, as `scan` does, unless `--new-agent`), then username and password (no echo), then `/auth/login`. `--password-stdin` for scripts; there's no password flag or environment variable. `--new-agent` first makes the state dir a new agent on this machine: every drive's stream and marker are forgotten, the old login is deleted without revoking it, and `agent.json` gets a new id; it needs the state dir to itself.
 - **`logout`**: revokes on the server (best effort) and deletes `credentials.json`.
-- **`remote-status`**: reachability and path, the handshake, the login, and per drive its root, identity, the synced marker, pending count (from the `sync_summary` view), the server's acked ranges, linked copies on other machines, and up to 10 rejected entries. It reconciles a drive only if its upload lock is free (otherwise it shows the server's list), and never opens a drive that was never uploaded.
+- **`update`**: updates driveagent now, to the server's latest version or `--version`'s, without re-running anything; `--check` only says whether one is available ([agent-auto-update.md](agent-auto-update.md#commands)).
+- **`remote-status`**: reachability and path, the handshake, what an update would do (it never updates), the login, and per drive its root, identity, the synced marker, pending count (from the `sync_summary` view), the server's acked ranges, linked copies on other machines, and up to 10 rejected entries. It reconciles a drive only if its upload lock is free (otherwise it shows the server's list), and never opens a drive that was never uploaded.
 - `scan` also takes `--remote-url`, `--lan-addr`, `--remote-timeout`, `--accept-identity-change` and `--wait`.
 
 ### `driveagent sync`
 
-1. Preflight (health, handshake, token). Nothing is uploaded unless it succeeds; failure exits 3 or 4.
+1. Preflight (health, handshake, token), updating driveagent first if the server names a newer version, before `state.db` is opened. Nothing is uploaded unless it succeeds; failure exits 3 or 4.
 2. Per drive, in `drive_id` order: try the upload lock (a drive a scan holds is skipped, with a note); open and reconcile; upload each [gap](#gaps) up to the clock as it stood after opening, oldest first (an empty gap is closed with an empty batch); release.
 3. One line per drive (`seagate2: uploaded 18,532 changes, fully synced`, or `… N still pending`), a running total every 5 s. It stops at the first failure, naming the drives not attempted, and exits 3 (4) or 1 for a local error.
 

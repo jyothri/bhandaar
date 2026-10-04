@@ -1,6 +1,6 @@
 # driveagent: Updating Itself
 
-**Status:** proposed. Written 2026-10-03, against driveagent 0.6.1; revised the same day after review.
+**Status:** implemented in driveagent 0.7.0 (2026-10-04); see [As built](#as-built). Written 2026-10-03, against driveagent 0.6.1, and revised the same day after review.
 
 ## Problem
 
@@ -297,3 +297,19 @@ Made 2026-10-03:
 - **Signing key:** a secret of the `driveagent-release` GitHub Environment, limited to `main`, each release approved by you (after review).
 - **Version and opt-out:** the server's `latest_agent_version`, an exact tag rather than GitHub's latest; `DRIVEAGENT_NO_AUTO_UPDATE=1` turns automatic updates off.
 - **Rollback:** none across machines; a bad release is fixed forward (after review).
+
+## As built
+
+Where 0.7.0 differs from the design above, or adds to it:
+
+- **The instance lock's own `flock`.** `gofrs/flock` doesn't expose its fd, which the hand-over needs, so `instance.lock` is now held through `runlock`'s `fileLock`, a `flock(2)` on a file kept open. Older driveagents take the same lock through `gofrs/flock`, which is `flock(2)` too, so they still see each other. The gate and the disk locks stay on `gofrs/flock`.
+- **`runlock.Membership`.** `Join` returns one, with `TryAlone`, `EndUpdate`, `HandOver`, `TakeBack` (if the exec fails: close-on-exec again, take the gate, and end the update) and `Release`. `Adopt` makes one from the handed fd. `JoinInstance` still returns a release func for older callers.
+- **Joiners after the hand-over.** Between `HandOver` (gate released) and the adoption, a joiner gets the gate but finds `instance.lock` held and `instance.json` saying `updating`. It releases the gate and looks again every 200 ms, within the same 10-minute limit. Once the new version has adopted the lock, a joiner of the old version is refused (exit 5).
+- **`login --new-agent` doesn't update.** It would run `startNewAgent` again after the re-exec; it only prints the note.
+- **Messages:**
+  - The update starts with `updating driveagent 0.7.0 → 0.7.1`, then `updated …` once installed, so a slow download isn't silent.
+  - A required update on a busy machine says `… is required, and will be installed by the next run once the other driveagent has finished`, without the pid.
+  - A failed update says `… but couldn't update: <reason>`. The next hour's runs say when it failed and that `driveagent update` overrides.
+- **The smoke test** runs the new binary with `DRIVEAGENT_UPDATED_FROM` and `DRIVEAGENT_INSTANCE_FD` stripped from its environment.
+- **Testing.** The signing key exists only in the `driveagent-release` environment; it was made on 2026-10-04, its public key is in `keys.go`, and the local copy was deleted. So no local build can make a release that a release build accepts. Instead, `TestUpdateEndToEnd` runs the whole update across a real exec, with a test key: the test binary as driveagent fetches a fake release, installs it, and execs it, and the new process adopts the lock and finishes the `sync`. `internal/update` checks that a signature made by OpenSSL with the release key (as the release job makes them) verifies with Go's `crypto/ed25519`. The manual check in [Tests](#tests) is done once 0.7.0 is released, with 0.7.1.
+
