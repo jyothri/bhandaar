@@ -117,7 +117,7 @@ func newFakeRelease(t *testing.T, versions ...string) *fakeRelease {
 func (f *fakeRelease) version(t *testing.T) string {
 	t.Helper()
 	b, _ := os.ReadFile(f.exe)
-	for _, v := range []string{version.Version, "0.7.1", "0.7.2"} {
+	for _, v := range []string{version.Version, older} {
 		if bytes.Equal(b, releaseScript(v)) {
 			return v
 		}
@@ -125,8 +125,11 @@ func (f *fakeRelease) version(t *testing.T) string {
 	return "?"
 }
 
-// newer is the version after this one.
-const newer = "99.0.0"
+// newer is a version after this one, and older one before it.
+const (
+	newer = "99.0.0"
+	older = "0.0.1"
+)
 
 func TestSyncUpdatesItselfAndRunsAgain(t *testing.T) {
 	state := t.TempDir()
@@ -351,7 +354,7 @@ func updateCmd(t *testing.T, state, url string, args ...string) result {
 func TestUpdateCommand(t *testing.T) {
 	state := t.TempDir()
 	srv := loggedIn(t, state)
-	f := newFakeRelease(t, newer, "0.7.1")
+	f := newFakeRelease(t, newer, older)
 	if r := updateCmd(t, state, srv.URL); r.err != nil || r.stdout != "driveagent "+version.Version+" is current\n" {
 		t.Errorf("current: %v %q", r.err, r.stdout)
 	}
@@ -371,11 +374,11 @@ func TestUpdateCommand(t *testing.T) {
 		t.Errorf("installed %q, execs %v", b, f.execs)
 	}
 	// --version installs exactly that, older or not.
-	if r := updateCmd(t, state, srv.URL, "--version", "0.7.1"); r.err != nil {
+	if r := updateCmd(t, state, srv.URL, "--version", older); r.err != nil {
 		t.Fatalf("--version: %v\n%s", r.err, r.stderr)
 	}
-	if b, _ := os.ReadFile(f.exe); !bytes.Equal(b, releaseScript("0.7.1")) {
-		t.Errorf("after --version 0.7.1: %q", b)
+	if b, _ := os.ReadFile(f.exe); !bytes.Equal(b, releaseScript(older)) {
+		t.Errorf("after --version %s: %q", older, b)
 	}
 	// Busy: exit 5.
 	dir, _ := runlock.Dir()

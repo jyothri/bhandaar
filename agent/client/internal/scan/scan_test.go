@@ -3,11 +3,14 @@ package scan
 import (
 	"context"
 	"crypto/md5"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -449,5 +452,123 @@ func TestRescanAddsMissingMD5Once(t *testing.T) {
 	// ...and the one after skips them again.
 	if s := run(t, st, Options{RootPath: root}); s.FilesSkipped != 6 || s.FilesHashed != 0 {
 		t.Errorf("third scan stats = %+v", s)
+	}
+}
+
+// lockDB takes state.db's write lock from a connection of its own, as
+// another driveagent process's long write transaction would (a big drive's
+// end-of-scan listing sync), and returns its release.
+func lockDB(t *testing.T, stateDir string) (release func()) {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(stateDir, "state.db")+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(context.Background(), "BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			conn.ExecContext(context.Background(), "ROLLBACK")
+			conn.Close()
+			db.Close()
+		})
+	}
+	t.Cleanup(release)
+	return release
+}
+
+// shortWaits makes state.db's lock waits and the batch retries short.
+// store.BusyTimeout applies to stores opened afterwards.
+func shortWaits(t *testing.T, retryFor time.Duration) {
+	t.Helper()
+	oldBusy, oldFor, oldPause := store.BusyTimeout, recordRetryFor, recordRetryPause
+	store.BusyTimeout, recordRetryFor, recordRetryPause = 50*time.Millisecond, retryFor, 20*time.Millisecond
+	t.Cleanup(func() { store.BusyTimeout, recordRetryFor, recordRetryPause = oldBusy, oldFor, oldPause })
+}
+
+func manyFiles(t *testing.T, n int) (root string, files testutil.Tree) {
+	t.Helper()
+	root = t.TempDir()
+	files = testutil.Tree{}
+	for i := 0; i < n; i++ {
+		files[fmt.Sprintf("d%02d/f%04d.txt", i%10, i)] = fmt.Sprintf("content %d", i)
+	}
+	testutil.WriteTree(t, root, files)
+	return root, files
+}
+
+// While another process holds state.db's write lock for longer than a
+// write waits, the scan retries its batch instead of dropping it: every
+// file ends up recorded. (Before, the batch was dropped, the scan carried
+// on, and its files were never uploaded.)
+func TestABatchThatFindsTheDBLockedIsRetried(t *testing.T) {
+	shortWaits(t, 30*time.Second)
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	root, files := manyFiles(t, 60)
+
+	var once sync.Once
+	opts := Options{DriveID: "d1", RootPath: root, BatchSize: 5}
+	opts.OnFlush = func() {
+		once.Do(func() {
+			release := lockDB(t, dir)
+			time.AfterFunc(500*time.Millisecond, release)
+		})
+	}
+	p, err := Prepare(st, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats, err := Run(context.Background(), st, p, opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(paths(t, st)); got != len(files) || stats.FilesHashed != int64(len(files)) {
+		t.Errorf("recorded %d of %d files (hashed %d)", got, len(files), stats.FilesHashed)
+	}
+}
+
+// A lock that outlasts the retries stops the scan with an error, rather
+// than carrying on past files it couldn't record.
+func TestABatchThatCantBeRecordedStopsTheScan(t *testing.T) {
+	shortWaits(t, 200*time.Millisecond)
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	root, files := manyFiles(t, 400)
+
+	var once sync.Once
+	release := func() {}
+	opts := Options{DriveID: "d1", RootPath: root, BatchSize: 5}
+	opts.OnFlush = func() { once.Do(func() { release = lockDB(t, dir) }) }
+	p, err := Prepare(st, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	_, err = Run(context.Background(), st, p, opts)
+	if err == nil || !strings.Contains(err.Error(), "writing checkpoint db, so the scan stopped") || !store.IsBusy(err) {
+		t.Fatalf("Run = %v, want the batch's lock error", err)
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Errorf("stopped after %v", d)
+	}
+	release()
+	if got := len(paths(t, st)); got >= len(files) {
+		t.Errorf("recorded all %d files, so nothing was refused", got)
 	}
 }

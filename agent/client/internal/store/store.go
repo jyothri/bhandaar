@@ -92,6 +92,19 @@ type Options struct {
 	Log io.Writer
 }
 
+// BusyTimeout is how long a write waits for another driveagent process's
+// write transaction on the same state.db. Not a second: scans of different
+// drives share one state.db, and a big drive's end-of-scan writes (its
+// whole directory listing) hold the lock for many seconds. Tests shorten
+// it.
+var BusyTimeout = 60 * time.Second
+
+// IsBusy reports whether err is SQLite's "database is locked": another
+// process held the write lock for longer than BusyTimeout.
+func IsBusy(err error) bool {
+	return err != nil && (strings.Contains(err.Error(), "SQLITE_BUSY") || strings.Contains(err.Error(), "database is locked"))
+}
+
 // Open creates (if needed) and opens the checkpoint database at
 // <stateDir>/state.db, enabling WAL mode for crash-safety.
 func Open(stateDir string) (*Store, error) {
@@ -118,7 +131,8 @@ func OpenWith(stateDir string, opts Options) (*Store, error) {
 	// SQLITE_BUSY_SNAPSHOT, which busy_timeout doesn't cover; taking the
 	// write lock at BEGIN avoids it. busy_timeout is in the DSN too, so it
 	// applies to every connection the pool opens.
-	db, err := sql.Open("sqlite", dbPath+"?_txlock=immediate&_pragma=busy_timeout(5000)")
+	busyMs := BusyTimeout.Milliseconds()
+	db, err := sql.Open("sqlite", fmt.Sprintf("%s?_txlock=immediate&_pragma=busy_timeout(%d)", dbPath, busyMs))
 	if err != nil {
 		return nil, fmt.Errorf("opening checkpoint db: %w", err)
 	}
@@ -127,8 +141,9 @@ func OpenWith(stateDir string, opts Options) (*Store, error) {
 	// process (e.g. scanning a different drive concurrently) opening the
 	// same state.db at the same time — that's what busy_timeout below is
 	// for: instead of failing immediately with "database is locked", a
-	// writer waits up to that long for the other process's brief
-	// (sub-second) write transaction to finish.
+	// writer waits up to BusyTimeout for the other process's write
+	// transaction to finish. Most are brief, but a big drive's end-of-scan
+	// writes take many seconds.
 	db.SetMaxOpenConns(1)
 
 	// Setting busy_timeout first does NOT, by itself, cover the race of
@@ -143,7 +158,7 @@ func OpenWith(stateDir string, opts Options) (*Store, error) {
 	// fine on their own (confirmed: 0 failures in 15 runs against an
 	// already-initialized state.db).
 	if err := execWithRetry(func() error {
-		_, err := db.Exec(`PRAGMA busy_timeout=5000;`)
+		_, err := db.Exec(fmt.Sprintf(`PRAGMA busy_timeout=%d;`, busyMs))
 		return err
 	}); err != nil {
 		db.Close()
@@ -186,7 +201,7 @@ func execWithRetry(run func() error) error {
 		if err = run(); err == nil {
 			return nil
 		}
-		if !strings.Contains(err.Error(), "SQLITE_BUSY") && !strings.Contains(err.Error(), "database is locked") {
+		if !IsBusy(err) {
 			return err
 		}
 		time.Sleep(time.Duration(25*(attempt+1)) * time.Millisecond)
