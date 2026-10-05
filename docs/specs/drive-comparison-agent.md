@@ -41,7 +41,7 @@ driveagent scan --drive-id <id> --path <folder> [--drive-root <dir>] [--backup-r
 - Repointing an existing `--drive-id` at a different `--drive-root` is refused by default (it would silently change what every existing relative path means) — pass `--replace-root` to discard that drive's checkpoint data and start over.
 - Records the real directory structure it observes (both from the recursive walk and cheap single-level reads of every ancestor between `--path` and `--drive-root`), so sibling folders that were never scanned still show up as real, named, `unscanned` folders rather than being invisible.
 - **Deletion detection**: after a walk that hit zero unreadable files or directories, `scan` removes checkpoint rows for anything under `--path` that no longer exists on disk (including cascading into an entire deleted subdirectory). If *anything* was unreadable during the walk, deletion detection is skipped for that run entirely — better to leave a stale row than wrongly delete one hidden behind a permission error.
-- Two `scan` processes (e.g. one per physical drive) can safely run at the same time against the same checkpoint DB.
+- Two `scan` processes (e.g. one per physical drive) can safely run at the same time against the same checkpoint DB. A write waits up to 60 s for the other's write lock (a big drive's end-of-scan listing sync holds it for many seconds), and a batch of results that still finds it locked is retried for up to 5 minutes. A batch that can't be recorded stops the scan (exit 1, the run marked interrupted) rather than being dropped: before 0.7.1 it was dropped and the scan carried on, so those files were hashed but never recorded or uploaded, until a re-run picked them up.
 
 ### `compare`
 

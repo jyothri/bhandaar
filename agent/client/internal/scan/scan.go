@@ -231,6 +231,12 @@ func Run(ctx context.Context, st *store.Store, p Prepared, opts Options) (Stats,
 	stats := &Stats{}
 	var statsMu sync.Mutex
 
+	// The walk and the hashing run under wctx, which is also cancelled if a
+	// batch of results can't be recorded: a scan never carries on past
+	// files it hashed but couldn't record.
+	wctx, stopWalk := context.WithCancel(ctx)
+	defer stopWalk()
+
 	jobs := make(chan job, opts.Workers*4)
 	results := make(chan store.FileRecord, opts.Workers*4)
 	ws := &walkState{
@@ -249,7 +255,7 @@ func Run(ctx context.Context, st *store.Store, p Prepared, opts Options) (Stats,
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				rec, ok := hashFile(ctx, opts.DriveID, j)
+				rec, ok := hashFile(wctx, opts.DriveID, j)
 				if !ok {
 					continue // cancelled mid-file: record nothing for it
 				}
@@ -263,7 +269,7 @@ func Run(ctx context.Context, st *store.Store, p Prepared, opts Options) (Stats,
 				statsMu.Unlock()
 				select {
 				case results <- rec:
-				case <-ctx.Done():
+				case <-wctx.Done():
 					return
 				}
 			}
@@ -277,11 +283,15 @@ func Run(ctx context.Context, st *store.Store, p Prepared, opts Options) (Stats,
 		defer close(batchDone)
 		batch := make([]store.FileRecord, 0, opts.BatchSize)
 		flush := func() {
-			if len(batch) == 0 {
+			if len(batch) == 0 || flushErr != nil {
+				// After a batch that couldn't be recorded, the scan is
+				// stopping; what isn't recorded is hashed again next time.
+				batch = batch[:0]
 				return
 			}
-			if err := st.UpsertFiles(context.Background(), batch); err != nil {
+			if err := recordBatch(ctx, st, batch); err != nil {
 				flushErr = err
+				stopWalk()
 			} else if opts.OnFlush != nil {
 				opts.OnFlush()
 			}
@@ -306,7 +316,7 @@ func Run(ctx context.Context, st *store.Store, p Prepared, opts Options) (Stats,
 		}
 	}()
 
-	walkErr := walkAndDispatch(ctx, st, opts, driveRoot, scanPath, jobs, stats, &statsMu, ws)
+	walkErr := walkAndDispatch(wctx, st, opts, driveRoot, scanPath, jobs, stats, &statsMu, ws)
 	close(jobs)
 	wg.Wait()
 	close(results)
@@ -317,6 +327,16 @@ func Run(ctx context.Context, st *store.Store, p Prepared, opts Options) (Stats,
 	// walked) are known to exist even though nothing under them was
 	// touched. See docs/specs/drive-comparison-agent.md.
 	listAncestors(driveRoot, relScanPath, ws)
+
+	if flushErr != nil {
+		// The checkpoint DB refused a batch, so the end-of-scan writes would
+		// likely fail too, and hide why: record the run as interrupted if
+		// possible, and stop.
+		stats.Elapsed = time.Since(start)
+		stats.DeletionsSkipped = true
+		st.FinishScanRun(runID, opts.DriveID, stats.FilesSeen, stats.BytesHashed, true)
+		return *stats, fmt.Errorf("writing checkpoint db, so the scan stopped (re-run it to carry on): %w", flushErr)
+	}
 
 	clean := walkErr == nil && ctx.Err() == nil && !ws.sawSoftError
 	stats.DeletionsSkipped = !clean
@@ -338,9 +358,6 @@ func Run(ctx context.Context, st *store.Store, p Prepared, opts Options) (Stats,
 	interrupted := walkErr != nil || ctx.Err() != nil
 	if err := st.FinishScanRun(runID, opts.DriveID, stats.FilesSeen, stats.BytesHashed, interrupted); err != nil {
 		return *stats, fmt.Errorf("recording scan run outcome: %w", err)
-	}
-	if flushErr != nil {
-		return *stats, fmt.Errorf("writing checkpoint db: %w", flushErr)
 	}
 	if ctx.Err() != nil {
 		// A cancel during the walk comes back from WalkDir as ctx.Err();
@@ -590,4 +607,33 @@ func hashFile(ctx context.Context, driveID string, j job) (rec store.FileRecord,
 	rec.MD5 = fmt.Sprintf("%x", m.Sum(nil))
 	rec.Status = store.StatusHashed
 	return rec, true
+}
+
+// How long recordBatch keeps retrying a batch that finds state.db locked
+// (beyond store.BusyTimeout per attempt), and how long it pauses between
+// tries. Tests shorten them.
+var (
+	recordRetryFor   = 5 * time.Minute
+	recordRetryPause = time.Second
+)
+
+// recordBatch writes a batch of results to the checkpoint DB. While
+// another driveagent process holds state.db's write lock (a big drive's
+// end-of-scan writes, say) it retries, rather than dropping the batch:
+// files hashed but not recorded would never be uploaded. Any other error,
+// or a lock that outlasts recordRetryFor, is returned, and the scan stops.
+// An interrupt (ctx) stops the retrying too.
+func recordBatch(ctx context.Context, st *store.Store, batch []store.FileRecord) error {
+	deadline := time.Now().Add(recordRetryFor)
+	for {
+		err := st.UpsertFiles(context.Background(), batch)
+		if err == nil || !store.IsBusy(err) || time.Now().After(deadline) || ctx.Err() != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(recordRetryPause):
+		}
+	}
 }
