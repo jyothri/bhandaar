@@ -38,7 +38,6 @@ Out:
 - **Gmail.** Attachments aren't scanned.
 - **Photos the owner hasn't picked.** The Picker API only shows picked items, so only those count as cloud copies (see [Google Photos](#google-photos-as-a-cloud-copy)).
 - **Near duplicates** (resized or re-encoded files other than the Photos match), as in Duplicates.
-- **Running a plan's steps across machines** (for example, copying from the Mac onto a seagate attached to optiplex7070). See [Open questions](#open-questions).
 
 ## Step 0 findings
 
@@ -46,9 +45,9 @@ Measured on 2026-10-05 against the dev database: the prod copy in the dev Compos
 
 | Source | Files | Bytes | Notes |
 |---|---|---|---|
-| seagate1 (drive 10, optiplex7070, `/media/jyothri/Seagate1`, backup root `Jyo`) | 888,902 | 1,580 GB | 291 unreadable; MD5 on all but those |
-| seagate2 (drive 11, optiplex7070, `/mnt/seagate2`, backup root `Jyo/Backup`) | 573,241 | 1,562 GB | all hashed |
-| vmware-mbp (drive 12, Mac, `/Users/jyothri`) | 479,830 | 756 GB | not linked to a physical drive |
+| seagate1 (drive 10, the Linux box, `/media/jyothri/Seagate1`, backup root `Jyo`) | 888,902 | 1,580 GB | 291 unreadable; MD5 on all but those |
+| seagate2 (drive 11, the Linux box, `/mnt/seagate2`, backup root `Jyo/Backup`) | 573,241 | 1,562 GB | all hashed |
+| The Mac's home folder (drive 12, `/Users/jyothri`) | 479,830 | 756 GB | not linked to a physical drive |
 | Drive, `jyo****ga` | 78,196 | 67 GB | all with MD5 |
 | Drive, `jyo****ri` | 4,299 | 5 GB | |
 | GCS `jyo-archive` (ARCHIVE) / `jyo-pics` (STANDARD) | 328,200 / 4,716 | 214 / 91 GB | live objects; `jyo-coldline` is empty |
@@ -109,8 +108,9 @@ Set once on the Redundancy page's **Setup** panel and stored per user (`red_conf
 | Role | What | Today |
 |---|---|---|
 | **Mirror A** and **Mirror B** | Two physical drives (`agent_physical_drives`), each with a root: the backup root of its uploads, which may be overridden | seagate1 (`Jyo`), seagate2 (`Jyo/Backup`) |
-| **Feeder** | Any other agent drive. Files only there should be copied into the mirror; its copies of mirrored content can be deleted | vmware-mbp |
+| **Feeder** | Any other agent drive. Files only there should be copied into the mirror; its copies of mirrored content can be deleted. Takes an optional **SSH host** (`user@host`), so plans on another machine can reach it (see [Feeders over SSH](#feeders-over-ssh)) | the Mac's home folder, with its SSH host |
 | **Out of scope** | Agent drives left out entirely | — |
+| **Dump folder names** | Patterns for folders that hold unsorted copies, used to [suggest which copy to keep](#which-copy-to-keep). Editable; these are the defaults | `from *`, `* to be sorted`, `backup*`, `*copy*`, `old`, `tmp` |
 | **Cloud destinations** | A list, each one: a Google account, a kind (`drive`, `gcs`, `photos`), and a place: a Drive folder path, a bucket and prefix, or nothing for Photos. GCS also takes an optional storage class. The `rclone` remote names are per account, in [Settings](#settings-how-cloud-steps-are-written). One destination is the default | for example, GCS `jyo-archive/seagate/`, ARCHIVE |
 
 **The cloud pool:** every linked account's Drive, GCS buckets and picked Photos count as cloud copies, whether or not they are destinations. Accounts aren't told apart: what matters is whether the pool has the content, and how many times. Destinations are only where new backups go.
@@ -130,7 +130,7 @@ Per mirror path, comparing A and B by content hash (BLAKE3, which both drives ha
 | Kind | When | Suggested action |
 |---|---|---|
 | `missing_on_b` / `missing_on_a` | The path exists on one drive only, and its content isn't on the other at any path | Copy it across |
-| `misplaced` | The path exists on one drive only, and its content is on the other at a path that isn't on the first. Reported once, as a pair (A's path, B's path) | Line up the layout: move the file on one drive to match the other |
+| `misplaced` | The path exists on one drive only, and its content is on the other at a path that isn't on the first. Reported once, as a pair (A's path, B's path) | Line up the layout, with the [suggested side](#which-layout-wins): move the file on the other drive to match |
 | `conflict` | Both drives have the path, with different content | Keep one drive's copy and overwrite the other's |
 | `corrupt_suspect` | A conflict where both copies have the same size and mtime. A third copy (cloud MD5 or feeder hash) that matches one side marks the other as bad | Keep the matching side, else ask |
 | `unreadable` | The file's status is `error` on one drive | Copy over it from the other drive, if that one is readable |
@@ -154,7 +154,7 @@ The goal allows each content to be stored once per mirror drive and once in the 
 
 | Kind | When | Suggested action |
 |---|---|---|
-| `dup_in_mirror` | One content at two or more mirror paths. Since both drives should match, keeping a path keeps it on both | Pick the paths to keep; the rest are deleted from both drives |
+| `dup_in_mirror` | One content at two or more mirror paths. Since both drives should match, keeping a path keeps it on both | Keep the [suggested copy](#which-copy-to-keep); the rest are deleted from both drives |
 | `dup_in_cloud` | One content in two or more places anywhere in the cloud pool: Drive files, GCS objects or Photos matches, in one account or across accounts (account 1's Drive and account 2's Drive count) | Pick the one to keep |
 | `on_feeder` | A feeder's file whose content is on both mirror drives | Delete it from the feeder |
 
@@ -166,8 +166,8 @@ Copies of one physical drive uploaded from several machines aren't extra copies,
 
 | Kind | When | Suggested action |
 |---|---|---|
-| `feeder_only` | A feeder's file whose content isn't on either mirror drive | Copy it into the mirror at a chosen folder, then optionally delete it from the feeder |
-| `cloud_only` | A cloud copy whose content isn't on either mirror drive | Download it into the mirror at a chosen folder |
+| `feeder_only` | A feeder's file whose content isn't on either mirror drive | Copy it into the mirror at `from <drive>/<its path>`, then optionally delete it from the feeder |
+| `cloud_only` | A cloud copy whose content isn't on either mirror drive | Download it into the mirror (both drives) at `from drive/<account>/<Drive path>` or `from gcs/<bucket>/<object name>`, where `<account>` is the part of the account's email before `@`. Drive items shared with the owner (not `owned_by_me`) are listed, labelled "Shared with you", with no suggestion |
 
 Left out, as in Duplicates: empty files, system files (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `Icon\r`, `._*`), Google Docs/Sheets/Slides (no MD5), and noncurrent or soft-deleted GCS versions.
 
@@ -216,7 +216,7 @@ How:
 
 Duplicates' Photos matching then uses agent files' capture times too.
 
-## Decisions
+## Deciding
 
 A **decision** is an action the owner chose for some issues. It's stored, not computed, so it survives rebuilds.
 
@@ -249,6 +249,36 @@ A **decision** is an action the owner chose for some issues. It's stored, not co
 | `feeder_only` | **Copy into the mirror** at a folder (default: the source's own path under `from <drive>/`), then optionally delete from the feeder; Ignore |
 | `cloud_only` | **Download into the mirror** at a folder; **Delete from the cloud**; Ignore |
 
+### Suggestions
+
+Some kinds come with a pre-selected action, worked out at build time and stored in `red_issues.details` with its reason. A suggestion is only a starting point: nothing is in a plan until the owner accepts it, on a row or in bulk ("Accept suggestions in this folder"). Accepting stores an ordinary decision.
+
+#### Which layout wins
+
+For `misplaced` pairs. Pairs are grouped by their two folders (A's folder, B's folder), so a folder moved or renamed on one drive is one suggestion, and becomes one `mv` of the folder when all its files go together.
+
+The side whose layout wins is, in order:
+1. **The side where the folder fits in.** For each side's folder, take the share of its files that are at the same mirror path on the other drive. The higher share wins: the other side's file is the odd one out. (A file moved on seagate1 from `x/` into a new `y/`: seagate2's `x/` is mostly in place on seagate1, and `y/` isn't on seagate2 at all, so seagate1's file moves back to `x/`.)
+2. **On a tie,** such as a whole folder renamed on one drive (neither folder is on the other side), the **newer** layout wins: the folder whose `agent_dir_listings.first_seen_at` is later, taken as the deliberate reorganisation.
+3. Else, **seagate1** (Mirror A).
+
+The row says why: "seagate2's `x/` is 96% in place on seagate1".
+
+#### Which copy to keep
+
+For `dup_in_mirror`, files and folder groups alike. The copy to keep is, in order:
+1. one **not under a dump folder** (a path segment matching the dump folder names in Setup);
+2. the one whose folder is **most its own**: the highest share of the folder's files that have no copy elsewhere in the mirror. That's where the file lives, rather than a folder copied in;
+3. the **shallowest** path;
+4. the **oldest** mtime;
+5. the first path in byte order.
+
+The row says why: "keep `media/2014/goa/IMG_1.JPG`: the other is under `from Win7`". Rows are grouped by the pair of folders involved, so "keep `media/2014/goa`, delete its copy in `from mac - to be sorted/goa`" is one decision for the whole folder.
+
+#### Cloud-only files
+
+`cloud_only` is suggested as **Download into the mirror**, to both drives, at `from drive/<account>/<Drive path>` (or `from gcs/<bucket>/<object name>`). The folder can be changed per folder or by rule. **Delete from the cloud** and Ignore are the alternatives.
+
 **Guards when deciding:**
 - A decision that would leave content with no copy on a mirror drive is refused.
 - A decision that would leave content with no cloud copy is allowed, with a warning, and the content then shows as `no_cloud_copy`.
@@ -279,7 +309,7 @@ The same pattern as Duplicates: worked out ahead of time per user, replaced in o
 
 | Table | Rows |
 |---|---|
-| `red_config` | per user: mirror A and B (physical drive, root), feeder and out-of-scope agent drives, default destination |
+| `red_config` | per user: mirror A and B (physical drive, root), feeder and out-of-scope agent drives (feeders with their SSH host), dump folder names, default destination |
 | `red_destinations` | per user: `id`, `client_key`, `kind`, place, `storage_class`, `is_default` |
 | `red_issues` | per user and issue: `kind`, `scope` (`mirror` or a source), `path` (or the pair for `misplaced`), `key` (content key or folder signature), `size`, `details` (JSONB: per-side hash, mtime, status, the third copy's verdict, Photos match), `state`, `decision_id` |
 | `red_folders` | per user, mirror folder and source folder: counts and bytes per issue kind and state, for the tree, plus `uniform_kind` (see [The page](#the-page)) |
@@ -344,7 +374,7 @@ A **plan** turns decided issues into steps that one machine can run.
 2. Optionally, **a selection**: tabs, folders or decisions. By default, everything Decided.
 3. Bhandaar builds the steps from the current index. It shows a preview before saving: steps per phase, files, bytes, and what is left out and why.
 4. **Left out of the plan, and listed:**
-   - steps needing a drive this machine hasn't uploaded, such as Mac → seagate copies on optiplex7070 ("needs vmware-mbp on this machine");
+   - steps needing a drive this machine hasn't uploaded, and that can't be reached over SSH either: a mirror drive not on this machine, or a feeder with no SSH host ("needs `<drive>` on this machine, or its SSH host in Setup");
    - issues whose data changed since the decision.
 
 ### Order
@@ -386,7 +416,38 @@ The plan downloads as `bhandaar-plan-<id>.sh`. The script starts with a header c
 - **Google Drive and Google Photos:** a checklist or `rclone` commands, as chosen in Settings (below).
 - **Rescan:** `driveagent scan --drive-id <id> --path "<drive_root>/<folder>"` for the topmost changed folders, at most one per top-level folder of the mirror.
 - **Quoting:** every path is single-quoted. A path that isn't valid UTF-8 (`agent_files.raw_path`) is written as `$'…'` with `\xHH` escapes.
+- **Feeders on another machine:** over SSH; see [Feeders over SSH](#feeders-over-ssh).
 - **Mac paths:** on a macOS agent, `cp -p` and `mkdir -p` work as on Linux. `cp -a` is BSD's, and does the same here.
+
+### Feeders over SSH
+
+The seagates are attached to the Linux box, and the Mac is a different machine. A plan for the Linux box reaches a feeder on another machine through the feeder's SSH host from Setup, so the owner doesn't have to move drives around.
+
+- **Copies into the mirror** pull with `rsync`, once per destination folder and mirror drive, with the files listed on stdin:
+
+  ```sh
+  rsync -a --protect-args --files-from=- '<user>@<mac-host>:/Users/<user>/' '/media/jyothri/Seagate1/Jyo/from <mac-drive>/' <<'BHANDAAR_FILES'
+  Pictures/2021/IMG_0001.HEIC
+  …
+  BHANDAAR_FILES
+  ```
+
+  The same list is pulled again into seagate2. Pulling from the Mac twice, not copying seagate1 → seagate2, keeps each drive's copy independent of the other's.
+  - `-a` keeps mtimes; `--files-from` keeps each file's path below the source root.
+  - A path with a newline can't be listed this way, so that file gets its own `rsync` call. A path that isn't valid UTF-8 is written as `$'…'` in a call of its own too.
+- **Deletes on the feeder** (`on_feeder`, and "delete from the feeder" after copying in) run in one SSH session per phase, with the paths on stdin, one per line:
+
+  ```sh
+  ssh <user>@<mac-host> 'cd /Users/<user> && while IFS= read -r p; do rm -- "$p"; done' <<'BHANDAAR_FILES'
+  Pictures/2021/IMG_0001.HEIC
+  …
+  BHANDAAR_FILES
+  ```
+
+  These are still plain `rm`, and still in the delete phase, after both rsyncs.
+- **Before anything else**, the script checks that the host answers: `ssh -o BatchMode=yes -o ConnectTimeout=10 <host> true || { echo "can't reach <host>"; exit 1; }`. It needs key-based SSH from the plan's machine to the feeder, and on macOS, Remote Login turned on.
+- **A plan made for the feeder's own machine** uses local paths, with no SSH, for the feeder's own steps (deleting copies on the Mac, say). Steps needing the seagates are then left out, unless the seagates have been uploaded from that machine too.
+- **Rescans:** the script ends by rescanning the mirror drives locally, and, over SSH, the feeder's changed folders: `ssh <host> driveagent scan --drive-id <mac-drive> --path '<path>'`.
 
 ### Checklist (Google Drive and Google Photos)
 
@@ -512,6 +573,7 @@ Two PRs. The first is release-gated, like 0.6.0 was.
      - the third-copy verdict;
      - the topmost-uniform rule;
      - precedence;
+     - suggestions: which layout wins (fits in, then newer, then A), with a moved and a renamed folder; which copy to keep (dump folders, most its own, shallowest, oldest); cloud-only folders, and none for shared items; a suggestion isn't a decision until accepted;
      - Ignore covering new files under an ignored folder;
      - a stale file decision dropped;
      - resolution after a fixture "rescan".
@@ -519,6 +581,7 @@ Two PRs. The first is release-gated, like 0.6.0 was.
      - script generation, including phase order, `$'…'` quoting for non-UTF-8 paths, and folder collapsing;
      - each tool setting: `rclone` and `gcloud storage` for Cloud Storage; instructions and `rclone` for Drive (a same-named file by ID, else an instruction); Photos deletions always instructions; a missing remote;
      - a plan keeping its tools after the settings change;
+     - feeders over SSH: the reachability check, `rsync --files-from` lists into both drives, a newline or non-UTF-8 path in its own call, deletes over one session, local paths in a plan for the feeder's own machine;
      - Mark as backed up: refused with the setting off; resolved and counted as backed up with it on; inactive (Open again) after turning it off, and back on turning it on; `no_cloud_copy` once the Photos item is gone; the accepted copy in `dup_in_cloud`;
    - `be/web/settings_test.go` and `be/db/settings_test.go`: the new fields, their defaults, the checks on remote names and accounts;
      - steps left out for a machine without a drive;
@@ -530,7 +593,12 @@ Two PRs. The first is release-gated, like 0.6.0 was.
 Made 2026-10-05:
 - **Mirror:** identical paths *and* content, relative to each drive's root. Content at different paths is `misplaced`, and the owner picks the layout that wins.
 - **Photos:** matched by name, capture time and dimensions, using driveagent 0.8.0's media metadata, plus served size for quality. Lower resolution doesn't count as a cloud copy, unless the owner turns on the setting to accept lower-resolution copies and marks the file.
-- **The Mac (vmware-mbp):** a feeder. Its files missing from the mirror are flagged, and its copies of mirrored content can be deleted.
+- **The Mac's home folder:** a feeder. Its files missing from the mirror are flagged, and its copies of mirrored content can be deleted.
+- **Feeders on other machines:** reached over SSH from the plan's machine: `rsync` pulls into both drives, and plain `rm` over one SSH session for deletes.
+- **Misplaced files:** suggested per folder pair. The side where the folder fits in wins; on a tie, the newer layout; else seagate1.
+- **Which duplicate to keep:** suggested: outside dump folders, then the folder that's most its own, the shallowest path, and the oldest mtime.
+- **Cloud-only files:** suggested download into both drives, at `from drive/<account>/<path>` or `from gcs/<bucket>/<name>`. Files shared with the owner get no suggestion.
+- **Suggestions are never decisions** until accepted, per row or in bulk.
 - **Granularity:** folders plus rules, with overrides down to files. A mixed folder is never offered as one row; the page shows the topmost *uniform* folders.
 - **Tools, in Settings:**
   - Drive and Photos steps are instructions (default) or `rclone` commands; Photos deletions are always instructions.
@@ -545,7 +613,4 @@ Made 2026-10-05:
 
 ## Open questions
 
-1. **Copies between machines:** a Mac → seagate copy needs both on one machine. Plans could emit `rsync -a mac:'<path>' '<dest>'` over SSH from optiplex7070 instead of leaving these steps out.
-2. **Which layout should win** for `misplaced`? The 82k pairs could be pre-suggested, for example the side whose folder has more of its siblings in place. The first version leaves the choice to the owner, per folder.
-3. **`dup_in_mirror` default:** which copy should be pre-selected to keep? A suggestion is the copy outside folders named like `from …` or `… to be sorted`, else the shallowest path. The first version doesn't pre-select; the owner picks.
-4. **Cloud-only Drive files (51 GB):** should `cloud_only` default to *download into the mirror*, at `from drive/<account>/<path>`, or to no suggestion?
+None. The four left from the first draft were settled on 2026-10-05 (see [Decisions](#decisions)).
